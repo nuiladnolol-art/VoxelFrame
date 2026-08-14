@@ -65,6 +65,7 @@ internal static class Program {
         WorldRenderer? renderer = null;
         int frames = 0;
         bool cursorCaptured = false;
+        float pauseDebounce = 0f;
 
         if (autoshotFile != null) {
             session = GameSession.NewGame(12345, headless: false);
@@ -73,6 +74,7 @@ internal static class Program {
 
         while (!Raylib.WindowShouldClose()) {
             float dt = MathF.Min(Raylib.GetFrameTime(), 0.1f);
+            if (pauseDebounce > 0f) pauseDebounce -= dt;
 
             if (session == null) {
                 if (cursorCaptured) {
@@ -145,6 +147,12 @@ internal static class Program {
                     else if (Screens.InControlsScreen) Screens.DrawControls();
                     else Screens.DrawSettings();
                     Raylib.EndDrawing();
+                    if (pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause)) {
+                        pauseDebounce = 0.25f;
+                        if (Screens.InGraphicsScreen) Screens.InGraphicsScreen = false;
+                        else if (Screens.InControlsScreen) Screens.InControlsScreen = false;
+                        else Screens.InSettingsScreen = false;
+                    }
                     continue;
                 }
                 
@@ -152,6 +160,7 @@ internal static class Program {
                 renderer!.ProcessMeshQueue();
                 renderer.DrawSky();
                 Raylib.BeginMode3D(session.Camera);
+                renderer.Draw3DSky(session.Camera);
                 renderer.DrawWorld();
                 renderer.DrawDecorations(dt);
                 renderer.DrawEntities(session.Camera);
@@ -160,12 +169,13 @@ internal static class Program {
                 var pauseAction = Screens.DrawPause(session);
                 Raylib.EndDrawing();
 
-                if (Raylib.IsKeyPressed(KeyBinds.Pause) || pauseAction == PauseAction.Resume) {
+                if ((pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause)) || pauseAction == PauseAction.Resume) {
                     session.Ui = UiState.Playing;
-                    while (Raylib.GetKeyPressed() != 0) {}
+                    pauseDebounce = 0.25f;
                 } else if (pauseAction == PauseAction.Settings) {
                     Screens.InSettingsScreen = true;
                     Screens.SettingsOpenedFromGame = true;
+                    pauseDebounce = 0.25f;
                 } else if (pauseAction == PauseAction.SaveAndExit) {
                     session.SaveTo(SaveSystem.SavePath);
                     session.Ui = UiState.Playing;
@@ -177,7 +187,8 @@ internal static class Program {
                 continue;
             }
 
-            var input = ReadInput(session.Ui == UiState.Playing);
+            var input = ReadInput(session.Ui == UiState.Playing, pauseDebounce);
+            if (input.Pause) pauseDebounce = 0.25f;
             session.Tick(dt, input);
 
             Raylib.BeginDrawing();
@@ -186,6 +197,7 @@ internal static class Program {
             renderer!.ProcessMeshQueue();
             renderer.DrawSky();
             Raylib.BeginMode3D(session.Camera);
+            renderer.Draw3DSky(session.Camera);
             renderer.DrawWorld();
             renderer.DrawClouds(session.Camera);
             renderer.DrawDecorations(dt);
@@ -253,7 +265,7 @@ internal static class Program {
         return 0;
     }
 
-    private static PlayerInput ReadInput(bool cursorCaptured) {
+    private static PlayerInput ReadInput(bool cursorCaptured, float pauseDebounce) {
         var input = new PlayerInput {
             MoveX = (Raylib.IsKeyDown(KeyBinds.Right) ? 1f : 0f) - (Raylib.IsKeyDown(KeyBinds.Left) ? 1f : 0f),
             MoveZ = (Raylib.IsKeyDown(KeyBinds.Forward) ? 1f : 0f) - (Raylib.IsKeyDown(KeyBinds.Backward) ? 1f : 0f),
@@ -266,7 +278,7 @@ internal static class Program {
             UseHeld = Raylib.IsMouseButtonDown(MouseButton.Right),
             OpenInventory = Raylib.IsKeyPressed(KeyBinds.Inventory),
             OpenCrafting = Raylib.IsKeyPressed(KeyBinds.Crafting),
-            Pause = Raylib.IsKeyPressed(KeyBinds.Pause),
+            Pause = pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause),
             Scroll = (int)Raylib.GetMouseWheelMove(),
             HotbarSlot = HotbarKey(),
         };

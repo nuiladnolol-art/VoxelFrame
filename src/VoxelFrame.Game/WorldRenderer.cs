@@ -44,7 +44,7 @@ public sealed class WorldRenderer : IDisposable {
         out vec4 finalColor;
         void main() {
             vec4 texelColor = texture(texture0, fragTexCoord);
-            if (texelColor.a < 0.5) discard;
+            if (texelColor.a < 0.05) discard;
 
             float sun = fragColor.r;       // Солнечный свет [0..1]
             float block = fragColor.g;     // Блочный (факельный) свет [0..1]
@@ -68,6 +68,20 @@ public sealed class WorldRenderer : IDisposable {
 
     private int _skyFactorLoc = -1;
     private int _sunAngleLoc = -1;
+    private static readonly Vector3[] StarPositions = GenerateStarField(160);
+
+    private static Vector3[] GenerateStarField(int count) {
+        var stars = new Vector3[count];
+        var rng = new Random(7919);
+        for (int i = 0; i < count; i++) {
+            float u = rng.NextSingle() * 2f - 1f;
+            float theta = rng.NextSingle() * MathF.PI * 2f;
+            float r = MathF.Sqrt(MathF.Max(0f, 1f - u * u));
+            float y = MathF.Abs(u) * 0.92f + 0.08f;
+            stars[i] = Vector3.Normalize(new Vector3(r * MathF.Cos(theta), y, r * MathF.Sin(theta)));
+        }
+        return stars;
+    }
 
     public WorldRenderer(GameSession session) {
         _session = session;
@@ -126,6 +140,7 @@ public sealed class WorldRenderer : IDisposable {
 
     // ── Небо ─────────────────────────────────────────────────────────────────
 
+    /// <summary>Фоновый градиент неба (2D купол).</summary>
     public void DrawSky() {
         float f = _session.DayNight.SkyFactor;
         int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
@@ -133,39 +148,47 @@ public sealed class WorldRenderer : IDisposable {
         var top = LerpColor(C(8, 10, 26, 255), C(92, 150, 240, 255), f);
         var bottom = LerpColor(C(16, 18, 40, 255), C(178, 208, 244, 255), f);
         Raylib.DrawRectangleGradientV(0, 0, w, h, top, bottom);
+    }
 
-        // Звёзды (ночью).
-        if (f < 0.6f) {
-            float alpha = (0.6f - f) / 0.6f;
-            int starCount = 130;
-            for (int i = 0; i < starCount; i++) {
-                var rng = new Random(i * 7919 + 17);
-                float sx = rng.NextSingle() * w;
-                float sy = rng.NextSingle() * h * 0.55f;
-                byte a = (byte)(alpha * (90 + rng.Next(120)));
-                Raylib.DrawPixel((int)sx, (int)sy, C(255, 255, 240, (int)a));
+    /// <summary>3D Небесные светила (Солнце, Луна, звёзды в мировом пространстве).</summary>
+    public void Draw3DSky(Camera3D camera) {
+        float f = _session.DayNight.SkyFactor;
+        float u = _session.DayNight.TimeOfDay;
+        float sunAngle = 2f * MathF.PI * (u - 0.25f);
+
+        // Направление орбиты светил в мировом 3D-пространстве (Восток -> Зенит -> Запад)
+        Vector3 celestialDir = Vector3.Normalize(new Vector3(MathF.Cos(sunAngle), MathF.Sin(sunAngle), 0.22f));
+        float dist = 170f;
+
+        // 1. Звёзды в 3D (видны ночью и в сумерках)
+        if (f < 0.65f) {
+            float starAlpha = Math.Clamp((0.65f - f) / 0.65f, 0f, 1f);
+            byte a = (byte)(starAlpha * 220);
+            Color starColor = C(245, 245, 255, (int)a);
+            foreach (var s in StarPositions) {
+                Vector3 starWorld = camera.Position + s * dist;
+                Raylib.DrawCube(starWorld, 1.3f, 1.3f, 1.3f, starColor);
             }
         }
 
-        // Квадратные Солнце и Луна (Minecraft Alpha style)
-        float u = _session.DayNight.TimeOfDay;
-        float sunAngle = 2f * MathF.PI * (u - 0.25f);
-        var sunDir = new Vector2(MathF.Cos(sunAngle), MathF.Sin(sunAngle));
-        DrawCelestial(sunDir, f, C(255, 255, 230, 255), w, h, true);
-        DrawCelestial(-sunDir, f, C(235, 240, 255, 255), w, h, false);
-    }
+        // 2. 3D Солнце
+        Vector3 sunPos = camera.Position + celestialDir * dist;
+        if (celestialDir.Y > -0.22f) {
+            float sunA = Math.Clamp((celestialDir.Y + 0.22f) * 3f, 0f, 1f);
+            Color sunColor = C(255, 255, 220, (int)(sunA * 255));
+            Color sunGlow = C(255, 215, 80, (int)(sunA * 180));
+            Raylib.DrawCube(sunPos, 26f, 26f, 26f, sunColor);
+            Raylib.DrawCubeWires(sunPos, 26.6f, 26.6f, 26.6f, sunGlow);
+        }
 
-    private static void DrawCelestial(Vector2 dir, float skyFactor, Color color, int w, int h, bool isSun) {
-        if (dir.Y < -0.08f) return;
-        float visible = Math.Clamp(dir.Y * 2.5f, 0f, 1f);
-        float x = w / 2f + dir.X * w * 0.44f;
-        float y = h * 0.72f - dir.Y * h * 0.52f;
-        byte a = (byte)(visible * 255 * (0.4f + 0.6f * skyFactor));
-        color.A = a;
-        float sz = MathF.Min(w, h) * (isSun ? 0.085f : 0.065f);
-        Raylib.DrawRectangle((int)(x - sz / 2f), (int)(y - sz / 2f), (int)sz, (int)sz, color);
-        if (isSun) {
-            Raylib.DrawRectangleLines((int)(x - sz / 2f), (int)(y - sz / 2f), (int)sz, (int)sz, C(255, 240, 160, (int)(a * 0.7f)));
+        // 3. 3D Луна
+        Vector3 moonPos = camera.Position - celestialDir * dist;
+        if (-celestialDir.Y > -0.22f) {
+            float moonA = Math.Clamp((-celestialDir.Y + 0.22f) * 3f, 0f, 1f);
+            Color moonColor = C(230, 235, 255, (int)(moonA * 255));
+            Color moonGlow = C(150, 180, 240, (int)(moonA * 150));
+            Raylib.DrawCube(moonPos, 20f, 20f, 20f, moonColor);
+            Raylib.DrawCubeWires(moonPos, 20.5f, 20.5f, 20.5f, moonGlow);
         }
     }
 

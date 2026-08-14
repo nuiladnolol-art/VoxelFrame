@@ -81,11 +81,18 @@ public sealed class WorldGenerator {
 
         float h = BaseHeight + (c - 0.5f) * 2f * HeightAmplitude + (d - 0.5f) * 6f + mountainH;
 
-        // Реки: прорезают русло сквозь возвышенности
+        // Реки: широкие и глубокие русла
         float r = MathF.Abs(_river.Get(wx * 0.004f, wz * 0.004f));
-        if (r < 0.08f) {
-            float riverDepth = (1.0f - r / 0.08f) * 12f;
-            h = MathF.Min(h, MathF.Max(SeaLevel - 4, h - riverDepth));
+        if (r < 0.095f) {
+            float riverDepth = (1.0f - r / 0.095f) * 14f;
+            h = MathF.Min(h, MathF.Max(SeaLevel - 5, h - riverDepth));
+        }
+
+        // Озёра и водоёмы в низинах
+        float lake = _detail.Fractal(wx * 0.015f + 1234f, wz * 0.015f + 4321f, 2, 0.5f);
+        if (lake < 0.22f && h >= SeaLevel - 1 && h <= SeaLevel + 5) {
+            float lakeDepth = (0.22f - lake) / 0.22f * 6f;
+            h = MathF.Min(h, SeaLevel - (int)lakeDepth - 1);
         }
 
         return (int)MathF.Round(h);
@@ -99,13 +106,13 @@ public sealed class WorldGenerator {
 
         int surface = SurfaceHeight(wx, wz);
         float r = MathF.Abs(_river.Get(wx * 0.004f, wz * 0.004f));
-        if (r < 0.075f && surface <= SeaLevel + 2) {
+        if (r < 0.090f && surface <= SeaLevel + 2) {
             return BiomeType.River;
         }
-        if (surface < SeaLevel - 2) {
-            return BiomeType.Ocean;
+        if (surface <= SeaLevel) {
+            return surface <= SeaLevel - 4 ? BiomeType.Ocean : BiomeType.Beach;
         }
-        if (surface <= SeaLevel + 3) {
+        if (surface <= SeaLevel + 2) {
             return BiomeType.Beach;
         }
         float f = _forestNoise.Get(wx * 0.015f, wz * 0.015f);

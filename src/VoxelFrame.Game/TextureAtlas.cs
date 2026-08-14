@@ -348,6 +348,18 @@ public static class TextureAtlas {
                         } else {
                             a = 0;
                         }
+                    } else if (tile == TWater) {
+                        int wave = ((px * 3 + py * 5 + (px ^ py)) % 7);
+                        r = 38 + wave * 4;
+                        g = 85 + wave * 9;
+                        b = 215 + wave * 5;
+                        a = 230;
+                    } else if (tile == TLava) {
+                        int lavaWave = ((px * 2 + py * 7) % 6);
+                        r = 235 + lavaWave * 3;
+                        g = 70 + lavaWave * 15;
+                        b = 10;
+                        a = 255;
                     } else if (tile == TTorch) {
                         bool isStick = px >= 7 && px <= 8 && py >= 6 && py <= 14;
                         bool isFlame = px >= 6 && px <= 9 && py >= 1 && py <= 5;
