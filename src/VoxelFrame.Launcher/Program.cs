@@ -627,7 +627,7 @@ public class LauncherForm : Form {
                 }
             }
         } catch { }
-        return "arsis-dev/VoxelFrame";
+        return "nuiladnolol-art/VoxelFrame";
     }
 
     private void SaveConfig(string nickname, int screenMode) {
