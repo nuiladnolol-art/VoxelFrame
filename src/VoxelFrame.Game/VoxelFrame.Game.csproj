@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>VoxelFrame.Game</RootNamespace>
+    <AssemblyName>VoxelFrame.Game</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <CodePage>65001</CodePage>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VoxelFrame.Core\VoxelFrame.Core.csproj" />
+    <PackageReference Include="Raylib-cs" Version="7.0.0" />
+  </ItemGroup>
+</Project>
