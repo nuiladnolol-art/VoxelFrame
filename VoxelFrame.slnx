@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/VoxelFrame.Core/VoxelFrame.Core.csproj" />
     <Project Path="src/VoxelFrame.Game/VoxelFrame.Game.csproj" />
+    <Project Path="src/VoxelFrame.Installer/VoxelFrame.Installer.csproj" />
     <Project Path="src/VoxelFrame.Launcher/VoxelFrame.Launcher.csproj" />
   </Folder>
 </Solution>
