@@ -338,6 +338,7 @@ public class LauncherForm : Form {
                 var root = doc.RootElement;
                 if (root.ValueKind == JsonValueKind.Array) {
                     string versionsDir = GetVersionsDirectory();
+                    int count = 0;
                     foreach (var rel in root.EnumerateArray()) {
                         string tag = rel.GetProperty("tag_name").GetString() ?? "";
                         string name = rel.TryGetProperty("name", out var np) ? np.GetString() ?? tag : tag;
@@ -373,18 +374,27 @@ public class LauncherForm : Form {
                                 ExePath = exePath
                             });
                         }
+                        count++;
                     }
 
                     cbVersion.Items.Clear();
                     foreach (var v in _versions) cbVersion.Items.Add(v);
                     if (cbVersion.Items.Count > 0) cbVersion.SelectedIndex = 0;
 
-                    lblStatus.Text = "Список версий успешно обновлен с GitHub";
-                    lblStatus.ForeColor = Color.FromArgb(100, 220, 120);
+                    if (count > 0) {
+                        lblStatus.Text = $"Найдено релизов на GitHub: {count}. Готово к игре";
+                        lblStatus.ForeColor = Color.FromArgb(100, 220, 120);
+                    } else {
+                        lblStatus.Text = "На GitHub пока нет релизов. Доступна локальная сборка";
+                        lblStatus.ForeColor = Color.FromArgb(180, 200, 235);
+                    }
                 }
+            } else if (response.StatusCode == System.Net.HttpStatusCode.NotFound) {
+                lblStatus.Text = "Репозиторий ещё не опубликован на GitHub (доступна локальная версия)";
+                lblStatus.ForeColor = Color.FromArgb(200, 185, 130);
             } else {
-                lblStatus.Text = $"GitHub API ответил: {response.StatusCode} (используются локальные версии)";
-                lblStatus.ForeColor = Color.FromArgb(230, 160, 80);
+                lblStatus.Text = $"GitHub статус: {response.StatusCode} (используются локальные версии)";
+                lblStatus.ForeColor = Color.FromArgb(200, 185, 130);
             }
         } catch {
             lblStatus.Text = "Режим оффлайн. Доступны локальные версии игры";
@@ -504,10 +514,20 @@ public class LauncherForm : Form {
             if (item.IsLocalDev) {
                 string? gameDir = FindGameDir();
                 if (gameDir != null) {
-                    string csproj = Path.Combine(gameDir, "VoxelFrame.Game.csproj");
-                    psi.FileName = "dotnet";
-                    psi.Arguments = $"run --project \"{csproj}\" -- {gameArgs}";
-                    psi.WorkingDirectory = gameDir;
+                    string builtExe = Path.Combine(gameDir, "bin", "Debug", "net10.0", "VoxelFrame.Game.exe");
+                    if (!File.Exists(builtExe))
+                        builtExe = Path.Combine(gameDir, "bin", "Release", "net10.0", "VoxelFrame.Game.exe");
+
+                    if (File.Exists(builtExe)) {
+                        psi.FileName = builtExe;
+                        psi.Arguments = gameArgs;
+                        psi.WorkingDirectory = Path.GetDirectoryName(builtExe)!;
+                    } else {
+                        string csproj = Path.Combine(gameDir, "VoxelFrame.Game.csproj");
+                        psi.FileName = "dotnet";
+                        psi.Arguments = $"run --project \"{csproj}\" -- {gameArgs}";
+                        psi.WorkingDirectory = gameDir;
+                    }
                 }
             } else {
                 string exePath = !string.IsNullOrEmpty(item.ExePath) && File.Exists(item.ExePath)
@@ -519,13 +539,22 @@ public class LauncherForm : Form {
                     psi.Arguments = gameArgs;
                     psi.WorkingDirectory = Path.GetDirectoryName(exePath) ?? AppDomain.CurrentDomain.BaseDirectory;
                 } else {
-                    // Если запускаемся из dev репозитория
                     string? gameDir = FindGameDir();
                     if (gameDir != null) {
-                        string csproj = Path.Combine(gameDir, "VoxelFrame.Game.csproj");
-                        psi.FileName = "dotnet";
-                        psi.Arguments = $"run --project \"{csproj}\" -- {gameArgs}";
-                        psi.WorkingDirectory = gameDir;
+                        string builtExe = Path.Combine(gameDir, "bin", "Debug", "net10.0", "VoxelFrame.Game.exe");
+                        if (!File.Exists(builtExe))
+                            builtExe = Path.Combine(gameDir, "bin", "Release", "net10.0", "VoxelFrame.Game.exe");
+
+                        if (File.Exists(builtExe)) {
+                            psi.FileName = builtExe;
+                            psi.Arguments = gameArgs;
+                            psi.WorkingDirectory = Path.GetDirectoryName(builtExe)!;
+                        } else {
+                            string csproj = Path.Combine(gameDir, "VoxelFrame.Game.csproj");
+                            psi.FileName = "dotnet";
+                            psi.Arguments = $"run --project \"{csproj}\" -- {gameArgs}";
+                            psi.WorkingDirectory = gameDir;
+                        }
                     } else {
                         MessageBox.Show("Исполняемый файл игры не найден!\n\nОжидался:\n" + exePath,
                             "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);

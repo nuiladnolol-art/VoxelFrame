@@ -1,3 +1,3 @@
 @echo off
-cd /d "%~dp0src\VoxelFrame.Launcher"
-dotnet run -c Release
+start "" "%~dp0src\VoxelFrame.Launcher\bin\Debug\net10.0-windows\VoxelFrame.Launcher.exe"
+exit
