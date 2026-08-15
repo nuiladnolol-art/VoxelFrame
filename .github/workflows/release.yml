@@ -44,6 +44,7 @@ jobs:
         run: |
           $tag = "${{ steps.vars.outputs.tag }}"
           ./build-release.ps1 -Version $tag
+          ./build-installer.ps1 -Version $tag
 
       - name: Upload GitHub Release
         uses: softprops/action-gh-release@v2
