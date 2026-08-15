@@ -152,11 +152,11 @@ public static class TextureAtlas {
     public static Texture2D Atlas => _atlas;
     public static bool Ready => _ready;
 
-    public static void GenerateDefaultTextures() {
+    public static void GenerateDefaultTextures(bool forceOverwrite = false) {
         var masterImage = GenerateProceduralImage();
         foreach (var (tile, relPath) in TileFiles) {
             string fullPath = Path.Combine(TextureDirectory, relPath);
-            if (!File.Exists(fullPath)) {
+            if (forceOverwrite || !File.Exists(fullPath)) {
                 Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
                 int sx = tile % Cols * TilePx;
                 int sy = tile / Cols * TilePx;
@@ -168,82 +168,14 @@ public static class TextureAtlas {
         unsafe { Raylib.UnloadImage(masterImage); }
     }
 
-    public static void MakeItemTransparent(ref Image image) {
-        int w = image.Width;
-        int h = image.Height;
-        if (w == 0 || h == 0) return;
-
-        bool[,] visited = new bool[w, h];
-        var queue = new Queue<(int X, int Y)>();
-
-        bool IsBgColor(Color c) {
-            if (c.A <= 10) return true;
-            // Белый, светло-серый фон канваса (включая результаты прошлого CleanAllTextures)
-            return (c.R >= 195 && c.G >= 195 && c.B >= 190) || (c.R >= 220 && c.G >= 220 && c.B >= 220);
-        }
-
-        // Добавляем все граничные пиксели фонового цвета
-        for (int x = 0; x < w; x++) {
-            var cTop = Raylib.GetImageColor(image, x, 0);
-            if (IsBgColor(cTop) && !visited[x, 0]) { queue.Enqueue((x, 0)); visited[x, 0] = true; }
-            var cBot = Raylib.GetImageColor(image, x, h - 1);
-            if (IsBgColor(cBot) && !visited[x, h - 1]) { queue.Enqueue((x, h - 1)); visited[x, h - 1] = true; }
-        }
-        for (int y = 0; y < h; y++) {
-            var cLeft = Raylib.GetImageColor(image, 0, y);
-            if (IsBgColor(cLeft) && !visited[0, y]) { queue.Enqueue((0, y)); visited[0, y] = true; }
-            var cRight = Raylib.GetImageColor(image, w - 1, y);
-            if (IsBgColor(cRight) && !visited[w - 1, y]) { queue.Enqueue((w - 1, y)); visited[w - 1, y] = true; }
-        }
-
-        // Заливка внешнего фона прозрачностью
-        while (queue.Count > 0) {
-            var (cx, cy) = queue.Dequeue();
-            unsafe {
-                Raylib.ImageDrawPixel(ref image, cx, cy, new Color(0, 0, 0, 0));
-            }
-            int[] dx = { -1, 1, 0, 0 };
-            int[] dy = { 0, 0, -1, 1 };
-            for (int i = 0; i < 4; i++) {
-                int nx = cx + dx[i];
-                int ny = cy + dy[i];
-                if (nx >= 0 && nx < w && ny >= 0 && ny < h && !visited[nx, ny]) {
-                    visited[nx, ny] = true;
-                    var nc = Raylib.GetImageColor(image, nx, ny);
-                    if (IsBgColor(nc)) {
-                        queue.Enqueue((nx, ny));
-                    }
-                }
-            }
-        }
-    }
-
-    public static void CleanAllTexturesOnDisk() {
-        try {
-            if (!Directory.Exists(TextureDirectory)) return;
-            foreach (var file in Directory.GetFiles(TextureDirectory, "*.png", SearchOption.AllDirectories)) {
-                var img = Raylib.LoadImage(file);
-                if (img.Width > 0 && img.Height > 0) {
-                    bool isItemOrGui = file.Contains("items") || file.Contains("gui");
-                    if (isItemOrGui) {
-                        MakeItemTransparent(ref img);
-                        Raylib.ExportImage(img, file);
-                    }
-                }
-                unsafe { Raylib.UnloadImage(img); }
-            }
-        } catch { }
-    }
-
     public static void GenerateAtlasFile() {
-        CleanAllTexturesOnDisk();
-        GenerateDefaultTextures();
+        GenerateDefaultTextures(forceOverwrite: true);
     }
 
     public static void Load() {
         if (_ready) return;
 
-        GenerateDefaultTextures();
+        GenerateDefaultTextures(forceOverwrite: true);
 
         var atlasImage = Raylib.GenImageColor(AtlasW, AtlasH, new Color(0, 0, 0, 0));
         var fallbackProcedural = GenerateProceduralImage();
@@ -259,9 +191,6 @@ public static class TextureAtlas {
                     if (tileImage.Width > 0 && tileImage.Height > 0) {
                         if (tileImage.Width != TilePx || tileImage.Height != TilePx) {
                             Raylib.ImageResize(ref tileImage, TilePx, TilePx);
-                        }
-                        if (relPath.StartsWith("items/") || relPath.StartsWith("gui/")) {
-                            MakeItemTransparent(ref tileImage);
                         }
                         for (int py = 0; py < TilePx; py++) {
                             for (int px = 0; px < TilePx; px++) {

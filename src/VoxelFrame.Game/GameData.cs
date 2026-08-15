@@ -161,14 +161,13 @@ public static class GameData {
     public static readonly BlockType BGrass = Block(1, "Трава", DirtM, drop: DirtItem);
     public static readonly BlockType BDirt = Block(2, "Земля", DirtM, drop: DirtItem);
     public static readonly BlockType BStone = Block(3, "Камень", Stone, drop: CobblestoneItem);
-    public static readonly BlockType BLog = Block(4, "Бревно", Oak, drop: LogItem, flammable: true, burnTime: 8f, capacity: 1500f);
+    public static readonly BlockType BLog = Block(4, "Бревно", Oak, drop: LogItem, flammable: true, burnTime: 8f);
     public static readonly BlockType BLeaves = Block(5, "Листва", LeavesM, drop: null, flammable: true, burnTime: 4f)
         .With(b => { b.IsSolid = true; b.IsOpaque = false; });
-    public static readonly BlockType BPlanks = Block(6, "Доски", Oak, drop: PlankItem, flammable: true, burnTime: 7f, capacity: 400f)
-        .With(b => { b.PlaceItemCount = 2; b.PlaceContentVolumeM3 = 0.8f; b.DropItemCount = 2; });
+    public static readonly BlockType BPlanks = Block(6, "Доски", Oak, drop: PlankItem, flammable: true, burnTime: 7f);
     public static readonly BlockType BCoalOre = Block(7, "Угольная руда", Stone, drop: CoalItem);
     public static readonly BlockType BTorch = Block(8, "Факел", Oak, drop: TorchItem, light: 11)
-        .With(b => { b.IsSolid = false; b.IsOpaque = false; b.PlaceItemCount = 1; b.PlaceContentVolumeM3 = 0.02f; b.DropItemCount = 1; });
+        .With(b => { b.IsSolid = false; b.IsOpaque = false; });
     public static readonly BlockType BBedrock = Block(11, "Коренная порода", Stone, drop: null).With(b => b.IsUnbreakable = true);
     public static readonly BlockType BIronOre = Block(12, "Железная руда", Stone, drop: IronOreItem);
     public static readonly BlockType BWorkbench = Block(13, "Верстак", Oak, drop: WorkbenchItem, flammable: true, burnTime: 6f)

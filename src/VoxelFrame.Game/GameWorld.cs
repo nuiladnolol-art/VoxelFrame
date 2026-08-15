@@ -147,24 +147,41 @@ public sealed class GameWorld : IDisposable {
 
     // ── Запись блоков (единый путь: мир → физика → освещение → меши) ─────────
 
-    /// <summary>VoxelData установленного игроком блока: точные масса, объём и ориентация (facing).</summary>
-    public static VoxelData MakePlacedVoxel(BlockType block, float contentVolumeM3, byte facing = 0) {
+    /// <summary>VoxelData установленного игроком блока (Minecraft-стандарт: без структурных напряжений, 1 блок = 1 ячейка).</summary>
+    public static VoxelData MakePlacedVoxel(BlockType block, float contentVolumeM3 = 1f, byte facing = 0) {
         var flags = VoxelFlags.None;
         if (block.IsSolid) flags |= VoxelFlags.Solid;
-        if (block.LoadCapacityKN > 0 && block.IsSolid) flags |= VoxelFlags.Structural;
         return new VoxelData {
             TypeId = block.Id,
             Flags = flags,
             SubGridLayerMask = facing,
-            Weight = (float)block.Material.MassOf(contentVolumeM3),
-            ContentVolumeM3 = contentVolumeM3,
-            LoadBearingCapacity = block.LoadCapacityKN * (contentVolumeM3 / 1f),
+            Weight = 0f,
+            ContentVolumeM3 = 1f,
+            LoadBearingCapacity = 0f,
             SubGridIndex = -1,
         };
     }
 
-    public void PlacePlacedBlock(Vec3i w, BlockType block, float contentVolumeM3, byte facing = 0) {
+    public void PlacePlacedBlock(Vec3i w, BlockType block, float contentVolumeM3 = 1f, byte facing = 0) {
         SetVoxelInternal(w, MakePlacedVoxel(block, contentVolumeM3, facing));
+    }
+
+    public void CheckGravityBlocksAbove(Vec3i pos) {
+        var check = pos + new Vec3i(0, 1, 0);
+        while (true) {
+            var vox = GetVoxel(check);
+            if (vox.TypeId == GameData.BSand.Id || vox.TypeId == GameData.BGravel.Id) {
+                var below = check + new Vec3i(0, -1, 0);
+                if (!IsSolidAt(below)) {
+                    var block = GameData.GetBlock(vox.TypeId);
+                    SetVoxelInternal(check, VoxelData.Air);
+                    FallingBlocks.Add(new FallingBlock(block, new Vector3(check.X + 0.5f, check.Y + 0.5f, check.Z + 0.5f)));
+                    check = check + new Vec3i(0, 1, 0);
+                    continue;
+                }
+            }
+            break;
+        }
     }
 
     public event Action<Vec3i, ushort>? OnBlockRemoved;
@@ -198,6 +215,7 @@ public sealed class GameWorld : IDisposable {
         }
 
         SetVoxelInternal(w, VoxelData.Air);
+        CheckGravityBlocksAbove(w);
 
         // Связанное удаление парной части кровати
         if (curVox.TypeId == GameData.BBed.Id || curVox.TypeId == GameData.BBedHead.Id) {

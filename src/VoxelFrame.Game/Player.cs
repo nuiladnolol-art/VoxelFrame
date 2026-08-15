@@ -465,7 +465,7 @@ public sealed class Player {
         if (min.X < pmax.X && max.X > pmin.X && min.Y < pmax.Y && max.Y > pmin.Y && min.Z < pmax.Z && max.Z > pmin.Z)
             return false;
 
-        // Вычисляем горизонтальную ориентацию блока (facing: 0..3), чтобы передняя сторона смотрела на игрока
+        // Вычисляем ориентацию блока (facing: 0..3) по направлению взгляда игрока (передняя сторона печки смотрит на игрока)
         byte facing = 0;
         Vec3i forwardH;
         if (MathF.Abs(Forward.X) > MathF.Abs(Forward.Z)) {
@@ -485,10 +485,9 @@ public sealed class Player {
             if (!world.IsSolidAt(cell + new Vec3i(0, -1, 0)) || !world.IsSolidAt(headCell + new Vec3i(0, -1, 0)))
                 return false;
 
-            int need = block.PlaceItemCount;
-            if (TryConsumeSelected(item, need)) {
-                world.PlacePlacedBlock(cell, GameData.BBed, block.PlaceContentVolumeM3, facing);
-                world.PlacePlacedBlock(headCell, GameData.BBedHead, block.PlaceContentVolumeM3, facing);
+            if (TryConsumeSelected(item, 1)) {
+                world.PlacePlacedBlock(cell, GameData.BBed, 1f, facing);
+                world.PlacePlacedBlock(headCell, GameData.BBedHead, 1f, facing);
                 SoundSystem.PlayPlace();
                 return true;
             }
@@ -499,8 +498,7 @@ public sealed class Player {
         if (block.Id == GameData.BSand.Id || block.Id == GameData.BGravel.Id) {
             var below = cell + new Vec3i(0, -1, 0);
             if (!world.IsSolidAt(below)) {
-                int need = block.PlaceItemCount;
-                if (TryConsumeSelected(item, need)) {
+                if (TryConsumeSelected(item, 1)) {
                     world.FallingBlocks.Add(new FallingBlock(block, new Vector3(cell.X + 0.5f, cell.Y + 0.5f, cell.Z + 0.5f)));
                     SoundSystem.PlayPlace();
                     return true;
@@ -509,9 +507,8 @@ public sealed class Player {
             }
         }
 
-        int needNormal = block.PlaceItemCount;
-        if (TryConsumeSelected(item, needNormal)) {
-            world.PlacePlacedBlock(cell, block, block.PlaceContentVolumeM3, facing);
+        if (TryConsumeSelected(item, 1)) {
+            world.PlacePlacedBlock(cell, block, 1f, facing);
             SoundSystem.PlayPlace();
             return true;
         }

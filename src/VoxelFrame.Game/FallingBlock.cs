@@ -45,9 +45,10 @@ public sealed class FallingBlock {
                 (int)MathF.Floor(Position.Y - HalfSize),
                 (int)MathF.Floor(Position.Z));
             if (!world.IsSolidAt(land)) {
-                world.PlacePlacedBlock(land, Block, Block.PlaceContentVolumeM3);
+                world.PlacePlacedBlock(land, Block, 1f);
             } else {
-                world.SpawnPickup(Block.DropItemId, 1, land);
+                ushort dropId = Block.DropItemId != 0 ? Block.DropItemId : (Block.Id == GameData.BSand.Id ? GameData.SandItem.Id : GameData.GravelItem.Id);
+                world.SpawnPickup(dropId, 1, land);
             }
             Alive = false;
         }

@@ -73,9 +73,11 @@ public sealed class GameSession {
         Player.Velocity = Vector3.Zero;
         Player.HighestYInAir = 0f;
         Player.FireTicks = 0f;
+        Player.AirSupply = 10f;
+        Player.StuckTimer = 0f;
         Player.Position = World.GetSafeRespawnPosition(World.SpawnBlock);
         Ui = UiState.Playing;
-        AddMessage("Вы возродились на безопасной точке спавна");
+        AddMessage("Вы возродились на точке спавна");
     }
 
     // ── Создание / загрузка ──────────────────────────────────────────────────
@@ -125,7 +127,7 @@ public sealed class GameSession {
             _messages[i] = (_messages[i].Text, _messages[i].Age + dt);
         _messages.RemoveAll(m => m.Age > 6f);
 
-        if (Ui == UiState.Paused) return;
+        if (Ui == UiState.Paused || Ui == UiState.Death) return;
 
         if (IsSleeping) {
             SleepProgress += dt;
@@ -186,18 +188,28 @@ public sealed class GameSession {
 
     public void DiePlayer(string message = "Вы погибли!") {
         if (Ui == UiState.Death) return;
+        Screens.ReturnHeld(this);
         if (!SaveSystem.KeepInventory) {
-            // Дроп всех предметов из инвентаря на месте гибели
-            var dropPos = Player.Position;
-            var cell = new Vec3i((int)MathF.Floor(dropPos.X), (int)MathF.Floor(dropPos.Y), (int)MathF.Floor(dropPos.Z));
+            // Дроп всех предметов из инвентаря на месте гибели с разлетом и задержкой подбора 2.5с
+            var dropPos = Player.Position + new Vector3(0f, 0.5f, 0f);
+            var rng = Random.Shared;
             for (int i = 0; i < Player.Inventory.Capacity; i++) {
                 var slot = Player.Inventory.Slots[i];
                 if (slot != null && slot.Value.Quantity > 0) {
-                    World.SpawnPickup(slot.Value.Item.Definition.Id, slot.Value.Quantity, cell);
+                    float angle = rng.NextSingle() * MathF.Tau;
+                    float speed = 1.2f + rng.NextSingle() * 2.0f;
+                    var pickup = new ItemPickup(slot.Value.Item.Definition, slot.Value.Quantity, dropPos) {
+                        PickupDelay = 2.5f,
+                        Velocity = new Vector3(MathF.Cos(angle) * speed, 3.5f + rng.NextSingle() * 2.0f, MathF.Sin(angle) * speed)
+                    };
+                    World.Pickups.Add(pickup);
                 }
             }
             Player.Inventory.Clear();
         }
+        Player.Health = 0f;
+        Player.Velocity = Vector3.Zero;
+        Player.FireTicks = 0f;
         Ui = UiState.Death;
         AddMessage(message);
     }

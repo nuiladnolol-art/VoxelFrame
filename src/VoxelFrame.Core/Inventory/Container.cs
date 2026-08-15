@@ -41,10 +41,24 @@ public sealed class Container : IInventorySource, IInventorySink {
         MassCapacityKg = massCapacityKg;
     }
 
-    /// The ONLY rule: real volume and real mass. No slot counts.
-    public bool CanFit(double storageVolumeM3, double massKg) =>
-        UsedVolumeM3 + storageVolumeM3 <= VolumeCapacityM3 + 1e-9 &&
-        UsedMassKg + massKg <= MassCapacityKg + 1e-9;
+    /// The ONLY rule in Minecraft: slot and stack capacity (max 64). No mass/volume limits.
+    public bool CanFit(double storageVolumeM3, double massKg) => true;
+
+    public bool HasSpaceFor(ItemDefinition def, int quantity = 1) {
+        int remaining = quantity;
+        const int maxStack = 64;
+        for (int i = 0; i < _slots.Length; i++) {
+            var e = _slots[i];
+            if (e != null && e.Value.Item.Definition == def) {
+                int space = maxStack - e.Value.Quantity;
+                if (space > 0) remaining -= space;
+            } else if (e == null) {
+                remaining -= maxStack;
+            }
+            if (remaining <= 0) return true;
+        }
+        return false;
+    }
 
     // ── Items ────────────────────────────────────────────────────────────────
 
@@ -52,8 +66,6 @@ public sealed class Container : IInventorySource, IInventorySink {
         if (quantity <= 0) return false;
         
         const int maxStack = 64;
-        if (!CanFit(item.VolumeM3 * quantity, item.MassKg * quantity)) return false;
-        
         int remaining = quantity;
         // 1. Try to merge into an existing slot containing the same item
         for (int i = 0; i < _slots.Length; i++) {
@@ -90,8 +102,8 @@ public sealed class Container : IInventorySource, IInventorySink {
             if (e == null || e.Value.Item.Definition != definition || e.Value.Quantity < quantity) continue;
             if (e.Value.Quantity == quantity) _slots[i] = null;
             else _slots[i] = e.Value with { Quantity = e.Value.Quantity - quantity };
-            UsedVolumeM3 -= e.Value.Item.VolumeM3 * quantity;
-            UsedMassKg -= e.Value.Item.MassKg * quantity;
+            UsedVolumeM3 = Math.Max(0, UsedVolumeM3 - e.Value.Item.VolumeM3 * quantity);
+            UsedMassKg = Math.Max(0, UsedMassKg - e.Value.Item.MassKg * quantity);
             return true;
         }
         return false;

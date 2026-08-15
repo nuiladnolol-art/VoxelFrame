@@ -108,45 +108,38 @@ internal static class SmokeTest {
         Tick(s, 1f);
         var inv = s.Player.Inventory;
         Check(inv.TryInsert(GameData.NewItem(GameData.DirtItem), 1), "выдан блок земли");
-        double volBefore = inv.UsedVolumeM3;
 
         var at = new Vec3i((int)MathF.Floor(s.Player.Position.X) + 1, (int)MathF.Floor(s.Player.Position.Y) + 1, (int)MathF.Floor(s.Player.Position.Z));
         var item = inv.Entries[0].Item.Definition;
         Check(s.Player.TryPlaceBlock(s.World, s, at, GameData.BDirt, item), "блок установлен");
         Check(s.World.IsSolidAt(at), "в мире появился твёрдый блок");
-        Check(Math.Abs(inv.UsedVolumeM3 - (volBefore - 1.0)) < 1e-6, "объём инвентаря уменьшился ровно на 1 м³");
+        Check(inv.CountOf(GameData.DirtItem) == 0, "предмет израсходован из инвентаря (1 блок = 1 предмет)");
 
         s.Player.BreakBlock(s.World, s, at, GameData.BDirt);
         Tick(s, 0.6f); // сбор выпавшего в мир предмета-пикапа
         Check(!s.World.IsSolidAt(at), "блок сломан");
-        Check(Math.Abs(inv.UsedVolumeM3 - volBefore) < 1e-6, "объём инвентаря вернулся (масса сохранена)");
+        Check(inv.CountOf(GameData.DirtItem) == 1, "предмет вернулся в инвентарь");
 
-        // Доски: установка 2 шт (0.8 м³) → ломание возвращает 2 шт — без потери массы.
-        Check(MaterialCycle(GameData.BPlanks, GameData.PlankItem, 0.8f), "цикл «доски» консервирует массу");
+        // Доски: 1 предмет ставит 1 блок, ломание возвращает 1 предмет
+        Check(BlockCycle(GameData.BPlanks, GameData.PlankItem), "цикл «доски»: 1 предмет = 1 блок = 1 дроп");
 
-        // Факел: установка 1 шт (0.02 м³) → блок 0.02 м³ → ломание возвращает 1 шт.
-        Check(MaterialCycle(GameData.BTorch, GameData.TorchItem, 0.02f), "цикл «факел» консервирует массу");
+        // Факел: 1 предмет ставит 1 факел, ломание возвращает 1 факел
+        Check(BlockCycle(GameData.BTorch, GameData.TorchItem), "цикл «факел»: 1 предмет = 1 факел = 1 дроп");
     }
 
-    /// <summary>Свежая сессия: выдать N предметов, поставить блок, сломать, сверить объём.</summary>
-    private static bool MaterialCycle(BlockType block, ItemDefinition item, float contentVolumeM3) {
+    private static bool BlockCycle(BlockType block, ItemDefinition item) {
         var s = NewSession();
         Tick(s, 1f);
         var inv = s.Player.Inventory;
-        int need = block.PlaceItemCount;
-        int drop = block.DropItemCount;
-        if (!inv.TryInsert(GameData.NewItem(item), need)) return false;
-        double volBefore = inv.UsedVolumeM3;
+        if (!inv.TryInsert(GameData.NewItem(item), 1)) return false;
 
         var at = new Vec3i((int)MathF.Floor(s.Player.Position.X) + 1, (int)MathF.Floor(s.Player.Position.Y) + 2, (int)MathF.Floor(s.Player.Position.Z));
         if (!s.Player.TryPlaceBlock(s.World, s, at, block, item)) return false;
-        if (Math.Abs(s.World.GetVoxel(at).ContentVolumeM3 - contentVolumeM3) > 1e-4) return false;
+        if (inv.CountOf(item) != 0) return false;
 
         s.Player.BreakBlock(s.World, s, at, block);
         Tick(s, 0.6f); // сбор выпавшего пикапа
-        return inv.CountOf(item) == drop &&
-               Math.Abs(inv.UsedVolumeM3 - volBefore) < 1e-6 &&
-               Math.Abs(inv.UsedMassKg - volBefore * item.Material.DensityKgPerM3) < 1e-3;
+        return inv.CountOf(item) == 1;
     }
 
     // ── 3.5 Инструменты: тиры и скорость добычи ──────────────────────────────
@@ -210,8 +203,6 @@ internal static class SmokeTest {
 
     // ── 5. Огонь ─────────────────────────────────────────────────────────────
 
-    // ── 5. Огонь ─────────────────────────────────────────────────────────────
-
     private static void TestFire() {
         Console.WriteLine("[5] Огонь");
         var s = NewSession();
@@ -219,13 +210,12 @@ internal static class SmokeTest {
         var planksPos = new Vec3i((int)MathF.Floor(s.Player.Position.X) + 2, s.World.SpawnBlock.Y + 1, (int)MathF.Floor(s.Player.Position.Z));
 
         // Детерминированное поджигание досок.
-        w.PlacePlacedBlock(planksPos, GameData.BPlanks, 0.8f);
+        w.PlacePlacedBlock(planksPos, GameData.BPlanks, 1.0f);
         w.Fire.Ignite(planksPos);
         Check(w.Fire.Burning.ContainsKey(planksPos), "доски горят");
         for (int i = 0; i < 120; i++) w.Fire.Tick(0.1f);
         var after = w.GetBlockType(planksPos);
         Check(after == null || after.Id == 0, "доски сгорели");
-        Check(w.Fire.TotalSmokeKg > 10, $"учтён дым ({w.Fire.TotalSmokeKg:F0} кг)");
         Check(true, "распространение огня стабильно");
     }
 
@@ -314,7 +304,7 @@ internal static class SmokeTest {
         Tick(s, 3f);
         s.Player.Inventory.TryInsert(GameData.NewItem(GameData.LogItem), 1);
         s.Player.Inventory.TryInsert(GameData.NewItem(GameData.CookedPorkItem), 2);
-        s.World.PlacePlacedBlock(new Vec3i(3, s.World.SpawnBlock.Y + 1, 0), GameData.BPlanks, 0.8f);
+        s.World.PlacePlacedBlock(new Vec3i(3, s.World.SpawnBlock.Y + 1, 0), GameData.BPlanks, 1.0f);
         s.World.SpawnPickup(GameData.AppleItem.Id, 1, new Vec3i(1, s.World.SpawnBlock.Y + 2, 1));
         var pig = new Animal { Position = s.Player.Position + new Vector3(0f, 0f, 3f) };
         s.World.Animals.Add(pig);
@@ -332,8 +322,6 @@ internal static class SmokeTest {
         Check(Vector3.Distance(loaded.Player.Position, s.Player.Position) < 0.1f, "позиция игрока сохранена");
         Check(loaded.Player.Inventory.CountOf(GameData.LogItem) == 1 &&
               loaded.Player.Inventory.CountOf(GameData.CookedPorkItem) == 2, "инвентарь сохранён");
-        Check(Math.Abs(loaded.Player.Inventory.UsedVolumeM3 - s.Player.Inventory.UsedVolumeM3) < 1e-9,
-              "объём инвентаря точен после загрузки");
         var chunkCoord = Chunk.CoordOf(new Vec3i(3, s.World.SpawnBlock.Y + 1, 0));
         Check(loaded.World.TryGetChunk(chunkCoord) != null, "чанк загружен");
         Check(loaded.World.Pickups.Count == 1 && loaded.World.Pickups[0].Definition == GameData.AppleItem,
@@ -341,8 +329,6 @@ internal static class SmokeTest {
         Check(loaded.World.Animals.Count == animalsBefore, "животные сохранены");
         var planksLoaded = loaded.World.GetBlockType(new Vec3i(3, s.World.SpawnBlock.Y + 1, 0));
         Check(planksLoaded?.Id == GameData.BPlanks.Id, "установленный блок на месте");
-        Check(Math.Abs(loaded.World.GetVoxel(new Vec3i(3, s.World.SpawnBlock.Y + 1, 0)).ContentVolumeM3 - 0.8f) < 1e-3f,
-              "частичный объём блока сохранён точно");
 
         // Мир после загрузки продолжает работать.
         Tick(loaded, 2f);
@@ -350,25 +336,28 @@ internal static class SmokeTest {
         File.Delete(path);
     }
 
-    // ── 10. Физика обрушений ─────────────────────────────────────────────────
+    // ── 10. Физика блоков (висящие блоки и гравитация песка) ─────────────────
 
     private static void TestCollapse() {
-        Console.WriteLine("[10] Структурная прочность (висящие блоки)");
+        Console.WriteLine("[10] Физика блоков (висящие блоки и гравитация песка)");
         var s = NewSession();
         Tick(s, 1f);
         var w = s.World;
-        var top = new Vec3i(0, w.SpawnBlock.Y + 1, 0);
-        w.PlacePlacedBlock(top, GameData.BPlanks, 0.8f);
+
+        // 1. Обычные блоки (доски, камень) висят в воздухе без опор (Minecraft-стандарт)
+        var top = new Vec3i(0, w.SpawnBlock.Y + 5, 0);
+        w.PlacePlacedBlock(top, GameData.BPlanks, 1.0f);
         Tick(s, 0.5f);
-        Check(w.FallingBlocks.Count == 0, "конструкция стоит");
+        Check(w.GetBlockType(top)?.Id == GameData.BPlanks.Id, "доски висят в воздухе без опор (Minecraft floating blocks)");
+        Check(w.FallingBlocks.Count == 0, "обрушение отсутствует");
 
-        // Копаем под досками → опора исчезает, но блок висит в воздухе!
-        w.RemoveBlock(new Vec3i(0, w.SpawnBlock.Y, 0));
-        Tick(s, 2f);
-        bool floats = w.GetBlockType(top)?.Id == GameData.BPlanks.Id && w.FallingBlocks.Count == 0;
-        Check(floats, "без опоры воксели сохраняют форму");
-
-        Check(true, "обломки отсутствуют");
+        // 2. Песок падает под действием гравитации
+        var sandPos = new Vec3i(5, w.SpawnBlock.Y + 6, 5);
+        w.PlacePlacedBlock(sandPos, GameData.BSand, 1.0f);
+        w.CheckGravityBlocksAbove(sandPos - new Vec3i(0, 1, 0));
+        Check(w.FallingBlocks.Count > 0, "песок в воздухе превращается в падающий блок (Sand Gravity)");
+        Tick(s, 1.5f);
+        Check(w.FallingBlocks.Count == 0, "песок приземлился на твердый блок");
     }
 
     // ── 11. Мобы, Жидкости и 3D-пещеры ───────────────────────────────────────

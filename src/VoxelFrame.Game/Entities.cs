@@ -100,7 +100,8 @@ public sealed class ItemPickup {
 
         var to = player.Position - Position;
         float dist = to.Length();
-        bool canFitAny = player.Inventory.CanFit(Definition.VolumeM3, Definition.MassKg);
+        bool isAlive = player.Health > 0f;
+        bool canFitAny = isAlive && player.Inventory.HasSpaceFor(Definition, 1);
         if (PickupDelay <= 0f && canFitAny && dist < 3.2f && dist > 0.001f) {
             Position += to / dist * MathF.Min(5f * dt, dist);
             Velocity = Vector3.Zero;
@@ -111,15 +112,13 @@ public sealed class ItemPickup {
             var half = new Vector3(0.15f, 0.15f, 0.15f);
             Collision.Move(world, ref Position, half, ref Velocity, dt);
         }
-        if (PickupDelay <= 0f && dist < 1.5f) {
+        if (isAlive && PickupDelay <= 0f && dist < 1.5f) {
             int fit = Quantity;
             while (fit > 0) {
-                if (player.Inventory.CanFit(Definition.VolumeM3 * fit, Definition.MassKg * fit)) {
-                    if (player.Inventory.TryInsert(GameData.NewItem(Definition), fit)) {
-                        Quantity -= fit;
-                        SoundSystem.PlayPop();
-                        break;
-                    }
+                if (player.Inventory.TryInsert(GameData.NewItem(Definition), fit)) {
+                    Quantity -= fit;
+                    SoundSystem.PlayPop();
+                    break;
                 }
                 fit--;
             }

@@ -278,10 +278,21 @@ public class LauncherForm : Form {
         _versions.Clear();
 
         string? gameDir = FindGameDir();
-        if (gameDir != null) {
+        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        string localExe = Path.Combine(baseDir, "VoxelFrame.Game.exe");
+
+        if (File.Exists(localExe)) {
             _versions.Add(new GameReleaseItem {
-                DisplayName = "⚡ Локальная сборка Dev (Исходный код)",
-                Tag = "dev-local",
+                DisplayName = "⚡ VoxelFrame (Актуальная версия)",
+                Tag = "v0.5.0",
+                IsInstalled = true,
+                InstallPath = baseDir,
+                ExePath = localExe
+            });
+        } else if (gameDir != null) {
+            _versions.Add(new GameReleaseItem {
+                DisplayName = "⚡ VoxelFrame (Актуальная версия)",
+                Tag = "v0.5.0",
                 IsLocalDev = true,
                 IsInstalled = true,
                 InstallPath = gameDir
@@ -295,7 +306,7 @@ public class LauncherForm : Form {
                 string exe = Path.Combine(dir, "VoxelFrame.Game.exe");
                 if (File.Exists(exe)) {
                     _versions.Add(new GameReleaseItem {
-                        DisplayName = $"💾 {name} (Установлена локально)",
+                        DisplayName = $"💾 {name} (Установлена)",
                         Tag = name,
                         IsInstalled = true,
                         InstallPath = dir,
@@ -303,24 +314,6 @@ public class LauncherForm : Form {
                     });
                 }
             }
-        }
-
-        if (_versions.Count == 0 || (_versions.Count == 1 && _versions[0].IsLocalDev)) {
-            _versions.Add(new GameReleaseItem {
-                DisplayName = "VoxelFrame Alpha v0.5.0 (Релиз: спринт, динамический FOV, 3D-частицы)",
-                Tag = "v0.5.0",
-                IsInstalled = gameDir != null
-            });
-            _versions.Add(new GameReleaseItem {
-                DisplayName = "VoxelFrame Beta v0.4.0 (Сборка с биомами и пещерами)",
-                Tag = "v0.4.0",
-                IsInstalled = false
-            });
-            _versions.Add(new GameReleaseItem {
-                DisplayName = "VoxelFrame Alpha v0.3.0 (Стабильный релиз)",
-                Tag = "v0.3.0",
-                IsInstalled = false
-            });
         }
 
         cbVersion.Items.Clear();

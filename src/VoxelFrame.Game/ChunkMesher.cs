@@ -89,8 +89,13 @@ namespace VoxelFrame.Game;
                         
                         bool visible;
                         if (isFluid) {
-                            // Жидкость скрывает грань, если рядом та же жидкость или непрозрачный блок
-                            visible = neighborType != v.TypeId && (neighborType == 0 || !GameData.GetBlock(neighborType).IsOpaque);
+                            // Жидкость показывает грань, только если рядом воздух (и соседний чанк загружен) или неполный блок
+                            int nChunkDx = (lx + dx < 0) ? -1 : (lx + dx >= 32) ? 1 : 0;
+                            int nChunkDy = (ly + dy < 0) ? -1 : (ly + dy >= 32) ? 1 : 0;
+                            int nChunkDz = (lz + dz < 0) ? -1 : (lz + dz >= 32) ? 1 : 0;
+                            bool isLoadedNeighbor = neighbors[nChunkDx + 1, nChunkDy + 1, nChunkDz + 1] != null;
+
+                            visible = neighborType != v.TypeId && isLoadedNeighbor && (neighborType == 0 || !GameData.GetBlock(neighborType).IsOpaque);
                         } else if (v.TypeId == GameData.BGlass.Id) {
                             visible = neighborType != GameData.BGlass.Id && !IsOpaqueAtOffset(neighbors, lx, ly, lz, dx, dy, dz);
                         } else {
