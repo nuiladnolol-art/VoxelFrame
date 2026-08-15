@@ -13,7 +13,7 @@ namespace VoxelFrame.Game;
 /// </summary>
 public static class SaveSystem {
     public const uint Magic = 0x56465331;   // "VFS1"
-    public const int Version = 4;
+    public const int Version = 5;
 
     public static int SelectedWorldSlot = 1;
     public static string SaveDirectory {
@@ -54,7 +54,7 @@ public static class SaveSystem {
             bw.Write(p.Yaw);
             bw.Write(p.Pitch);
             bw.Write(p.Health);
-            bw.Write(0f); // placeholder (ранее был Hunger, теперь не используется)
+            bw.Write(0f); // placeholder
             bw.Write(p.SelectedSlot);
 
             var inv = p.Inventory;
@@ -67,6 +67,7 @@ public static class SaveSystem {
                 bw.Write(idx);
                 bw.Write(e!.Value.Item.Definition.Id);
                 bw.Write(e.Value.Quantity);
+                bw.Write((float)e.Value.Item.Condition);
             }
 
             bw.Write(session.World.Chunks.Count);
@@ -126,6 +127,20 @@ public static class SaveSystem {
             foreach (var pos in session.World.Fire.Campfires) {
                 bw.Write(pos.X); bw.Write(pos.Y); bw.Write(pos.Z);
             }
+
+            // Сундуки мира
+            bw.Write(session.World.Chests.Count);
+            foreach (var (cpos, cinv) in session.World.Chests) {
+                bw.Write(cpos.X); bw.Write(cpos.Y); bw.Write(cpos.Z);
+                var cNonNull = cinv.Slots.Select((e, idx) => (e, idx)).Where(x => x.e != null).ToList();
+                bw.Write(cNonNull.Count);
+                foreach (var (e, idx) in cNonNull) {
+                    bw.Write(idx);
+                    bw.Write(e!.Value.Item.Definition.Id);
+                    bw.Write(e.Value.Quantity);
+                    bw.Write((float)e.Value.Item.Condition);
+                }
+            }
         }
         File.Move(tmp, path, overwrite: true);
     }
@@ -163,8 +178,12 @@ public static class SaveSystem {
             int index = br.ReadInt32();
             ushort defId = br.ReadUInt16();
             int qty = br.ReadInt32();
-            if (GameData.Items.TryGetValue(defId, out var def))
-                session.Player.Inventory.InsertAt(index, new ItemEntry(GameData.NewItem(def), qty));
+            float cond = version >= 5 ? br.ReadSingle() : 1.0f;
+            if (GameData.Items.TryGetValue(defId, out var def)) {
+                var item = GameData.NewItem(def);
+                item.Condition = Math.Clamp(cond, 0.0, 1.0);
+                session.Player.Inventory.InsertAt(index, new ItemEntry(item, qty));
+            }
         }
 
         int chunkCount = br.ReadInt32();
@@ -230,6 +249,26 @@ public static class SaveSystem {
             session.World.Fire.Campfires.Add(pos);
         }
 
+        if (version >= 5) {
+            int chestCount = br.ReadInt32();
+            for (int ch = 0; ch < chestCount; ch++) {
+                var cpos = new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32());
+                var cinv = session.World.GetOrCreateChest(cpos);
+                int cEntries = br.ReadInt32();
+                for (int ce = 0; ce < cEntries; ce++) {
+                    int cidx = br.ReadInt32();
+                    ushort cDefId = br.ReadUInt16();
+                    int cQty = br.ReadInt32();
+                    float cCond = br.ReadSingle();
+                    if (GameData.Items.TryGetValue(cDefId, out var cDef)) {
+                        var cItem = GameData.NewItem(cDef);
+                        cItem.Condition = Math.Clamp(cCond, 0.0, 1.0);
+                        cinv.InsertAt(cidx, new ItemEntry(cItem, cQty));
+                    }
+                }
+            }
+        }
+
         session.AddMessage("Мир загружен");
         return session;
     }
@@ -247,6 +286,7 @@ public static class SaveSystem {
     public static bool FancyGraphics = true;
     public static int SoundVolume = 100; // 0..100%
     public static int RenderDistanceSetting = 5; // 3, 5, 7
+    public static bool KeepInventory = false; // По умолчанию инвентарь выпадает при смерти
 
     public static void SaveSettings() {
         try {
@@ -258,17 +298,17 @@ public static class SaveSystem {
                 ["Right"] = (int)KeyBinds.Right,
                 ["Jump"] = (int)KeyBinds.Jump,
                 ["Crouch"] = (int)KeyBinds.Crouch,
-                ["Sprint"] = (int)KeyBinds.Sprint,
                 ["Drop"] = (int)KeyBinds.Drop,
                 ["Inventory"] = (int)KeyBinds.Inventory,
                 ["Crafting"] = (int)KeyBinds.Crafting,
                 ["Pause"] = (int)KeyBinds.Pause,
-                ["Fullscreen"] = Raylib_cs.Raylib.IsWindowFullscreen(),
+                ["Fullscreen"] = Raylib_cs.Raylib.IsWindowState(Raylib_cs.ConfigFlags.UndecoratedWindow) || Raylib_cs.Raylib.IsWindowFullscreen(),
                 ["Width"] = Raylib_cs.Raylib.GetScreenWidth(),
                 ["Height"] = Raylib_cs.Raylib.GetScreenHeight(),
                 ["FancyGraphics"] = FancyGraphics,
                 ["SoundVolume"] = SoundVolume,
                 ["RenderDistanceSetting"] = RenderDistanceSetting,
+                ["KeepInventory"] = KeepInventory,
             };
             File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(obj, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
         } catch { }
@@ -288,7 +328,6 @@ public static class SaveSystem {
             R("Right", v => KeyBinds.Right = (Raylib_cs.KeyboardKey)v);
             R("Jump", v => KeyBinds.Jump = (Raylib_cs.KeyboardKey)v);
             R("Crouch", v => KeyBinds.Crouch = (Raylib_cs.KeyboardKey)v);
-            R("Sprint", v => KeyBinds.Sprint = (Raylib_cs.KeyboardKey)v);
             R("Drop", v => KeyBinds.Drop = (Raylib_cs.KeyboardKey)v);
             R("Inventory", v => KeyBinds.Inventory = (Raylib_cs.KeyboardKey)v);
             R("Crafting", v => KeyBinds.Crafting = (Raylib_cs.KeyboardKey)v);
@@ -296,6 +335,7 @@ public static class SaveSystem {
             B("FancyGraphics", v => FancyGraphics = v);
             R("SoundVolume", v => SoundVolume = v);
             R("RenderDistanceSetting", v => RenderDistanceSetting = v);
+            B("KeepInventory", v => KeepInventory = v);
         } catch { }
     }
 }

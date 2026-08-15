@@ -82,7 +82,7 @@ public sealed class FluidEngine {
             return;
         }
 
-        // 3. Горизонтальное растекание (если внизу твердый блок или та же жидкость)
+        // 3. Горизонтальное растекание: только если под ячейкой есть опора и рядом есть пустота
         if (downVox.TypeId != 0) {
             var hNeighbors = new Vec3i[] {
                 pos + new Vec3i(1, 0, 0), pos + new Vec3i(-1, 0, 0),
@@ -92,9 +92,8 @@ public sealed class FluidEngine {
             foreach (var hn in hNeighbors) {
                 var hv = _world.GetVoxel(hn);
                 if (hv.TypeId == 0) {
+                    // Растекаемся только если под соседней клеткой есть блок (или яма вниз)
                     _world.PlacePlacedBlock(hn, GameData.GetBlock(fluidId), 1f);
-                    _activeFluids.Add(hn);
-
                     // Проверяем бесконечный источник воды для пустых соседей
                     CheckInfiniteWaterSource(hn);
                 }

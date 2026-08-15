@@ -26,6 +26,14 @@ public sealed class Container : IInventorySource, IInventorySink {
     public double FreeMassKg => MassCapacityKg - UsedMassKg;
     public IReadOnlyList<ItemEntry> Entries => _slots.Where(e => e != null).Select(e => e!.Value).ToList();
     public ItemEntry?[] Slots => _slots;
+    public int Capacity => _slots.Length;
+
+    public void Clear() {
+        for (int i = 0; i < _slots.Length; i++) _slots[i] = null;
+        UsedVolumeM3 = 0;
+        UsedMassKg = 0;
+        _bulk.Clear();
+    }
 
     public Container(double volumeCapacityM3, double massCapacityKg) {
         if (volumeCapacityM3 <= 0 || massCapacityKg <= 0) throw new ArgumentOutOfRangeException();

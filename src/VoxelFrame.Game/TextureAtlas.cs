@@ -28,7 +28,10 @@ public static class TextureAtlas {
                      TShovelWood = 52, TShovelStone = 53, TShovelIron = 54, TShovelDiamond = 55,
                      // Дроп мобов и новые предметы
                      TFeather = 56, TGunpowder = 57, TString = 58, TArrow = 59, TBone = 60,
-                     TCharcoal = 61, TRawBeef = 62, TCookedBeef = 63, TLeather = 64, TWool = 65;
+                     TCharcoal = 61, TRawBeef = 62, TCookedBeef = 63, TLeather = 64, TWool = 65,
+                     TChestTop = 66, TChestSide = 67, TChestFront = 68,
+                     TBedTop = 69, TBedSide = 70, TBedEnd = 71,
+                     TRottenFlesh = 72;
 
     public record struct BlockFaceTiles(byte PosX, byte NegX, byte PosY, byte NegY, byte PosZ, byte NegZ);
 
@@ -143,6 +146,7 @@ public static class TextureAtlas {
         [TCookedBeef] = "items/beef_cooked.png",
         [TLeather] = "items/leather.png",
         [TWool] = "items/wool.png",
+        [TRottenFlesh] = "items/rotten_flesh.png",
     };
 
     public static Texture2D Atlas => _atlas;
@@ -164,11 +168,71 @@ public static class TextureAtlas {
         unsafe { Raylib.UnloadImage(masterImage); }
     }
 
-    public static void RemovePureWhite(ref Image image) {
-        // Сохраняем все оригинальные пиксели (включая чистый белый цвет для железа, зубов и инструментов)
+    public static void MakeItemTransparent(ref Image image) {
+        int w = image.Width;
+        int h = image.Height;
+        if (w == 0 || h == 0) return;
+
+        bool[,] visited = new bool[w, h];
+        var queue = new Queue<(int X, int Y)>();
+
+        bool IsBgColor(Color c) {
+            if (c.A <= 10) return true;
+            // Белый, светло-серый фон канваса (включая результаты прошлого CleanAllTextures)
+            return (c.R >= 195 && c.G >= 195 && c.B >= 190) || (c.R >= 220 && c.G >= 220 && c.B >= 220);
+        }
+
+        // Добавляем все граничные пиксели фонового цвета
+        for (int x = 0; x < w; x++) {
+            var cTop = Raylib.GetImageColor(image, x, 0);
+            if (IsBgColor(cTop) && !visited[x, 0]) { queue.Enqueue((x, 0)); visited[x, 0] = true; }
+            var cBot = Raylib.GetImageColor(image, x, h - 1);
+            if (IsBgColor(cBot) && !visited[x, h - 1]) { queue.Enqueue((x, h - 1)); visited[x, h - 1] = true; }
+        }
+        for (int y = 0; y < h; y++) {
+            var cLeft = Raylib.GetImageColor(image, 0, y);
+            if (IsBgColor(cLeft) && !visited[0, y]) { queue.Enqueue((0, y)); visited[0, y] = true; }
+            var cRight = Raylib.GetImageColor(image, w - 1, y);
+            if (IsBgColor(cRight) && !visited[w - 1, y]) { queue.Enqueue((w - 1, y)); visited[w - 1, y] = true; }
+        }
+
+        // Заливка внешнего фона прозрачностью
+        while (queue.Count > 0) {
+            var (cx, cy) = queue.Dequeue();
+            unsafe {
+                Raylib.ImageDrawPixel(ref image, cx, cy, new Color(0, 0, 0, 0));
+            }
+            int[] dx = { -1, 1, 0, 0 };
+            int[] dy = { 0, 0, -1, 1 };
+            for (int i = 0; i < 4; i++) {
+                int nx = cx + dx[i];
+                int ny = cy + dy[i];
+                if (nx >= 0 && nx < w && ny >= 0 && ny < h && !visited[nx, ny]) {
+                    visited[nx, ny] = true;
+                    var nc = Raylib.GetImageColor(image, nx, ny);
+                    if (IsBgColor(nc)) {
+                        queue.Enqueue((nx, ny));
+                    }
+                }
+            }
+        }
     }
 
     public static void CleanAllTexturesOnDisk() {
+        try {
+            if (!Directory.Exists(TextureDirectory)) return;
+            foreach (var file in Directory.GetFiles(TextureDirectory, "*.png", SearchOption.AllDirectories)) {
+                var img = Raylib.LoadImage(file);
+                if (img.Width > 0 && img.Height > 0) {
+                    bool isItemOrGui = file.Contains("items") || file.Contains("gui");
+                    if (isItemOrGui) {
+                        MakeItemTransparent(ref img);
+                        Raylib.ExportImage(img, file);
+                    }
+                }
+                unsafe { Raylib.UnloadImage(img); }
+            }
+        } catch { }
     }
 
     public static void GenerateAtlasFile() {
@@ -179,7 +243,6 @@ public static class TextureAtlas {
     public static void Load() {
         if (_ready) return;
 
-        CleanAllTexturesOnDisk();
         GenerateDefaultTextures();
 
         var atlasImage = Raylib.GenImageColor(AtlasW, AtlasH, new Color(0, 0, 0, 0));
@@ -197,7 +260,9 @@ public static class TextureAtlas {
                         if (tileImage.Width != TilePx || tileImage.Height != TilePx) {
                             Raylib.ImageResize(ref tileImage, TilePx, TilePx);
                         }
-                        RemovePureWhite(ref tileImage);
+                        if (relPath.StartsWith("items/") || relPath.StartsWith("gui/")) {
+                            MakeItemTransparent(ref tileImage);
+                        }
                         for (int py = 0; py < TilePx; py++) {
                             for (int px = 0; px < TilePx; px++) {
                                 var col = Raylib.GetImageColor(tileImage, px, py);
@@ -285,6 +350,13 @@ public static class TextureAtlas {
         palette[TRedstoneDust] = (new Color(220, 30, 20, 255), false);
         palette[TFlint] = (new Color(50, 50, 55, 255), false);
         palette[TClay] = (new Color(160, 165, 175, 255), true);
+        palette[TChestTop] = (new Color(150, 105, 55, 255), true);
+        palette[TChestSide] = (new Color(150, 105, 55, 255), true);
+        palette[TChestFront] = (new Color(150, 105, 55, 255), true);
+        palette[TBedTop] = (new Color(210, 40, 40, 255), true);
+        palette[TBedSide] = (new Color(210, 40, 40, 255), true);
+        palette[TBedEnd] = (new Color(210, 40, 40, 255), true);
+        palette[TRottenFlesh] = (new Color(150, 75, 45, 255), true);
 
         var rng = new Random(20260812);
         for (int tile = 0; tile < palette.Length; tile++) {
@@ -353,13 +425,34 @@ public static class TextureAtlas {
                         r = 38 + wave * 4;
                         g = 85 + wave * 9;
                         b = 215 + wave * 5;
-                        a = 230;
+                        a = 160; // Полупрозрачная вода по канону
                     } else if (tile == TLava) {
                         int lavaWave = ((px * 2 + py * 7) % 6);
                         r = 235 + lavaWave * 3;
                         g = 70 + lavaWave * 15;
                         b = 10;
                         a = 255;
+                    } else if (tile == TChestTop || tile == TChestSide) {
+                        bool isBorder = px <= 1 || px >= 14 || py <= 1 || py >= 14;
+                        if (isBorder) { r = 85; g = 50; b = 25; a = 255; }
+                        else { r = 150 + (px % 3) * 5; g = 105 + (px % 3) * 4; b = 55; a = 255; }
+                    } else if (tile == TChestFront) {
+                        bool isBorder = px <= 1 || px >= 14 || py <= 1 || py >= 14;
+                        bool isLock = px >= 7 && px <= 8 && py >= 5 && py <= 8;
+                        if (isLock) { r = 220; g = 220; b = 225; a = 255; }
+                        else if (isBorder) { r = 85; g = 50; b = 25; a = 255; }
+                        else { r = 150 + (px % 3) * 5; g = 105 + (px % 3) * 4; b = 55; a = 255; }
+                    } else if (tile == TBedTop) {
+                        bool isPillow = py <= 5 && px >= 2 && px <= 13;
+                        if (isPillow) { r = 245; g = 245; b = 250; a = 255; }
+                        else { r = 210 + (px % 2) * 10; g = 35; b = 35; a = 255; }
+                    } else if (tile == TBedSide) {
+                        if (py >= 12) { r = 120; g = 80; b = 40; a = 255; }
+                        else if (px <= 5 && py <= 5) { r = 245; g = 245; b = 250; a = 255; }
+                        else { r = 210; g = 35; b = 35; a = 255; }
+                    } else if (tile == TBedEnd) {
+                        if (py >= 12) { r = 120; g = 80; b = 40; a = 255; }
+                        else { r = 210; g = 35; b = 35; a = 255; }
                     } else if (tile == TTorch) {
                         bool isStick = px >= 7 && px <= 8 && py >= 6 && py <= 14;
                         bool isFlame = px >= 6 && px <= 9 && py >= 1 && py <= 5;
@@ -504,6 +597,39 @@ public static class TextureAtlas {
                         if (shine) { r = 240; g = 240; b = 245; a = 255; }
                         else if (ingot) { r = 185; g = 185; b = 192; a = 255; }
                         else { a = 0; }
+                    } else if (tile == TGoldIngot) {
+                        // Золотой слиток
+                        bool ingot = py >= 4 && py <= 11 && px >= 3 && px <= 12;
+                        bool shine = ingot && px >= 4 && px <= 6 && py >= 5 && py <= 7;
+                        if (shine) { r = 255; g = 245; b = 130; a = 255; }
+                        else if (ingot) { r = 245; g = 195; b = 35; a = 255; }
+                        else { a = 0; }
+                    } else if (tile == TDiamond) {
+                        // Драгоценный алмаз
+                        bool inDiamond = Math.Abs(px - 8) + Math.Abs(py - 8) <= 5 && py >= 3 && py <= 12;
+                        bool shine = inDiamond && px >= 6 && px <= 7 && py >= 5 && py <= 7;
+                        if (shine) { r = 220; g = 255; b = 255; a = 255; }
+                        else if (inDiamond) { r = 75; g = 225; b = 235; a = 255; }
+                        else { a = 0; }
+                    } else if (tile == TRedstoneDust) {
+                        // Кучка редстоун пыли
+                        bool inDust = (px - 8) * (px - 8) + (py - 10) * (py - 10) <= 14 && py >= 6;
+                        bool sparkle = (px == 6 && py == 8) || (px == 10 && py == 9);
+                        if (sparkle) { r = 255; g = 120; b = 100; a = 255; }
+                        else if (inDust) { r = 205 + (px * 3 + py * 7) % 35; g = 25; b = 15; a = 255; }
+                        else { a = 0; }
+                    } else if (tile == TFlint) {
+                        // Кремень
+                        bool inFlint = px >= 4 && px <= 12 && py >= 3 && py <= 12 && (px + py >= 9) && (px - py <= 5);
+                        bool edge = inFlint && (px == 4 || py == 3 || px + py == 9);
+                        if (edge) { r = 90; g = 90; b = 98; a = 255; }
+                        else if (inFlint) { r = 50 + (px * 5 + py * 3) % 15; g = 50 + (px * 5 + py * 3) % 15; b = 56; a = 255; }
+                        else { a = 0; }
+                    } else if (tile == TClay) {
+                        // Глина
+                        bool inClay = (px - 8) * (px - 8) + (py - 8) * (py - 8) <= 18 + (px * 5 + py * 3) % 4;
+                        if (inClay) { r = 160 + (px * 7 + py * 5) % 20; g = 165 + (px * 7 + py * 5) % 20; b = 175; a = 255; }
+                        else { a = 0; }
                     } else if (tile >= TPickaxeWood && tile <= TShovelDiamond) {
                         // 16 уникальных тайлов для ВСЕХ инструментов!
                         int toolType = (tile - TPickaxeWood) / 4; // 0 = Pickaxe, 1 = Sword, 2 = Axe, 3 = Shovel
@@ -610,6 +736,14 @@ public static class TextureAtlas {
                                       ((px == 3 || px == 4) && (py == 11 || py == 12)) ||
                                       ((px == 11 || px == 12) && (py == 3 || py == 4));
                         if (inBone) { r = 230; g = 230; b = 220; a = 255; }
+                        else { a = 0; }
+                    } else if (tile == TRottenFlesh) {
+                        bool inMeat = px >= 3 && px <= 12 && py >= 4 && py <= 12;
+                        bool rottenSpot = (px == 5 && py == 6) || (px == 9 && py == 8) || (px == 7 && py == 10) || (px == 10 && py == 5);
+                        bool bonePart = px <= 4 && py >= 11;
+                        if (bonePart) { r = 220; g = 220; b = 210; a = 255; }
+                        else if (rottenSpot) { r = 70; g = 100; b = 40; a = 255; }
+                        else if (inMeat) { r = 140 + (px % 3) * 8; g = 60 + (py % 3) * 6; b = 40; a = 255; }
                         else { a = 0; }
                     } else {
                         if (tile == TPlanks && (py == 4 || py == 11)) { r -= 40; g -= 30; b -= 20; }

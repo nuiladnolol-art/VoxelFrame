@@ -22,6 +22,8 @@ public static class Screens {
     public static bool InSettingsScreen = false;
     public static bool InControlsScreen = false;
     public static bool InGraphicsScreen = false;
+    public static bool InAudioScreen = false;
+    public static bool InGameplayScreen = false;
     public static bool SettingsOpenedFromGame = false;
     public static int ActiveRebindIndex = -1;
 
@@ -32,7 +34,6 @@ public static class Screens {
         "Вправо",
         "Прыжок",
         "Красться",
-        "Спринт",
         "Выбросить",
         "Инвентарь",
         "Крафт",
@@ -46,11 +47,10 @@ public static class Screens {
         3 => KeyBinds.Right,
         4 => KeyBinds.Jump,
         5 => KeyBinds.Crouch,
-        6 => KeyBinds.Sprint,
-        7 => KeyBinds.Drop,
-        8 => KeyBinds.Inventory,
-        9 => KeyBinds.Crafting,
-        10 => KeyBinds.Pause,
+        6 => KeyBinds.Drop,
+        7 => KeyBinds.Inventory,
+        8 => KeyBinds.Crafting,
+        9 => KeyBinds.Pause,
         _ => KeyboardKey.Null
     };
 
@@ -62,11 +62,10 @@ public static class Screens {
             case 3: KeyBinds.Right = key; break;
             case 4: KeyBinds.Jump = key; break;
             case 5: KeyBinds.Crouch = key; break;
-            case 6: KeyBinds.Sprint = key; break;
-            case 7: KeyBinds.Drop = key; break;
-            case 8: KeyBinds.Inventory = key; break;
-            case 9: KeyBinds.Crafting = key; break;
-            case 10: KeyBinds.Pause = key; break;
+            case 6: KeyBinds.Drop = key; break;
+            case 7: KeyBinds.Inventory = key; break;
+            case 8: KeyBinds.Crafting = key; break;
+            case 9: KeyBinds.Pause = key; break;
         }
     }
 
@@ -130,7 +129,7 @@ public static class Screens {
             if (MenuError.Length > 0)
                 Fonts.DrawCentered(MenuError, w / 2f, h * 0.68f, 18f, new Color(255, 120, 120, 255));
 
-            Fonts.Draw("VoxelFrame Beta 0.4.0", 10f, h - 25f, 14f, new Color(200, 200, 200, 180));
+            Fonts.Draw("VoxelFrame Alpha 0.5.0", 10f, h - 25f, 14f, new Color(200, 200, 200, 180));
             Fonts.Draw("SenStol Studio", w - 180f, h - 25f, 14f, new Color(200, 200, 200, 180));
         }
 
@@ -150,17 +149,32 @@ public static class Screens {
             }
         }
 
-        Fonts.DrawCentered("НАСТРОЙКИ", w / 2f, h * 0.2f, 44f, new Color(255, 220, 120, 255));
+        Fonts.DrawCentered("НАСТРОЙКИ", w / 2f, h * 0.18f, 44f, new Color(255, 220, 120, 255));
 
-        float cy = h * 0.4f;
-        if (Button(w / 2f - 185f, cy, 180f, 46f, "Настройки графики", true)) {
+        float cy = h * 0.34f;
+        float btnW = 210f;
+        float btnH = 46f;
+        float gapX = 20f;
+        float gapY = 16f;
+
+        float leftX = w / 2f - btnW - gapX / 2f;
+        float rightX = w / 2f + gapX / 2f;
+
+        if (Button(leftX, cy, btnW, btnH, "Настройки графики...", true)) {
             InGraphicsScreen = true;
         }
-        if (Button(w / 2f + 5f, cy, 180f, 46f, "Управление", true)) {
+        if (Button(rightX, cy, btnW, btnH, "Настройки звука...", true)) {
+            InAudioScreen = true;
+        }
+
+        if (Button(leftX, cy + btnH + gapY, btnW, btnH, "Игровой процесс...", true)) {
+            InGameplayScreen = true;
+        }
+        if (Button(rightX, cy + btnH + gapY, btnW, btnH, "Управление...", true)) {
             InControlsScreen = true;
         }
 
-        if (Button(w / 2f - 140f, cy + 80f, 280f, 46f, "Готово", true)) {
+        if (Button(w / 2f - 140f, cy + (btnH + gapY) * 2 + 28f, 280f, 46f, "Готово", true)) {
             InSettingsScreen = false;
         }
     }
@@ -176,26 +190,22 @@ public static class Screens {
             }
         }
 
-        Fonts.DrawCentered("НАСТРОЙКИ ГРАФИКИ И ЗВУКА", w / 2f, h * 0.15f, 44f, new Color(255, 220, 120, 255));
+        Fonts.DrawCentered("НАСТРОЙКИ ГРАФИКИ", w / 2f, h * 0.15f, 44f, new Color(255, 220, 120, 255));
 
-        float cy = h * 0.3f;
-        string fsText = Raylib.IsWindowFullscreen() ? "Режим экрана: Полный" : "Режим экрана: Оконный";
+        float cy = h * 0.32f;
+        bool isFs = Raylib.IsWindowState(ConfigFlags.UndecoratedWindow) || Raylib.IsWindowFullscreen();
+        string fsText = isFs ? "Режим экрана: Полноэкранный (в окне)" : "Режим экрана: Оконный";
         if (Button(w / 2f - 180f, cy, 360f, 46f, fsText, true)) {
-            Raylib.ToggleFullscreen();
+            Raylib.ToggleBorderlessWindowed();
         }
 
         string gfxText = SaveSystem.FancyGraphics ? "Графика: Красивая (Fancy)" : "Графика: Быстрая (Fast)";
-        if (Button(w / 2f - 180f, cy + 54f, 360f, 46f, gfxText, true)) {
+        if (Button(w / 2f - 180f, cy + 56f, 360f, 46f, gfxText, true)) {
             SaveSystem.FancyGraphics = !SaveSystem.FancyGraphics;
         }
 
-        string volText = SaveSystem.SoundVolume > 0 ? $"Громкость звука: {SaveSystem.SoundVolume}%" : "Громкость звука: Выкл";
-        if (Button(w / 2f - 180f, cy + 108f, 360f, 46f, volText, true)) {
-            SaveSystem.SoundVolume = (SaveSystem.SoundVolume + 25) % 125;
-        }
-
         string distText = $"Дальность прорисовки: {SaveSystem.RenderDistanceSetting} чанков";
-        if (Button(w / 2f - 180f, cy + 162f, 360f, 46f, distText, true)) {
+        if (Button(w / 2f - 180f, cy + 112f, 360f, 46f, distText, true)) {
             SaveSystem.RenderDistanceSetting = SaveSystem.RenderDistanceSetting switch {
                 3 => 5,
                 5 => 7,
@@ -203,8 +213,64 @@ public static class Screens {
             };
         }
 
-        if (Button(w / 2f - 140f, h * 0.85f, 280f, 46f, "Готово", true)) {
+        if (Button(w / 2f - 140f, h * 0.82f, 280f, 46f, "Готово", true)) {
             InGraphicsScreen = false;
+            SaveSystem.SaveSettings();
+        }
+    }
+
+    public static void DrawAudio() {
+        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        
+        int tileSize = 64;
+        for (int x = 0; x < w; x += tileSize) {
+            for (int y = 0; y < h; y += tileSize) {
+                bool isEven = ((x / tileSize) + (y / tileSize)) % 2 == 0;
+                Raylib.DrawRectangle(x, y, tileSize, tileSize, isEven ? new Color(42, 34, 30, 255) : new Color(34, 27, 24, 255));
+            }
+        }
+
+        Fonts.DrawCentered("НАСТРОЙКИ ЗВУКА", w / 2f, h * 0.15f, 44f, new Color(255, 220, 120, 255));
+
+        float cy = h * 0.36f;
+        string volText = SaveSystem.SoundVolume > 0 ? $"Общая громкость: {SaveSystem.SoundVolume}%" : "Общая громкость: Выкл";
+        if (Button(w / 2f - 180f, cy, 360f, 46f, volText, true)) {
+            SaveSystem.SoundVolume = (SaveSystem.SoundVolume + 25) % 125;
+            if (SaveSystem.SoundVolume > 0) {
+                Raylib.SetMasterVolume(SaveSystem.SoundVolume / 100f);
+                SoundSystem.PlayPop();
+            } else {
+                Raylib.SetMasterVolume(0f);
+            }
+        }
+
+        if (Button(w / 2f - 140f, h * 0.82f, 280f, 46f, "Готово", true)) {
+            InAudioScreen = false;
+            SaveSystem.SaveSettings();
+        }
+    }
+
+    public static void DrawGameplay() {
+        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        
+        int tileSize = 64;
+        for (int x = 0; x < w; x += tileSize) {
+            for (int y = 0; y < h; y += tileSize) {
+                bool isEven = ((x / tileSize) + (y / tileSize)) % 2 == 0;
+                Raylib.DrawRectangle(x, y, tileSize, tileSize, isEven ? new Color(42, 34, 30, 255) : new Color(34, 27, 24, 255));
+            }
+        }
+
+        Fonts.DrawCentered("ИГРОВОЙ ПРОЦЕСС", w / 2f, h * 0.15f, 44f, new Color(255, 220, 120, 255));
+
+        float cy = h * 0.36f;
+        string keepInvText = SaveSystem.KeepInventory ? "Сохранение инвентаря: Вкл (Сохраняется)" : "Сохранение инвентаря: Выкл (Выпадает)";
+        if (Button(w / 2f - 180f, cy, 360f, 46f, keepInvText, true)) {
+            SaveSystem.KeepInventory = !SaveSystem.KeepInventory;
+        }
+
+        if (Button(w / 2f - 140f, h * 0.82f, 280f, 46f, "Готово", true)) {
+            InGameplayScreen = false;
             SaveSystem.SaveSettings();
         }
     }
@@ -229,10 +295,10 @@ public static class Screens {
             }
         }
 
-        Fonts.DrawCentered("НАСТРОЙКИ УПРАВЛЕНИЯ", w / 2f, h * 0.12f, 44f, new Color(255, 220, 120, 255));
+        Fonts.DrawCentered("НАСТРОЙКИ УПРАВЛЕНИЯ", w / 2f, h * 0.10f, 44f, new Color(255, 220, 120, 255));
 
-        float startY = h * 0.22f;
-        float rowH = 46f;
+        float startY = h * 0.18f;
+        float rowH = 42f;
         float colW = 340f;
         
         for (int i = 0; i < BindLabels.Length; i++) {
@@ -240,9 +306,9 @@ public static class Screens {
             int row = i / 2;
             
             float cx = (col == 0) ? (w / 2f - colW - 10f) : (w / 2f + 10f);
-            float cy = startY + row * (rowH + 10f);
+            float cy = startY + row * (rowH + 8f);
             
-            Fonts.Draw($"{BindLabels[i]}:", cx, cy + 12f, 20f, Color.White);
+            Fonts.Draw($"{BindLabels[i]}:", cx, cy + 10f, 20f, Color.White);
             
             string keyName = (ActiveRebindIndex == i) ? "> ??? <" : KeyBinds.GetName(GetBindKey(i));
             if (Button(cx + 160f, cy, 160f, rowH, keyName, true)) {
@@ -250,7 +316,14 @@ public static class Screens {
             }
         }
 
-        if (Button(w / 2f - 140f, h * 0.85f, 280f, 46f, "Готово", true)) {
+        float bottomY = h * 0.85f;
+        if (Button(w / 2f - 210f, bottomY, 200f, 44f, "Сбросить по умолч.", true)) {
+            ActiveRebindIndex = -1;
+            KeyBinds.ResetToDefaults();
+            SaveSystem.SaveSettings();
+        }
+
+        if (Button(w / 2f + 10f, bottomY, 200f, 44f, "Готово", true)) {
             ActiveRebindIndex = -1;
             InControlsScreen = false;
             SaveSystem.SaveSettings();
@@ -269,6 +342,34 @@ public static class Screens {
         if (Button(w / 2f - 140f, cy, 280f, 46f, "Продолжить (ESC)", true)) action = PauseAction.Resume;
         if (Button(w / 2f - 140f, cy + 58f, 280f, 46f, "Настройки...", true)) action = PauseAction.Settings;
         if (Button(w / 2f - 140f, cy + 116f, 280f, 46f, "Сохранить и выйти в меню", true)) action = PauseAction.SaveAndExit;
+        return action;
+    }
+
+    // ── Экран смерти ─────────────────────────────────────────────────────────
+
+    public enum DeathAction { None, Respawn, MainMenu }
+
+    public static DeathAction DrawDeath(GameSession session) {
+        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        // Красный градиент смерти Minecraft
+        Raylib.DrawRectangleGradientV(0, 0, w, h, new Color(170, 20, 20, 170), new Color(40, 5, 5, 235));
+
+        Fonts.DrawCentered("ВЫ ПОГИБЛИ!", w / 2f, h * 0.25f, 54f, new Color(255, 60, 60, 255));
+
+        int totalSec = (int)session.TotalPlaySeconds;
+        int mins = totalSec / 60;
+        int secs = totalSec % 60;
+        Fonts.DrawCentered($"Время выживания: {mins} мин {secs:D2} сек", w / 2f, h * 0.38f, 24f, new Color(230, 230, 230, 255));
+
+        var action = DeathAction.None;
+        float cy = h * 0.52f;
+        if (Button(w / 2f - 140f, cy, 280f, 48f, "Возродиться", true)) {
+            action = DeathAction.Respawn;
+        }
+        if (Button(w / 2f - 140f, cy + 64f, 280f, 48f, "Главное меню", true)) {
+            action = DeathAction.MainMenu;
+        }
+
         return action;
     }
 
@@ -505,15 +606,91 @@ public static class Screens {
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Left) || Raylib.IsMouseButtonPressed(MouseButton.Right)) {
             bool right = Raylib.IsMouseButtonPressed(MouseButton.Right);
+            bool slotHit = false;
             for (int row = 0; row < mainRows; row++) {
                 for (int col = 0; col < cols; col++) {
                     int idx = 9 + row * cols + col;
-                    if (SlotClicked(session, inv, gridX + col * (slot + gap), py + 76f + row * (slot + gap), idx, right)) return;
+                    if (SlotClicked(session, inv, gridX + col * (slot + gap), py + 76f + row * (slot + gap), idx, right)) {
+                        slotHit = true;
+                        break;
+                    }
+                }
+                if (slotHit) break;
+            }
+            if (!slotHit) {
+                float hotbarY = py + 76f + mainRows * (slot + gap);
+                for (int col = 0; col < cols; col++) {
+                    if (SlotClicked(session, inv, gridX + col * (slot + gap), hotbarY, col, right)) {
+                        slotHit = true;
+                        break;
+                    }
+                }
+            }
+
+            // Клик за пределами окна инвентаря с предметом в руке — выбросить в мир!
+            if (!slotHit && Held.HasValue && Held.Value.Quantity > 0) {
+                if (!Raylib.CheckCollisionPointRec(mouse, new Rectangle(px, py, panelW, panelH))) {
+                    var dropPos = session.Player.Eye + session.Player.Forward * 0.5f;
+                    int dropCount = right ? 1 : Held.Value.Quantity;
+                    var pickup = new ItemPickup(Held.Value.Item.Definition, dropCount, dropPos) {
+                        PickupDelay = 1.2f,
+                        Velocity = session.Player.Forward * 4.5f + new Vector3(0f, 2.0f, 0f)
+                    };
+                    session.World.Pickups.Add(pickup);
+                    if (right && Held.Value.Quantity > 1) {
+                        Held = Held.Value with { Quantity = Held.Value.Quantity - 1 };
+                    } else {
+                        Held = null;
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Выбрасывание предмета клавишей Q при наведении на слот
+        if (Raylib.IsKeyPressed(KeyboardKey.Q)) {
+            for (int row = 0; row < mainRows; row++) {
+                for (int col = 0; col < cols; col++) {
+                    int idx = 9 + row * cols + col;
+                    if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(gridX + col * (slot + gap), py + 76f + row * (slot + gap), 52, 52))) {
+                        var slotEntry = inv.Slots[idx];
+                        if (slotEntry.HasValue && slotEntry.Value.Quantity > 0) {
+                            var dropPos = session.Player.Eye + session.Player.Forward * 0.5f;
+                            var pickup = new ItemPickup(slotEntry.Value.Item.Definition, 1, dropPos) {
+                                PickupDelay = 1.2f,
+                                Velocity = session.Player.Forward * 4.5f + new Vector3(0f, 2.0f, 0f)
+                            };
+                            session.World.Pickups.Add(pickup);
+                            if (slotEntry.Value.Quantity > 1) {
+                                inv.Slots[idx] = slotEntry.Value with { Quantity = slotEntry.Value.Quantity - 1 };
+                            } else {
+                                inv.RemoveAt(idx);
+                            }
+                            return;
+                        }
+                    }
                 }
             }
             float hotbarY = py + 76f + mainRows * (slot + gap);
             for (int col = 0; col < cols; col++) {
-                if (SlotClicked(session, inv, gridX + col * (slot + gap), hotbarY, col, right)) return;
+                if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(gridX + col * (slot + gap), hotbarY, 52, 52))) {
+                    int idx = col;
+                    var slotEntry = inv.Slots[idx];
+                    if (slotEntry.HasValue && slotEntry.Value.Quantity > 0) {
+                        var dropPos = session.Player.Eye + session.Player.Forward * 0.5f;
+                        var pickup = new ItemPickup(slotEntry.Value.Item.Definition, 1, dropPos) {
+                            PickupDelay = 1.2f,
+                            Velocity = session.Player.Forward * 4.5f + new Vector3(0f, 2.0f, 0f)
+                        };
+                        session.World.Pickups.Add(pickup);
+                        if (slotEntry.Value.Quantity > 1) {
+                            inv.Slots[idx] = slotEntry.Value with { Quantity = slotEntry.Value.Quantity - 1 };
+                        } else {
+                            inv.RemoveAt(idx);
+                        }
+                        return;
+                    }
+                }
             }
         }
 
@@ -1014,6 +1191,131 @@ public static class Screens {
                     var tmp = slotItem;
                     slotItem = held;
                     Held = tmp;
+                }
+            }
+        }
+    }
+
+    // ── Экран сундука (27 слотов сундука + 36 слотов игрока) ─────────────────
+
+    public static void DrawChestUI(GameSession session) {
+        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        var pInv = session.Player.Inventory;
+        var chestInv = session.World.GetOrCreateChest(session.ActiveChestPos);
+        var mouse = Raylib.GetMousePosition();
+        bool leftClick = Raylib.IsMouseButtonPressed(MouseButton.Left);
+        bool rightClick = Raylib.IsMouseButtonPressed(MouseButton.Right);
+
+        const int slotSz = 52, gap = 4;
+        int gridW = 9 * slotSz + 8 * gap;
+        int panelW = gridW + 32;
+        int panelH = 3 * slotSz + 2 * gap + 24 + 4 * slotSz + 3 * gap + 100;
+
+        float px = w / 2f - panelW / 2f, py = (h - panelH) / 2f;
+        DrawPanel(px, py, panelW, panelH);
+
+        Fonts.DrawCentered("СУНДУК", w / 2f, py + 8f, 24f, new Color(255, 205, 100, 255));
+        Fonts.DrawCentered("Хранилище предметов · ЛКМ / ПКМ", w / 2f, py + 34f, 13f, new Color(170, 176, 190, 255));
+
+        float chestY = py + 56f;
+        float chestX = px + 16f;
+
+        // 3×9 слотов сундука
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 9; c++) {
+                int idx = r * 9 + c;
+                float sx = chestX + c * (slotSz + gap);
+                float sy = chestY + r * (slotSz + gap);
+                var rect = new Rectangle(sx, sy, slotSz, slotSz);
+                bool hov = Raylib.CheckCollisionPointRec(mouse, rect);
+
+                Raylib.DrawRectangleRounded(rect, 0.12f, 6, hov ? SlotHover : SlotBg);
+                Raylib.DrawRectangleRoundedLinesEx(rect, 0.12f, 6, 1.5f, SlotBorder);
+
+                var entry = chestInv.Slots[idx];
+                if (entry.HasValue && entry.Value.Quantity > 0) {
+                    Hud.DrawItemIcon(entry.Value.Item.Definition, new Rectangle(sx + 3f, sy + 3f, slotSz - 6f, slotSz - 6f), 1f);
+                    if (entry.Value.Quantity > 1)
+                        Fonts.DrawShadowed($"×{entry.Value.Quantity}", sx + 4f, sy + slotSz - 16f, 14f, Color.White);
+                    if (entry.Value.Item.Condition < 0.999) {
+                        float durRatio = (float)entry.Value.Item.Condition;
+                        var barRec = new Rectangle(sx + 6f, sy + slotSz - 8f, slotSz - 12f, 4f);
+                        Raylib.DrawRectangleRec(barRec, new Color(20, 20, 20, 220));
+                        Color durCol = durRatio > 0.5f ? new Color(50, 220, 50, 255) : durRatio > 0.2f ? new Color(240, 200, 30, 255) : new Color(240, 40, 40, 255);
+                        Raylib.DrawRectangleRec(new Rectangle(sx + 6f, sy + slotSz - 8f, (slotSz - 12f) * durRatio, 4f), durCol);
+                    }
+                }
+
+                if ((leftClick || rightClick) && hov) {
+                    HandleContainerSlotClick(chestInv, idx, leftClick, rightClick);
+                }
+            }
+        }
+
+        // Инвентарь игрока снизу
+        float invY = chestY + 3 * (slotSz + gap) + 20f;
+        float invX = px + 16f;
+        Fonts.Draw("Инвентарь", invX, invY - 16f, 13f, new Color(200, 200, 200, 255));
+
+        for (int row = 0; row < 3; row++) {
+            for (int col = 0; col < 9; col++) {
+                int idx = 9 + row * 9 + col;
+                DrawSlot(session, pInv, invX + col * (slotSz + gap), invY + row * (slotSz + gap), idx, false);
+            }
+        }
+        float hotY = invY + 3 * (slotSz + gap) + 6f;
+        for (int col = 0; col < 9; col++)
+            DrawSlot(session, pInv, invX + col * (slotSz + gap), hotY, col, col == session.Player.SelectedSlot);
+
+        DrawHeldItem();
+        HandleWorkbenchInput(session, pInv, invX, invY, hotY);
+    }
+
+    private static void HandleContainerSlotClick(Container inv, int slotIdx, bool leftClick, bool rightClick) {
+        const int maxStack = 64;
+        var slotItem = inv.Slots[slotIdx];
+
+        if (rightClick) {
+            if (Held.HasValue && Held.Value.Quantity > 0) {
+                var held = Held.Value;
+                if (!slotItem.HasValue) {
+                    inv.InsertAt(slotIdx, new ItemEntry(held.Item, 1));
+                    Held = held with { Quantity = held.Quantity - 1 };
+                    if (Held.Value.Quantity <= 0) Held = null;
+                } else if (slotItem.Value.Item.Definition == held.Item.Definition && slotItem.Value.Quantity < maxStack) {
+                    inv.InsertAt(slotIdx, slotItem.Value with { Quantity = slotItem.Value.Quantity + 1 });
+                    Held = held with { Quantity = held.Quantity - 1 };
+                    if (Held.Value.Quantity <= 0) Held = null;
+                }
+            } else if (slotItem.HasValue && slotItem.Value.Quantity > 0) {
+                int qty = slotItem.Value.Quantity;
+                int take = (qty + 1) / 2;
+                Held = slotItem.Value with { Quantity = take };
+                if (qty - take > 0) inv.InsertAt(slotIdx, slotItem.Value with { Quantity = qty - take });
+                else inv.RemoveAt(slotIdx);
+            }
+        } else if (leftClick) {
+            if (!Held.HasValue || Held.Value.Quantity <= 0) {
+                if (slotItem.HasValue) {
+                    Held = slotItem;
+                    inv.RemoveAt(slotIdx);
+                }
+            } else {
+                var held = Held.Value;
+                if (!slotItem.HasValue) {
+                    inv.InsertAt(slotIdx, held);
+                    Held = null;
+                } else if (slotItem.Value.Item.Definition == held.Item.Definition) {
+                    int current = slotItem.Value.Quantity;
+                    if (current < maxStack) {
+                        int add = Math.Min(maxStack - current, held.Quantity);
+                        inv.InsertAt(slotIdx, slotItem.Value with { Quantity = current + add });
+                        if (held.Quantity - add > 0) Held = held with { Quantity = held.Quantity - add };
+                        else Held = null;
+                    }
+                } else {
+                    inv.InsertAt(slotIdx, held);
+                    Held = slotItem;
                 }
             }
         }

@@ -48,9 +48,19 @@ internal static class Program {
 
         Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint | ConfigFlags.VSyncHint | ConfigFlags.ResizableWindow);
         Raylib.InitWindow(launchWidth, launchHeight, "VoxelFrame — выживание");
+        try {
+            string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "icon.png");
+            if (!File.Exists(iconPath)) iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "assets", "icon.png");
+            if (File.Exists(iconPath)) {
+                var iconImg = Raylib.LoadImage(iconPath);
+                if (iconImg.Width > 0) {
+                    Raylib.SetWindowIcon(iconImg);
+                    unsafe { Raylib.UnloadImage(iconImg); }
+                }
+            }
+        } catch { }
         if (startFullscreen) {
-            Raylib.SetWindowSize(launchWidth, launchHeight);
-            Raylib.ToggleFullscreen();
+            Raylib.ToggleBorderlessWindowed();
         }
         Raylib.SetTargetFPS(60);
         Raylib.SetExitKey(KeyboardKey.Null);   // ESC обрабатывается игрой
@@ -85,9 +95,18 @@ internal static class Program {
                 MenuAction action = MenuAction.None;
                 if (Screens.InSettingsScreen) {
                     if (Screens.InGraphicsScreen) Screens.DrawGraphics();
+                    else if (Screens.InAudioScreen) Screens.DrawAudio();
+                    else if (Screens.InGameplayScreen) Screens.DrawGameplay();
                     else if (Screens.InControlsScreen) Screens.DrawControls();
                     else Screens.DrawSettings();
                     Raylib.EndDrawing();
+                    if (Raylib.IsKeyPressed(KeyBinds.Pause)) {
+                        if (Screens.InGraphicsScreen) { Screens.InGraphicsScreen = false; SaveSystem.SaveSettings(); }
+                        else if (Screens.InAudioScreen) { Screens.InAudioScreen = false; SaveSystem.SaveSettings(); }
+                        else if (Screens.InGameplayScreen) { Screens.InGameplayScreen = false; SaveSystem.SaveSettings(); }
+                        else if (Screens.InControlsScreen) { Screens.InControlsScreen = false; SaveSystem.SaveSettings(); }
+                        else Screens.InSettingsScreen = false;
+                    }
                 } else {
                     action = Screens.DrawMenu(dt);
                     Raylib.EndDrawing();
@@ -144,13 +163,17 @@ internal static class Program {
                 
                 if (Screens.InSettingsScreen) {
                     if (Screens.InGraphicsScreen) Screens.DrawGraphics();
+                    else if (Screens.InAudioScreen) Screens.DrawAudio();
+                    else if (Screens.InGameplayScreen) Screens.DrawGameplay();
                     else if (Screens.InControlsScreen) Screens.DrawControls();
                     else Screens.DrawSettings();
                     Raylib.EndDrawing();
                     if (pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause)) {
                         pauseDebounce = 0.25f;
-                        if (Screens.InGraphicsScreen) Screens.InGraphicsScreen = false;
-                        else if (Screens.InControlsScreen) Screens.InControlsScreen = false;
+                        if (Screens.InGraphicsScreen) { Screens.InGraphicsScreen = false; SaveSystem.SaveSettings(); }
+                        else if (Screens.InAudioScreen) { Screens.InAudioScreen = false; SaveSystem.SaveSettings(); }
+                        else if (Screens.InGameplayScreen) { Screens.InGameplayScreen = false; SaveSystem.SaveSettings(); }
+                        else if (Screens.InControlsScreen) { Screens.InControlsScreen = false; SaveSystem.SaveSettings(); }
                         else Screens.InSettingsScreen = false;
                     }
                     continue;
@@ -204,6 +227,12 @@ internal static class Program {
             renderer.DrawEntities(session.Camera);
             Raylib.EndMode3D();
 
+            // Защита от X-Ray (если камера внутри непрозрачного блока — черная заглушка)
+            var camCell = new VoxelFrame.Core.Vec3i((int)MathF.Floor(session.Camera.Position.X), (int)MathF.Floor(session.Camera.Position.Y), (int)MathF.Floor(session.Camera.Position.Z));
+            if (session.World.IsOpaqueAt(camCell)) {
+                Raylib.DrawRectangle(0, 0, Raylib.GetScreenWidth(), Raylib.GetScreenHeight(), new Color(16, 14, 13, 255));
+            }
+
             switch (session.Ui) {
                 case UiState.Playing:
                     // Курсор прячем только при фокусе окна: иначе он «зависает»
@@ -216,6 +245,21 @@ internal static class Program {
                         cursorCaptured = false;
                     }
                     Hud.Draw(session, dt);
+                    break;
+                case UiState.Death:
+                    if (cursorCaptured) {
+                        Raylib.EnableCursor();
+                        cursorCaptured = false;
+                    }
+                    var deathAction = Screens.DrawDeath(session);
+                    if (deathAction == Screens.DeathAction.Respawn) {
+                        session.RespawnPlayer();
+                    } else if (deathAction == Screens.DeathAction.MainMenu) {
+                        session.SaveTo(SaveSystem.SavePath);
+                        session.Ui = UiState.Playing;
+                        session = null;
+                        renderer = null;
+                    }
                     break;
                 case UiState.Inventory:
                     if (cursorCaptured) {
@@ -245,6 +289,13 @@ internal static class Program {
                     }
                     Screens.DrawFurnaceUI(session);
                     break;
+                case UiState.Chest:
+                    if (cursorCaptured) {
+                        Raylib.EnableCursor();
+                        cursorCaptured = false;
+                    }
+                    Screens.DrawChestUI(session);
+                    break;
             }
             Raylib.EndDrawing();
 
@@ -270,8 +321,8 @@ internal static class Program {
             MoveX = (Raylib.IsKeyDown(KeyBinds.Right) ? 1f : 0f) - (Raylib.IsKeyDown(KeyBinds.Left) ? 1f : 0f),
             MoveZ = (Raylib.IsKeyDown(KeyBinds.Forward) ? 1f : 0f) - (Raylib.IsKeyDown(KeyBinds.Backward) ? 1f : 0f),
             Jump = Raylib.IsKeyDown(KeyBinds.Jump),
-            Sprint = Raylib.IsKeyDown(KeyBinds.Sprint),
             Crouch = Raylib.IsKeyDown(KeyBinds.Crouch),
+            Sprint = Raylib.IsKeyDown(KeyBinds.Sprint) || Raylib.IsKeyDown(KeyboardKey.LeftControl),
             Drop = Raylib.IsKeyPressed(KeyBinds.Drop),
             AttackHeld = Raylib.IsMouseButtonDown(MouseButton.Left),
             UsePressed = Raylib.IsMouseButtonPressed(MouseButton.Right),
@@ -385,9 +436,16 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.ArrowItem.Id, TextureAtlas.TArrow);
         TextureAtlas.SetItemTile(GameData.BoneItem.Id, TextureAtlas.TBone);
         TextureAtlas.SetItemTile(GameData.CharcoalItem.Id, TextureAtlas.TCharcoal);
+        TextureAtlas.SetBlockFaces(GameData.BChest.Id, TextureAtlas.TChestSide, TextureAtlas.TChestSide, TextureAtlas.TChestTop, TextureAtlas.TChestTop, TextureAtlas.TChestFront, TextureAtlas.TChestSide);
+        TextureAtlas.SetBlockFaces(GameData.BBed.Id, TextureAtlas.TBedSide, TextureAtlas.TBedSide, TextureAtlas.TBedTop, TextureAtlas.TPlanks, TextureAtlas.TBedEnd, TextureAtlas.TBedEnd);
+        TextureAtlas.SetBlockFaces(GameData.BBedHead.Id, TextureAtlas.TBedSide, TextureAtlas.TBedSide, TextureAtlas.TBedTop, TextureAtlas.TPlanks, TextureAtlas.TBedEnd, TextureAtlas.TBedEnd);
+
         TextureAtlas.SetItemTile(GameData.RawBeefItem.Id, TextureAtlas.TRawBeef);
         TextureAtlas.SetItemTile(GameData.CookedBeefItem.Id, TextureAtlas.TCookedBeef);
         TextureAtlas.SetItemTile(GameData.LeatherItem.Id, TextureAtlas.TLeather);
         TextureAtlas.SetItemTile(GameData.WhiteWoolItem.Id, TextureAtlas.TWool);
+        TextureAtlas.SetItemTile(GameData.ChestItem.Id, TextureAtlas.TChestFront);
+        TextureAtlas.SetItemTile(GameData.BedItem.Id, TextureAtlas.TBedTop);
+        TextureAtlas.SetItemTile(GameData.RottenFleshItem.Id, TextureAtlas.TRottenFlesh);
     }
 }

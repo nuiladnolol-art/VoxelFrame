@@ -15,6 +15,7 @@ public static class SoundSystem {
     private static Sound _placeSound;
     private static Sound _eatSound;
     private static Sound _splashSound;
+    private static Sound _popSound;
 
     public static void Initialize() {
         if (_audioReady) return;
@@ -27,6 +28,7 @@ public static class SoundSystem {
                 _placeSound = LoadProceduralSound(CreateToneWav(44100 / 10, 400f, 250f, 0.35f));
                 _eatSound = LoadProceduralSound(CreateToneWav(44100 / 8, 280f, 420f, 0.45f));
                 _splashSound = LoadProceduralSound(CreateNoiseWav(44100 / 5, 0.4f));
+                _popSound = LoadProceduralSound(CreateToneWav(44100 / 16, 550f, 850f, 0.30f));
                 _audioReady = true;
             }
         } catch {
@@ -73,6 +75,13 @@ public static class SoundSystem {
         if (_audioReady && SaveSystem.SoundVolume > 0) {
             Raylib.SetMasterVolume(SaveSystem.SoundVolume / 100f);
             Raylib.PlaySound(_splashSound);
+        }
+    }
+
+    public static void PlayPop() {
+        if (_audioReady && SaveSystem.SoundVolume > 0) {
+            Raylib.SetMasterVolume(SaveSystem.SoundVolume / 100f);
+            Raylib.PlaySound(_popSound);
         }
     }
 

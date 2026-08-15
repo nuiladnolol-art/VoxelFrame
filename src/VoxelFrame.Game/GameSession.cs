@@ -5,7 +5,7 @@ using VoxelFrame.Core.World;
 
 namespace VoxelFrame.Game;
 
-public enum UiState { Playing, Inventory, Crafting, Paused, Workbench, Furnace, Loading }
+public enum UiState { Playing, Inventory, Crafting, Paused, Workbench, Furnace, Chest, Loading, Death }
 
 /// <summary>
 /// Игровая сессия: мир + игрок + время суток + UI-состояние + сообщения.
@@ -24,8 +24,16 @@ public sealed class GameSession {
     public Vec3i TargetBlock;
     public Vec3i PlaceCell;
     public Vec3i ActiveFurnacePos;
+    public Vec3i ActiveChestPos;
     public bool HasTarget;
     public float TotalPlaySeconds;
+
+    // Сон и смена времени
+    public bool IsSleeping;
+    public float SleepProgress;
+    public Vec3i BedPosition;
+
+    private Vector3 _lastChunkLoadPos = new(float.MaxValue, 0, 0);
 
     // Очередь загрузки чанков (для экрана загрузки)
     private Queue<Vec3i>? _loadQueue;
@@ -38,9 +46,11 @@ public sealed class GameSession {
     public GameSession(bool headless) {
         Headless = headless;
         Camera = new Camera3D {
+            Position = new Vector3(0f, 40f, 0f),
+            Target = new Vector3(0f, 40f, 1f),
+            Up = Vector3.UnitY,
             FovY = 70f,
             Projection = CameraProjection.Perspective,
-            Up = Vector3.UnitY,
         };
     }
 
@@ -51,11 +61,21 @@ public sealed class GameSession {
         if (_messages.Count > 5) _messages.RemoveAt(_messages.Count - 1);
     }
 
+    public void StartSleep(Vec3i bedPos) {
+        IsSleeping = true;
+        SleepProgress = 0f;
+        BedPosition = bedPos;
+        World.SpawnBlock = bedPos;
+    }
+
     public void RespawnPlayer() {
-        Player.Health = 20f;
+        Player.Health = Player.MaxHealth;
         Player.Velocity = Vector3.Zero;
-        Player.Position = new Vector3(World.SpawnBlock.X + 0.5f, World.SpawnBlock.Y + 2.1f, World.SpawnBlock.Z + 0.5f);
-        AddMessage("Вы возродились на точке спавна");
+        Player.HighestYInAir = 0f;
+        Player.FireTicks = 0f;
+        Player.Position = World.GetSafeRespawnPosition(World.SpawnBlock);
+        Ui = UiState.Playing;
+        AddMessage("Вы возродились на безопасной точке спавна");
     }
 
     // ── Создание / загрузка ──────────────────────────────────────────────────
@@ -107,10 +127,30 @@ public sealed class GameSession {
 
         if (Ui == UiState.Paused) return;
 
+        if (IsSleeping) {
+            SleepProgress += dt;
+            DayNight.TimeOfDay = (DayNight.TimeOfDay + dt * 0.22f) % 1.0f;
+            if (SleepProgress >= 2.5f) {
+                DayNight.TimeOfDay = 0.25f; // Утро!
+                IsSleeping = false;
+                Player.Health = MathF.Min(Player.MaxHealth, Player.Health + 4f);
+                AddMessage("Вы проснулись. Точка возрождения установлена.");
+            }
+        }
+
         if (Ui == UiState.Playing) {
-            Player.Update(dt, input, World, this);
-            Camera.Position = Player.Eye + new Vector3(0f, Player.BobOffset, 0f);
-            Camera.Target = Player.Eye + new Vector3(0f, Player.BobOffset, 0f) + Player.Forward;
+            if (!IsSleeping) {
+                Player.Update(dt, input, World, this);
+            }
+            var shake = Player.ScreenShake > 0.001f
+                ? new Vector3(
+                    (Random.Shared.NextSingle() - 0.5f) * Player.ScreenShake,
+                    (Random.Shared.NextSingle() - 0.5f) * Player.ScreenShake,
+                    (Random.Shared.NextSingle() - 0.5f) * Player.ScreenShake)
+                : Vector3.Zero;
+            Camera.Position = Player.Eye + new Vector3(0f, Player.BobOffset, 0f) + shake;
+            Camera.Target = Player.Eye + new Vector3(0f, Player.BobOffset, 0f) + Player.Forward + shake;
+            Camera.FovY = 70f + Player.SprintFovProgress * 10f;
             if (input.OpenInventory) Ui = UiState.Inventory;
             else if (input.OpenCrafting) Ui = UiState.Crafting;
             else if (input.Pause) Ui = UiState.Paused;
@@ -121,8 +161,12 @@ public sealed class GameSession {
             }
         }
 
-        World.EnsureLoadedAround(Player.Position);
-        World.Tick(dt);
+        if (Vector3.DistanceSquared(_lastChunkLoadPos, Player.Position) > 16.0f) {
+            _lastChunkLoadPos = Player.Position;
+            World.EnsureLoadedAround(Player.Position);
+        }
+
+        World.Tick(dt, Player);
         World.TickPickups(dt, Player);
         World.TickHostileMobs(dt, Player, this);
         World.ProcessSolverEvents();
@@ -136,6 +180,26 @@ public sealed class GameSession {
 
         DayNight.Tick(dt);
         // Фактор неба — uniform шейдера, меши не пересобираются при смене дня.
+    }
+
+    // ── Смерть и возрождение ────────────────────────────────────────────────
+
+    public void DiePlayer(string message = "Вы погибли!") {
+        if (Ui == UiState.Death) return;
+        if (!SaveSystem.KeepInventory) {
+            // Дроп всех предметов из инвентаря на месте гибели
+            var dropPos = Player.Position;
+            var cell = new Vec3i((int)MathF.Floor(dropPos.X), (int)MathF.Floor(dropPos.Y), (int)MathF.Floor(dropPos.Z));
+            for (int i = 0; i < Player.Inventory.Capacity; i++) {
+                var slot = Player.Inventory.Slots[i];
+                if (slot != null && slot.Value.Quantity > 0) {
+                    World.SpawnPickup(slot.Value.Item.Definition.Id, slot.Value.Quantity, cell);
+                }
+            }
+            Player.Inventory.Clear();
+        }
+        Ui = UiState.Death;
+        AddMessage(message);
     }
 
     // ── Сохранение ───────────────────────────────────────────────────────────

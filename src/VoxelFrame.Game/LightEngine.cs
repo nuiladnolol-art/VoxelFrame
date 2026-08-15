@@ -13,13 +13,17 @@ public static class LightEngine {
         new(1, 0, 0), new(-1, 0, 0), new(0, 1, 0), new(0, -1, 0), new(0, 0, 1), new(0, 0, -1),
     };
 
-    public static void RecomputeSun(GameChunk gc) {
+    public static void RecomputeSun(GameChunk gc, GameWorld world) {
+        int ox = gc.Coord.X * Chunk.SizeX;
+        int oz = gc.Coord.Z * Chunk.SizeZ;
         for (int lx = 0; lx < Chunk.SizeX; lx++) {
             for (int lz = 0; lz < Chunk.SizeZ; lz++) {
-                int surface = gc.Surface[gc.SurfaceIndex(lx, lz)];
+                int wx = ox + lx;
+                int wz = oz + lz;
+                int surface = world.GetColumnSurfaceHeight(wx, wz);
                 for (int ly = 0; ly < Chunk.SizeY; ly++) {
                     int wy = gc.Coord.Y * Chunk.SizeY + ly;
-                    gc.SunLight[Chunk.Index(lx, ly, lz)] = (byte)(wy >= surface ? 15 : 0);
+                    gc.SunLight[Chunk.Index(lx, ly, lz)] = (byte)(wy >= surface && surface != int.MinValue ? 15 : 0);
                 }
             }
         }

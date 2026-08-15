@@ -60,7 +60,17 @@ public sealed class HostileMob {
         AttackCooldown -= dt;
 
         // Зомби и Скелеты горят при ярком солнечном свете днём
-        var feetPos = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z));
+        var feetPos = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y - HalfSizeY + 0.1f), (int)MathF.Floor(Position.Z));
+        var feetVox = world.GetVoxel(feetPos);
+        if (feetVox.TypeId == GameData.BLava.Id) {
+            Health -= 8f * dt;
+            HurtTime = 0.3f;
+            if (Health <= 0f) {
+                Die(world, session);
+                return;
+            }
+        }
+
         byte sun = world.GetSunLight(feetPos);
         float sky = session.DayNight.SkyFactor;
         if ((Type == HostileType.Zombie || Type == HostileType.Skeleton) && sun >= 12 && sky > 0.70f) {
@@ -74,37 +84,28 @@ public sealed class HostileMob {
 
         var toPlayer = player.Position - Position;
         float dist = toPlayer.Length();
-
-        Velocity.Y -= 22f * dt;
-        bool grounded = Collision.Move(world, ref Position, new Vector3(HalfSizeX, HalfSizeY, HalfSizeZ), ref Velocity, dt);
-        if (grounded && Velocity.Y < 0f) Velocity.Y = 0f;
-
         if (dist > 64f) { Alive = false; return; } // Деспавн
+
+        Vector3 moveDir = Vector3.Zero;
+        float speed = 2.0f;
 
         if (dist < 20f) { // Агр на игрока
             var dir = Vector3.Normalize(new Vector3(toPlayer.X, 0f, toPlayer.Z));
-            float speed = Type switch {
-                HostileType.Spider => 3.4f,
-                HostileType.Creeper => 2.3f,
-                HostileType.Skeleton => (dist < 8f ? -1.5f : 2.0f), // Скелет держит дистанцию
-                _ => 2.2f
-            };
+            moveDir = dir;
 
-            Velocity.X = dir.X * speed;
-            Velocity.Z = dir.Z * speed;
-
-            // Проверка блока впереди для прыжка
-            var aheadCell = new Vec3i((int)MathF.Floor(Position.X + dir.X * 0.6f), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z + dir.Z * 0.6f));
-            if (world.IsSolidAt(aheadCell) && (grounded || Type == HostileType.Spider)) {
-                Velocity.Y = Type == HostileType.Spider ? 9.5f : 8.5f;
-            }
-
-            // Логика Крипера (начинает шипеть и тикать только если видит игрока)
-            if (Type == HostileType.Creeper) {
+            if (Type == HostileType.Spider) {
+                speed = 3.4f;
+                // Паук лазает по стенам
+                var aheadWall = new Vec3i((int)MathF.Floor(Position.X + dir.X * 0.7f), (int)MathF.Floor(Position.Y + 0.5f), (int)MathF.Floor(Position.Z + dir.Z * 0.7f));
+                if (world.IsSolidAt(aheadWall)) {
+                    Velocity.Y = 4.5f;
+                }
+            } else if (Type == HostileType.Creeper) {
+                speed = 2.4f;
                 var mobCenter = Position + new Vector3(0f, 0.45f, 0f);
                 var playerCenter = player.Position + new Vector3(0f, 0.60f, 0f);
                 bool canSeePlayer = HasLineOfSight(world, mobCenter, playerCenter) || HasLineOfSight(world, mobCenter, player.Eye);
-                if (dist < 3.2f && canSeePlayer) {
+                if (dist < 3.0f && canSeePlayer) {
                     FuseTimer += dt;
                     if (FuseTimer >= 1.5f) {
                         Explode(world, session);
@@ -114,9 +115,45 @@ public sealed class HostileMob {
                 } else {
                     FuseTimer = MathF.Max(0f, FuseTimer - dt * 1.5f);
                 }
+            } else if (Type == HostileType.Skeleton) {
+                if (dist < 7.5f) {
+                    moveDir = -dir; // Отступает назад при приближении
+                    speed = 2.0f;
+                } else if (dist <= 14f) {
+                    // Тактическое боковое смещение (стрейф)
+                    var strafe = Vector3.Cross(dir, Vector3.UnitY);
+                    moveDir = Vector3.Normalize(dir * 0.3f + strafe * 0.7f);
+                    speed = 1.6f;
+                } else {
+                    speed = 2.2f;
+                }
+            } else {
+                speed = 2.3f;
             }
 
-            // Атака Зомби и Паука (только при прямой видимости — блокирует урон сквозь стены и в коробке 1x1x2)
+            // Умный прыжок и обход препятствий
+            int aheadX = (int)MathF.Floor(Position.X + moveDir.X * (HalfSizeX + 0.35f));
+            int aheadZ = (int)MathF.Floor(Position.Z + moveDir.Z * (HalfSizeZ + 0.35f));
+            var aheadFoot = new Vec3i(aheadX, feetPos.Y, aheadZ);
+            var aheadHead = new Vec3i(aheadX, feetPos.Y + 1, aheadZ);
+            var currentHead = feetPos + new Vec3i(0, 1, 0);
+
+            if (world.IsSolidAt(aheadFoot)) {
+                if (!world.IsSolidAt(aheadHead) && !world.IsSolidAt(currentHead) && MathF.Abs(Velocity.Y) < 0.1f) {
+                    Velocity.Y = 8.5f; // Прыжок на 1 блок вверх
+                } else if (world.IsSolidAt(aheadHead)) {
+                    // Стена впереди: проверяем боковые направления для обхода (+45° / -45°)
+                    var leftDir = new Vector3(moveDir.Z, 0f, -moveDir.X);
+                    var rightDir = new Vector3(-moveDir.Z, 0f, moveDir.X);
+                    var leftCell = new Vec3i((int)MathF.Floor(Position.X + leftDir.X * 0.6f), feetPos.Y, (int)MathF.Floor(Position.Z + leftDir.Z * 0.6f));
+                    var rightCell = new Vec3i((int)MathF.Floor(Position.X + rightDir.X * 0.6f), feetPos.Y, (int)MathF.Floor(Position.Z + rightDir.Z * 0.6f));
+
+                    if (!world.IsSolidAt(leftCell)) moveDir = Vector3.Normalize(moveDir + leftDir);
+                    else if (!world.IsSolidAt(rightCell)) moveDir = Vector3.Normalize(moveDir + rightDir);
+                }
+            }
+
+            // Атака Зомби и Паука
             if ((Type == HostileType.Zombie || Type == HostileType.Spider) && dist < 1.8f && AttackCooldown <= 0f) {
                 var mobCenter = Position + new Vector3(0f, 0.35f, 0f);
                 var playerCenter = player.Position + new Vector3(0f, 0.60f, 0f);
@@ -124,12 +161,11 @@ public sealed class HostileMob {
                     AttackCooldown = 1.0f;
                     float dmg = Type == HostileType.Spider ? 3f : 4f;
                     player.Health = MathF.Max(0f, player.Health - dmg);
-                    session.AddMessage($"{(Type == HostileType.Spider ? "Паук" : "Зомби")} нанёс урон -{dmg} HP!");
                     SoundSystem.PlayHit();
                 }
             }
 
-            // Атака Скелета (стрельба из лука с проверкой прямой видимости и визуальной стрелой)
+            // Атака Скелета
             if (Type == HostileType.Skeleton && dist < 20f && dist > 1.8f && AttackCooldown <= 0f) {
                 var eyePos = Position + new Vector3(0f, 0.65f, 0f);
                 var targetPos = player.Position + new Vector3(0f, Player.EyeHeight * 0.6f, 0f);
@@ -140,18 +176,28 @@ public sealed class HostileMob {
                     var arrowDir = Vector3.Normalize(toTarget);
                     var arrowVel = arrowDir * 18f + new Vector3(0f, MathF.Min(2.5f, toDist * 0.12f), 0f);
                     world.Arrows.Add(new ArrowProjectile(eyePos + arrowDir * 0.5f, arrowVel));
-                    session.AddMessage("Скелет натянул тетиву и выстрелил стрелой!");
                 }
             }
         } else {
-            // Блуждание
-            Velocity.X = WanderDir.X * 1.0f;
-            Velocity.Z = WanderDir.Y * 1.0f;
+            // Плавное блуждание
             if (_random.NextDouble() < 0.02) {
-                float angle = (float)_random.NextDouble() * MathF.Tau;
-                WanderDir = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
+                if (_random.NextDouble() < 0.30) {
+                    WanderDir = Vector2.Zero; // Пауза
+                } else {
+                    float angle = (float)_random.NextDouble() * MathF.Tau;
+                    WanderDir = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
+                }
             }
+            moveDir = new Vector3(WanderDir.X, 0f, WanderDir.Y);
+            speed = 1.1f;
         }
+
+        Velocity.X = moveDir.X * speed;
+        Velocity.Z = moveDir.Z * speed;
+        Velocity.Y -= 22f * dt;
+
+        bool grounded = Collision.Move(world, ref Position, new Vector3(HalfSizeX, HalfSizeY, HalfSizeZ), ref Velocity, dt);
+        if (grounded && Velocity.Y < 0f) Velocity.Y = 0f;
     }
 
     public static bool HasLineOfSight(GameWorld world, Vector3 from, Vector3 to) {
@@ -175,21 +221,17 @@ public sealed class HostileMob {
         
         switch (Type) {
             case HostileType.Zombie:
-                world.SpawnPickup(GameData.FeatherItem.Id, _random.Next(1, 3), pos); // В Alpha зомби дропали перья!
-                session.AddMessage("Зомби побежден — выпало перо");
+                world.SpawnPickup(GameData.RottenFleshItem.Id, _random.Next(1, 3), pos);
                 break;
             case HostileType.Creeper:
                 world.SpawnPickup(GameData.GunpowderItem.Id, _random.Next(1, 3), pos);
-                session.AddMessage("Крипер побежден — выпал порох");
                 break;
             case HostileType.Skeleton:
                 world.SpawnPickup(GameData.ArrowItem.Id, _random.Next(1, 3), pos);
                 world.SpawnPickup(GameData.BoneItem.Id, 1, pos);
-                session.AddMessage("Скелет побежден — выпали стрелы и кость");
                 break;
             case HostileType.Spider:
                 world.SpawnPickup(GameData.StringItem.Id, _random.Next(1, 3), pos);
-                session.AddMessage("Паук побежден — выпала нить");
                 break;
         }
     }

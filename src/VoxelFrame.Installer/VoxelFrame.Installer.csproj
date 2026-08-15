@@ -8,5 +8,6 @@
     <AssemblyName>VoxelFrame-Setup</AssemblyName>
     <UseWindowsForms>true</UseWindowsForms>
     <CodePage>65001</CodePage>
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 </Project>

@@ -117,20 +117,15 @@ internal static class SmokeTest {
         Check(Math.Abs(inv.UsedVolumeM3 - (volBefore - 1.0)) < 1e-6, "объём инвентаря уменьшился ровно на 1 м³");
 
         s.Player.BreakBlock(s.World, s, at, GameData.BDirt);
+        Tick(s, 0.6f); // сбор выпавшего в мир предмета-пикапа
         Check(!s.World.IsSolidAt(at), "блок сломан");
         Check(Math.Abs(inv.UsedVolumeM3 - volBefore) < 1e-6, "объём инвентаря вернулся (масса сохранена)");
 
         // Доски: установка 2 шт (0.8 м³) → ломание возвращает 2 шт — без потери массы.
         Check(MaterialCycle(GameData.BPlanks, GameData.PlankItem, 0.8f), "цикл «доски» консервирует массу");
 
-        // Факел: установка 2 шт (0.04 м³) → блок 0.04 м³ → ломание возвращает 2 шт.
-        Check(MaterialCycle(GameData.BTorch, GameData.TorchItem, 0.04f), "цикл «факел» консервирует массу");
-
-        // Доски: установка 2 шт (0.8 м³) → ломание возвращает 2 шт — без потери массы.
-        Check(MaterialCycle(GameData.BPlanks, GameData.PlankItem, 0.8f), "цикл «доски» консервирует массу");
-
-        // Факел: установка 2 шт (0.04 м³) → блок 0.04 м³ → ломание возвращает 2 шт.
-        Check(MaterialCycle(GameData.BTorch, GameData.TorchItem, 0.04f), "цикл «факел» консервирует массу");
+        // Факел: установка 1 шт (0.02 м³) → блок 0.02 м³ → ломание возвращает 1 шт.
+        Check(MaterialCycle(GameData.BTorch, GameData.TorchItem, 0.02f), "цикл «факел» консервирует массу");
     }
 
     /// <summary>Свежая сессия: выдать N предметов, поставить блок, сломать, сверить объём.</summary>
@@ -148,6 +143,7 @@ internal static class SmokeTest {
         if (Math.Abs(s.World.GetVoxel(at).ContentVolumeM3 - contentVolumeM3) > 1e-4) return false;
 
         s.Player.BreakBlock(s.World, s, at, block);
+        Tick(s, 0.6f); // сбор выпавшего пикапа
         return inv.CountOf(item) == drop &&
                Math.Abs(inv.UsedVolumeM3 - volBefore) < 1e-6 &&
                Math.Abs(inv.UsedMassKg - volBefore * item.Material.DensityKgPerM3) < 1e-3;
@@ -260,6 +256,12 @@ internal static class SmokeTest {
         int before = w.Animals.Count;
         Tick(s, 0.5f);
         Check(w.Animals.Count >= before, "животные спавнятся");
+
+        // Гравитация животных: свинья в воздухе должна падать
+        var airPig = new Animal(AnimalType.Pig, new Vector3(w.SpawnBlock.X + 0.5f, w.SpawnBlock.Y + 10f, w.SpawnBlock.Z + 0.5f));
+        float startAirY = airPig.Position.Y;
+        airPig.Tick(0.2f, w);
+        Check(airPig.Position.Y < startAirY && airPig.Velocity.Y < 0f, "гравитация корректно действует на животных в воздухе");
 
         // Бой: свинья перед игроком.
         var pig = new Animal {
@@ -377,12 +379,12 @@ internal static class SmokeTest {
         Tick(s, 1f);
         var w = s.World;
 
-        // 1. Дроп Зомби: перья
+        // 1. Дроп Зомби: гнилая плоть
         var zombie = new HostileMob(HostileType.Zombie, s.Player.Eye + s.Player.Forward * 2f);
         w.HostileMobs.Add(zombie);
         zombie.TakeDamage(100f, w, s);
         Check(!zombie.Alive, "зомби погиб");
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.FeatherItem.Id), "с зомби выпали перья");
+        Check(w.Pickups.Any(p => p.Definition.Id == GameData.RottenFleshItem.Id), "с зомби выпала гнилая плоть");
 
         // 2. Дроп Крипера: порох
         var creeper = new HostileMob(HostileType.Creeper, s.Player.Eye + s.Player.Forward * 2f);
@@ -544,5 +546,88 @@ internal static class SmokeTest {
         var furnTiles = TextureAtlas.BlockTiles(GameData.BFurnace.Id);
         Check(furnTiles.PosZ == TextureAtlas.TFurnace && furnTiles.PosX == TextureAtlas.TStone && furnTiles.PosY == TextureAtlas.TStone,
               "печка имеет жерло спереди и камень по бокам/сверху/снизу");
+
+        // 11. Установка и разрушение 2-блочной кровати
+        var bedFootPos = new Vec3i(20, w.SpawnBlock.Y + 1, 20);
+        var bedHeadPos = bedFootPos + new Vec3i(0, 0, 1);
+        w.RemoveBlock(bedFootPos);
+        w.RemoveBlock(bedHeadPos);
+        w.PlacePlacedBlock(bedFootPos + new Vec3i(0, -1, 0), GameData.BStone, 1f);
+        w.PlacePlacedBlock(bedHeadPos + new Vec3i(0, -1, 0), GameData.BStone, 1f);
+        s.Player.Position = new Vector3(20.5f, w.SpawnBlock.Y + 1.9f, 18.5f);
+        s.Player.Yaw = 0f;
+        s.Player.Pitch = 0f;
+        s.Player.SelectedSlot = 0;
+        inv.Slots[0] = new ItemEntry(GameData.NewItem(GameData.BedItem), 1);
+        Check(s.Player.TryPlaceBlock(w, s, bedFootPos, GameData.BBed, GameData.BedItem), "кровать установлена на 2 блока");
+        Check(w.GetVoxel(bedFootPos).TypeId == GameData.BBed.Id, "в мире появилось изножье кровати");
+        Check(w.GetVoxel(bedHeadPos).TypeId == GameData.BBedHead.Id, "в мире появилось изголовье кровати");
+
+        s.Player.BreakBlock(w, s, bedFootPos, GameData.BBed);
+        Tick(s, 0.6f);
+        Check(w.GetVoxel(bedFootPos).TypeId == 0 && w.GetVoxel(bedHeadPos).TypeId == 0, "разрушение одной половины удаляет обе");
+        Check(w.Pickups.Any(p => p.Definition.Id == GameData.BedItem.Id) || inv.CountOf(GameData.BedItem) == 1, "с кровати выпал предмет кровати");
+
+        // 12. Гравитация песка при установке в воздухе
+        var airPos = new Vec3i(30, w.SpawnBlock.Y + 10, 30);
+        w.RemoveBlock(airPos);
+        w.RemoveBlock(airPos + new Vec3i(0, -1, 0));
+        s.Player.Position = new Vector3(30.5f, w.SpawnBlock.Y + 10f, 28.5f);
+        s.Player.SelectedSlot = 0;
+        inv.Slots[0] = new ItemEntry(GameData.NewItem(GameData.SandItem), 1);
+        Check(s.Player.TryPlaceBlock(w, s, airPos, GameData.BSand, GameData.SandItem), "песок установлен в воздухе");
+        Check(w.FallingBlocks.Any(fb => fb.Block.Id == GameData.BSand.Id), "песок превратился в падающий блок");
+
+        // 13. Сон: пропуск ночи и переход к рассвету
+        s.DayNight.TimeOfDay = 0.85f; // Ночь
+        s.StartSleep(bedFootPos);
+        Check(s.IsSleeping, "игрок уснул");
+        Tick(s, 3.0f);
+        Check(!s.IsSleeping, "игрок проснулся");
+        Check(Math.Abs(s.DayNight.TimeOfDay - 0.25f) < 0.05f, "наступил рассвет");
+
+        // 14. Смерть, экран смерти и KeepInventory
+        SaveSystem.KeepInventory = false;
+        inv.Slots[0] = new ItemEntry(GameData.NewItem(GameData.DiamondItem), 5);
+        s.Player.Health = 0f;
+        s.Player.Update(0.1f, PlayerInput.Idle, w, s);
+        Check(s.Ui == UiState.Death, "при смерти активируется экран смерти (UiState.Death)");
+        Check(inv.CountOf(GameData.DiamondItem) == 0, "при KeepInventory=false вещи выпадают из инвентаря");
+        Check(w.Pickups.Any(p => p.Definition.Id == GameData.DiamondItem.Id), "выпавшие алмазы лежат на месте гибели");
+        s.RespawnPlayer();
+        Check(s.Ui == UiState.Playing && s.Player.Health == s.Player.MaxHealth, "возрождение восстанавливает здоровье");
+
+        // 15. Установка блоков в воду
+        var waterPos = new Vec3i(40, w.SpawnBlock.Y, 40);
+        w.PlacePlacedBlock(waterPos, GameData.BWater, 1f);
+        inv.Slots[0] = new ItemEntry(GameData.NewItem(GameData.DirtItem), 1);
+        s.Player.SelectedSlot = 0;
+        s.Player.Position = new Vector3(40.5f, w.SpawnBlock.Y + 3f, 40.5f);
+        Check(s.Player.TryPlaceBlock(w, s, waterPos, GameData.BDirt, GameData.DirtItem), "блок земли успешно установлен в воду");
+        Check(w.GetVoxel(waterPos).TypeId == GameData.BDirt.Id, "вода заменена на землю");
+
+        // 16. Сгорание предметов в лаве
+        var lavaPos = new Vec3i(50, w.SpawnBlock.Y, 50);
+        w.PlacePlacedBlock(lavaPos, GameData.BLava, 1f);
+        var lavaItem = new ItemPickup(GameData.LogItem, 3, new Vector3(50.5f, w.SpawnBlock.Y + 0.5f, 50.5f));
+        w.Pickups.Add(lavaItem);
+        lavaItem.Tick(0.1f, w, s.Player);
+        Check(lavaItem.Quantity == 0, "предмет сгорел при попадании в лаву");
+
+        // 17. Меню настроек и сброс управления
+        KeyBinds.Forward = Raylib_cs.KeyboardKey.Up;
+        Check(KeyBinds.Forward == Raylib_cs.KeyboardKey.Up, "клавиша переназначена");
+        KeyBinds.ResetToDefaults();
+        Check(KeyBinds.Forward == Raylib_cs.KeyboardKey.W && KeyBinds.Jump == Raylib_cs.KeyboardKey.Space, "сброс управления восстановил WASD и Пробел");
+
+        Screens.InSettingsScreen = true;
+        Screens.InGraphicsScreen = false;
+        Screens.InAudioScreen = true;
+        Check(Screens.InSettingsScreen && Screens.InAudioScreen, "экран настроек звука активируется");
+        Screens.InAudioScreen = false;
+        Screens.InGameplayScreen = true;
+        Check(Screens.InGameplayScreen, "экран игрового процесса активируется");
+        Screens.InGameplayScreen = false;
+        Screens.InSettingsScreen = false;
     }
 }

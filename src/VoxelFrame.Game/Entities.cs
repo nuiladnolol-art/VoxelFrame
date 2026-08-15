@@ -22,6 +22,17 @@ public static class Collision {
     public static bool Move(GameWorld world, ref Vector3 pos, Vector3 half, ref Vector3 vel, float dt, bool sneaking = false) {
         bool onGround = false;
 
+        // Автоматическое выталкивание вверх при застревании внутри твердого блока
+        if (IntersectsSolid(world, pos - half, pos + half)) {
+            for (int step = 0; step < 24; step++) {
+                pos.Y += 0.05f;
+                if (!IntersectsSolid(world, pos - half, pos + half)) {
+                    vel.Y = 0f;
+                    break;
+                }
+            }
+        }
+
         // Если крадемся (Shift) — не даем упасть с края блока
         if (sneaking) {
             float testX = pos.X + vel.X * dt;
@@ -61,6 +72,7 @@ public sealed class ItemPickup {
     public Vector3 Position;
     public float BobPhase;
     public Vector3 Velocity;
+    public float PickupDelay = 0.3f;
 
     public ItemPickup(ItemDefinition definition, int quantity, Vector3 position) {
         Definition = definition;
@@ -75,12 +87,21 @@ public sealed class ItemPickup {
         Velocity = new Vector3(vx, vy, vz);
     }
 
-    /// <summary>Притяжение к игроку и сбор в инвентарь.</summary>
+    /// <summary>Притяжение к игроку и сбор в инвентарь (с задержкой подбора).</summary>
     public void Tick(float dt, GameWorld world, Player player) {
+        var cell = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z));
+        var vox = world.GetVoxel(cell);
+        if (vox.TypeId == GameData.BLava.Id || world.Fire.Burning.ContainsKey(cell)) {
+            Quantity = 0; // Предмет сгорает в лаве или огне!
+            return;
+        }
+
+        if (PickupDelay > 0f) PickupDelay -= dt;
+
         var to = player.Position - Position;
         float dist = to.Length();
         bool canFitAny = player.Inventory.CanFit(Definition.VolumeM3, Definition.MassKg);
-        if (canFitAny && dist < 3.2f && dist > 0.001f) {
+        if (PickupDelay <= 0f && canFitAny && dist < 3.2f && dist > 0.001f) {
             Position += to / dist * MathF.Min(5f * dt, dist);
             Velocity = Vector3.Zero;
         } else {
@@ -90,14 +111,15 @@ public sealed class ItemPickup {
             var half = new Vector3(0.15f, 0.15f, 0.15f);
             Collision.Move(world, ref Position, half, ref Velocity, dt);
         }
-        if (dist < 1.5f) {
+        if (PickupDelay <= 0f && dist < 1.5f) {
             int fit = Quantity;
             while (fit > 0) {
                 if (player.Inventory.CanFit(Definition.VolumeM3 * fit, Definition.MassKg * fit)) {
                     if (player.Inventory.TryInsert(GameData.NewItem(Definition), fit)) {
                         Quantity -= fit;
+                        SoundSystem.PlayPop();
+                        break;
                     }
-                    break;
                 }
                 fit--;
             }
@@ -105,38 +127,33 @@ public sealed class ItemPickup {
     }
 }
 
-public enum AnimalType {
-    Pig,
-    Cow,
-    Sheep
-}
+public enum AnimalType { Pig, Cow, Sheep }
 
-/// <summary>Животное (свинья, корова, овца): блуждание, гравитация, здоровье, добыча.</summary>
 public sealed class Animal {
-    public const float MaxHealth = 10f;
-    public const float HalfSize = 0.45f;
-
-    public AnimalType Type = AnimalType.Pig;
+    public AnimalType Type;
     public Vector3 Position;
     public Vector3 Velocity;
-    public float Health = MaxHealth;
+    public float Health = 10f;
     public bool Alive = true;
-    public float WanderTimer = 1f;
-    public Vector2 WanderDir;
     public float HurtTime;
+    public float WanderTimer;
+    public Vector2 WanderDir;
     public float FleeTimer;
-    private readonly Random _random = new();
-    public float AttackCooldown;
 
+    private static readonly Random _random = new();
+
+    public const float HalfSize = 0.45f;
     public float HalfSizeX => 0.45f;
     public float HalfSizeY => Type switch {
         AnimalType.Cow => 0.65f,
         AnimalType.Sheep => 0.55f,
-        _ => 0.45f
+        _ => 0.45f // Pig
     };
     public float HalfSizeZ => 0.45f;
 
-    public Animal() { }
+    public Animal() {
+        Health = 10f;
+    }
 
     public Animal(AnimalType type, Vector3 position) {
         Type = type;
@@ -154,48 +171,81 @@ public sealed class Animal {
         switch (Type) {
             case AnimalType.Pig:
                 world.SpawnPickup(GameData.RawPorkItem.Id, _random.Next(1, 4), pos);
-                session.AddMessage("Свинья побеждена — выпала свинина");
                 break;
             case AnimalType.Cow:
                 world.SpawnPickup(GameData.RawBeefItem.Id, _random.Next(1, 4), pos);
                 if (_random.NextDouble() < 0.60) {
                     world.SpawnPickup(GameData.LeatherItem.Id, _random.Next(1, 3), pos);
                 }
-                session.AddMessage("Корова побеждена — выпала говядина и кожа");
                 break;
             case AnimalType.Sheep:
                 world.SpawnPickup(GameData.WhiteWoolItem.Id, _random.Next(1, 4), pos);
-                session.AddMessage("Овца побеждена — выпала шерсть");
                 break;
         }
     }
 
-    public void Tick(float dt, GameWorld world) {
+    public void Tick(float dt, GameWorld world, Player? player = null) {
         if (!Alive) return;
         if (Position.Y < FallingBlock.VoidY) { Alive = false; return; }
         
         HurtTime -= dt;
         FleeTimer -= dt;
 
+        var feetPos = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y - HalfSizeY + 0.1f), (int)MathF.Floor(Position.Z));
+        if (world.GetVoxel(feetPos).TypeId == GameData.BLava.Id) {
+            Health -= 8f * dt;
+            HurtTime = 0.3f;
+            if (Health <= 0f) { Alive = false; return; }
+        }
+
+        // Привлечение животного едой в руках игрока (яблоки, хлеб)
+        if (player != null && FleeTimer <= 0f) {
+            ushort heldId = player.SelectedEntry?.Item.Definition.Id ?? 0;
+            bool isFood = heldId == GameData.AppleItem.Id || heldId == GameData.BreadItem.Id;
+            float dist = Vector3.Distance(Position, player.Position);
+            if (isFood && dist < 8.5f && dist > 1.5f) {
+                var toP = player.Position - Position;
+                WanderDir = Vector2.Normalize(new Vector2(toP.X, toP.Z));
+                WanderTimer = 0.8f;
+            }
+        }
+
         WanderTimer -= dt;
         if (WanderTimer <= 0f && FleeTimer <= 0f) {
-            WanderTimer = 2f + (float)_random.NextDouble() * 4f;
-            float angle = (float)_random.NextDouble() * MathF.Tau;
-            WanderDir = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
-        }
-        
-        float speed = FleeTimer > 0f ? 2.6f : 1.1f;
-        Velocity.X = WanderDir.X * speed;
-        Velocity.Z = WanderDir.Y * speed;
-        Velocity.Y -= 22f * dt;
-        bool grounded = Collision.Move(world, ref Position, new Vector3(HalfSizeX, HalfSizeY, HalfSizeZ), ref Velocity, dt);
-        if (grounded) {
-            Velocity.Y = 0f;
-            if (Velocity.X == 0f && Velocity.Z == 0f && WanderTimer > 0.2f) {
-                WanderTimer = 0.2f;
+            WanderTimer = 2.5f + (float)_random.NextDouble() * 4.5f;
+            if (_random.NextDouble() < 0.25) {
+                WanderDir = Vector2.Zero;
+            } else {
                 float angle = (float)_random.NextDouble() * MathF.Tau;
                 WanderDir = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
             }
+        }
+        
+        float speed = FleeTimer > 0f ? 2.8f : 1.1f;
+        Velocity.X = WanderDir.X * speed;
+        Velocity.Z = WanderDir.Y * speed;
+        // Проверка прыжка на 1 блок вверх при препятствии
+        if (WanderDir != Vector2.Zero) {
+            int aheadX = (int)MathF.Floor(Position.X + WanderDir.X * (HalfSizeX + 0.35f));
+            int aheadZ = (int)MathF.Floor(Position.Z + WanderDir.Y * (HalfSizeZ + 0.35f));
+            var aheadFoot = new Vec3i(aheadX, feetPos.Y, aheadZ);
+            var aheadHead = new Vec3i(aheadX, feetPos.Y + 1, aheadZ);
+            var currentHead = feetPos + new Vec3i(0, 1, 0);
+
+            if (world.IsSolidAt(aheadFoot) && !world.IsSolidAt(aheadHead) && !world.IsSolidAt(currentHead) && MathF.Abs(Velocity.Y) < 0.1f) {
+                Velocity.Y = 7.5f;
+            } else if (world.IsSolidAt(aheadFoot) && world.IsSolidAt(aheadHead)) {
+                // Стена: повернуть в другую сторону
+                float angle = (float)_random.NextDouble() * MathF.Tau;
+                WanderDir = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
+            }
+        }
+
+        Velocity.Y -= 22f * dt;
+
+        bool grounded = Collision.Move(world, ref Position, new Vector3(HalfSizeX, HalfSizeY, HalfSizeZ), ref Velocity, dt);
+        if (grounded && Velocity.Y < 0f) {
+            Velocity.Y = 0f;
         }
     }
 }

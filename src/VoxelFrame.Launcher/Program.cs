@@ -16,6 +16,7 @@ namespace VoxelFrame.Launcher;
 internal static class Program {
     [STAThread]
     private static void Main() {
+        IconHelper.EnsureAppIcons();
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new LauncherForm());
@@ -58,6 +59,9 @@ public class LauncherForm : Form {
         this.StartPosition = FormStartPosition.CenterScreen;
         this.BackColor = Color.FromArgb(24, 26, 32);
         this.ForeColor = Color.White;
+        try {
+            this.Icon = IconHelper.GetLauncherIcon();
+        } catch { }
 
         Font titleFont = new Font("Segoe UI", 22, FontStyle.Bold);
         Font subTitleFont = new Font("Segoe UI", 10, FontStyle.Regular);
@@ -82,7 +86,7 @@ public class LauncherForm : Form {
         headerPanel.Controls.Add(lblTitle);
 
         Label lblBadge = new Label {
-            Text = "BETA 0.4.0",
+            Text = "ALPHA 0.5.0",
             Font = new Font("Segoe UI", 9, FontStyle.Bold),
             ForeColor = Color.FromArgb(100, 220, 120),
             BackColor = Color.FromArgb(30, 60, 40),
@@ -303,9 +307,14 @@ public class LauncherForm : Form {
 
         if (_versions.Count == 0 || (_versions.Count == 1 && _versions[0].IsLocalDev)) {
             _versions.Add(new GameReleaseItem {
+                DisplayName = "VoxelFrame Alpha v0.5.0 (Релиз: спринт, динамический FOV, 3D-частицы)",
+                Tag = "v0.5.0",
+                IsInstalled = gameDir != null
+            });
+            _versions.Add(new GameReleaseItem {
                 DisplayName = "VoxelFrame Beta v0.4.0 (Сборка с биомами и пещерами)",
                 Tag = "v0.4.0",
-                IsInstalled = gameDir != null
+                IsInstalled = false
             });
             _versions.Add(new GameReleaseItem {
                 DisplayName = "VoxelFrame Alpha v0.3.0 (Стабильный релиз)",
@@ -666,5 +675,185 @@ public class LauncherForm : Form {
             string json = $"{{\n  \"Username\": \"{nickname}\",\n  \"ScreenMode\": {screenMode},\n  \"GitHubRepo\": \"{repo}\"\n}}";
             File.WriteAllText(path, json);
         } catch { }
+    }
+}
+
+public static class IconHelper {
+    public static Icon GetLauncherIcon() {
+        try {
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            string localIco = Path.Combine(baseDir, "launcher.ico");
+            if (File.Exists(localIco)) {
+                return new Icon(localIco);
+            }
+            using var bmp = RenderVoxelBlockIcon(64);
+            IntPtr hIcon = bmp.GetHicon();
+            return Icon.FromHandle(hIcon);
+        } catch {
+            return SystemIcons.Application;
+        }
+    }
+
+    public static void EnsureAppIcons() {
+        try {
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            string? root = FindProjectRoot();
+            if (root == null) return;
+
+            string assetsDir = Path.Combine(root, "assets");
+            Directory.CreateDirectory(assetsDir);
+
+            int[] sizes = new[] { 16, 32, 48, 64, 128, 256 };
+            List<Bitmap> bitmaps = new();
+            foreach (int s in sizes) {
+                bitmaps.Add(RenderVoxelBlockIcon(s));
+            }
+
+            // Save assets/icon.png
+            string pngPath = Path.Combine(assetsDir, "icon.png");
+            if (!File.Exists(pngPath)) {
+                bitmaps[^1].Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
+            }
+
+            // Save multi-size .ico files
+            string[] targetIcos = new[] {
+                Path.Combine(assetsDir, "icon.ico"),
+                Path.Combine(root, "src", "VoxelFrame.Game", "app.ico"),
+                Path.Combine(root, "src", "VoxelFrame.Launcher", "launcher.ico"),
+                Path.Combine(root, "src", "VoxelFrame.Installer", "app.ico"),
+                Path.Combine(baseDir, "launcher.ico")
+            };
+
+            foreach (var path in targetIcos) {
+                try {
+                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    SaveMultiSizeIco(bitmaps, path);
+                } catch { }
+            }
+
+            foreach (var bmp in bitmaps) bmp.Dispose();
+        } catch { }
+    }
+
+    private static string? FindProjectRoot() {
+        string? dir = AppDomain.CurrentDomain.BaseDirectory;
+        for (int i = 0; i < 8 && dir != null; i++) {
+            if (Directory.Exists(Path.Combine(dir, "src")) && Directory.Exists(Path.Combine(dir, "assets")))
+                return Path.GetFullPath(dir);
+            dir = Path.GetDirectoryName(dir);
+        }
+        return null;
+    }
+
+    public static Bitmap RenderVoxelBlockIcon(int size) {
+        var bmp = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+
+        float cx = size / 2f;
+        float cy = size / 2f - size * 0.03f;
+        float r = size * 0.44f;
+        float rx = r * 0.866f;
+        float ry = r * 0.5f;
+
+        // Top face (Grass)
+        PointF[] topFace = new[] {
+            new PointF(cx, cy - r),
+            new PointF(cx + rx, cy - ry),
+            new PointF(cx, cy),
+            new PointF(cx - rx, cy - ry)
+        };
+        using (var topBrush = new SolidBrush(Color.FromArgb(105, 185, 60))) {
+            g.FillPolygon(topBrush, topFace);
+        }
+
+        // Left face (Dirt with grass overhang)
+        PointF[] leftFace = new[] {
+            new PointF(cx - rx, cy - ry),
+            new PointF(cx, cy),
+            new PointF(cx, cy + r),
+            new PointF(cx - rx, cy + ry)
+        };
+        using (var leftBrush = new SolidBrush(Color.FromArgb(135, 95, 55))) {
+            g.FillPolygon(leftBrush, leftFace);
+        }
+        float overhangH = r * 0.32f;
+        PointF[] leftGrass = new[] {
+            new PointF(cx - rx, cy - ry),
+            new PointF(cx, cy),
+            new PointF(cx, cy + overhangH),
+            new PointF(cx - rx * 0.45f, cy - ry + overhangH * 1.3f),
+            new PointF(cx - rx, cy - ry + overhangH)
+        };
+        using (var leftGrassBrush = new SolidBrush(Color.FromArgb(88, 162, 48))) {
+            g.FillPolygon(leftGrassBrush, leftGrass);
+        }
+
+        // Right face (Dirt shaded with grass overhang)
+        PointF[] rightFace = new[] {
+            new PointF(cx, cy),
+            new PointF(cx + rx, cy - ry),
+            new PointF(cx + rx, cy + ry),
+            new PointF(cx, cy + r)
+        };
+        using (var rightBrush = new SolidBrush(Color.FromArgb(98, 68, 38))) {
+            g.FillPolygon(rightBrush, rightFace);
+        }
+        PointF[] rightGrass = new[] {
+            new PointF(cx, cy),
+            new PointF(cx + rx, cy - ry),
+            new PointF(cx + rx, cy - ry + overhangH),
+            new PointF(cx + rx * 0.45f, cy - ry + overhangH * 1.3f),
+            new PointF(cx, cy + overhangH)
+        };
+        using (var rightGrassBrush = new SolidBrush(Color.FromArgb(68, 132, 36))) {
+            g.FillPolygon(rightGrassBrush, rightGrass);
+        }
+
+        // 3D Isometric Outline
+        using (var pen = new Pen(Color.FromArgb(35, 22, 14), Math.Max(1.2f, size / 48f))) {
+            g.DrawPolygon(pen, topFace);
+            g.DrawPolygon(pen, leftFace);
+            g.DrawPolygon(pen, rightFace);
+        }
+
+        return bmp;
+    }
+
+    public static void SaveMultiSizeIco(List<Bitmap> bitmaps, string filePath) {
+        using var ms = new MemoryStream();
+        using var bw = new BinaryWriter(ms);
+
+        bw.Write((ushort)0); // idReserved
+        bw.Write((ushort)1); // idType (1 = Icon)
+        bw.Write((ushort)bitmaps.Count); // idCount
+
+        int offset = 6 + 16 * bitmaps.Count;
+        List<byte[]> pngs = new();
+        foreach (var bmp in bitmaps) {
+            using var pngMs = new MemoryStream();
+            bmp.Save(pngMs, System.Drawing.Imaging.ImageFormat.Png);
+            byte[] pngData = pngMs.ToArray();
+            pngs.Add(pngData);
+
+            bw.Write((byte)(bmp.Width >= 256 ? 0 : bmp.Width));
+            bw.Write((byte)(bmp.Height >= 256 ? 0 : bmp.Height));
+            bw.Write((byte)0); // Color count
+            bw.Write((byte)0); // Reserved
+            bw.Write((ushort)1); // Color planes
+            bw.Write((ushort)32); // Bits per pixel
+            bw.Write((uint)pngData.Length); // Size of image data
+            bw.Write((uint)offset); // Offset of image data
+            offset += pngData.Length;
+        }
+
+        foreach (var png in pngs) {
+            bw.Write(png);
+        }
+
+        bw.Flush();
+        File.WriteAllBytes(filePath, ms.ToArray());
     }
 }

@@ -125,6 +125,16 @@ public static class Hud {
             Raylib.DrawRectangleRec(new Rectangle(rect.X, rect.Y, rect.Width * player.BreakProgress / player.BreakDuration, rect.Height),
                 Color.White);
         }
+
+        // Анимация сна (затемнение и плавный переход к утру)
+        if (session.IsSleeping) {
+            float alphaFactor = MathF.Sin(MathF.Min(1f, session.SleepProgress / 2.5f) * MathF.PI);
+            byte overlayAlpha = (byte)(235 * Math.Clamp(alphaFactor * 1.5f, 0f, 1f));
+            Raylib.DrawRectangle(0, 0, w, h, new Color((byte)5, (byte)5, (byte)15, overlayAlpha));
+            string sleepText = "Сон... Пропуск ночи";
+            float tw = Fonts.Measure(sleepText, 28f);
+            Fonts.DrawShadowed(sleepText, w / 2f - tw / 2f, h / 2f - 14f, 28f, new Color((byte)255, (byte)255, (byte)255, overlayAlpha));
+        }
     }
 
     private static void DrawStatusRow(byte filledTile, byte emptyTile, float xStart, float y, float size, float spacing, float value) {

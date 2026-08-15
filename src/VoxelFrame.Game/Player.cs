@@ -11,7 +11,6 @@ namespace VoxelFrame.Game;
 /// </summary>
 public sealed class Player {
     public const float WalkSpeed = 4.3f;
-    public const float SprintSpeed = 6.2f;
     public const float JumpSpeed = 8.0f;
     public const float Gravity = 25f;
     public const float EyeHeight = 0.72f;
@@ -43,8 +42,12 @@ public sealed class Player {
     public float PlaceCooldown;
     public float HighestYInAir;
     public float AirSupply = 10f;
+    public float FireTicks;
     /// <summary>Урон от застревания в блоках.</summary>
     public float StuckTimer;
+    public bool IsSprinting { get; private set; }
+    public float SprintFovProgress { get; private set; }
+    public float ScreenShake { get; set; }
 
     public Vector3 Forward => new(
         MathF.Cos(Pitch) * MathF.Sin(Yaw),
@@ -78,19 +81,30 @@ public sealed class Player {
             SlotToastText = SelectedItem?.Name ?? "";
         }
         SlotToastTimer = MathF.Max(0f, SlotToastTimer - dt);
+        ScreenShake = MathF.Max(0f, ScreenShake - dt * 3.5f);
 
-        // Движение (ходьба, приседание, плавание).
+        // Движение (каноничная ходьба, спринт, приседание, плавание).
         float targetEyeHeight = EyeHeight;
         float speed = WalkSpeed;
         if (input.Crouch) {
             targetEyeHeight = 0.35f;
             speed = WalkSpeed * 0.35f;
+            IsSprinting = false;
+            SprintFovProgress = MathF.Max(0f, SprintFovProgress - dt * 5f);
+        } else if (input.Sprint && input.MoveZ > 0.1f) {
+            IsSprinting = true;
+            speed = WalkSpeed * 1.35f;
+            SprintFovProgress = MathF.Min(1f, SprintFovProgress + dt * 4f);
+        } else {
+            IsSprinting = false;
+            SprintFovProgress = MathF.Max(0f, SprintFovProgress - dt * 5f);
         }
         CurrentEyeHeight += (targetEyeHeight - CurrentEyeHeight) * MathF.Min(1f, dt * 15f);
 
         var feetBlock = world.GetVoxel(new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z)));
         var eyeVoxel = world.GetVoxel(new Vec3i((int)MathF.Floor(Eye.X), (int)MathF.Floor(Eye.Y), (int)MathF.Floor(Eye.Z)));
         bool inWater = feetBlock.TypeId == GameData.BWater.Id || eyeVoxel.TypeId == GameData.BWater.Id;
+        bool inLava = feetBlock.TypeId == GameData.BLava.Id || eyeVoxel.TypeId == GameData.BLava.Id;
 
         var forwardH = new Vector3(Forward.X, 0f, Forward.Z);
         if (forwardH.LengthSquared() > 0.001f) forwardH = Vector3.Normalize(forwardH);
@@ -98,17 +112,36 @@ public sealed class Player {
         var wish = right * input.MoveX + forwardH * input.MoveZ;
         if (wish.LengthSquared() > 1f) wish = Vector3.Normalize(wish);
 
+        bool wasOnGround = OnGround;
+
         if (inWater) {
+            FireTicks = 0f; // Вода мгновенно тушит огонь
             speed *= 0.65f;
             Velocity.X = wish.X * speed;
             Velocity.Z = wish.Z * speed;
             Velocity.Y -= 6f * dt; // уменьшенная гравитация в воде
             if (input.Jump) {
-                Velocity.Y = 4.0f; // всплытие
+                bool nearSurface = eyeVoxel.TypeId != GameData.BWater.Id;
+                Velocity.Y = nearSurface ? JumpSpeed * 0.85f : 4.2f;
             }
             Velocity.X *= MathF.Exp(-2.5f * dt);
             Velocity.Z *= MathF.Exp(-2.5f * dt);
             HighestYInAir = Position.Y; // вода гасит урон от падения
+            OnGround = Collision.Move(world, ref Position, HalfExtents, ref Velocity, dt, false);
+        } else if (inLava) {
+            FireTicks = MathF.Max(FireTicks, 8.0f); // Поджигает на 8 секунд
+            Health = MathF.Max(0f, Health - dt * 8.0f); // Урон от лавы
+            ScreenShake = MathF.Min(0.35f, ScreenShake + dt * 0.4f);
+            speed *= 0.35f;
+            Velocity.X = wish.X * speed;
+            Velocity.Z = wish.Z * speed;
+            Velocity.Y -= 4f * dt;
+            if (input.Jump) {
+                Velocity.Y = 3.2f;
+            }
+            Velocity.X *= MathF.Exp(-4f * dt);
+            Velocity.Z *= MathF.Exp(-4f * dt);
+            HighestYInAir = Position.Y;
             OnGround = Collision.Move(world, ref Position, HalfExtents, ref Velocity, dt, false);
         } else {
             Velocity.X = wish.X * speed;
@@ -120,21 +153,28 @@ public sealed class Player {
 
         if (OnGround && Velocity.Y < 0f) Velocity.Y = 0f;
 
-        // Звуки шагов при ходьбе по земле
+        // Пыль при приземлении
+        if (!wasOnGround && OnGround && !inWater && !inLava) {
+            world.SpawnDust(Position - new Vector3(0f, HalfExtents.Y, 0f), 5);
+        }
+
+        // Звуки шагов и пыль при спринте
         if (OnGround && (Velocity.X != 0f || Velocity.Z != 0f) && !input.Crouch) {
             if (BobTimer % MathF.PI < 0.2f) {
                 SoundSystem.PlayStep();
+                if (IsSprinting) world.SpawnDust(Position - new Vector3(0f, HalfExtents.Y, 0f), 2);
             }
         }
 
         // Урон от падения
-        if (!OnGround && !inWater) {
+        if (!OnGround && !inWater && !inLava) {
             if (Position.Y > HighestYInAir) HighestYInAir = Position.Y;
         } else if (OnGround) {
             float fallDist = HighestYInAir - Position.Y;
             if (fallDist > 3.5f) {
                 float fallDmg = MathF.Floor((fallDist - 3f) * 2f);
                 Health = MathF.Max(0f, Health - fallDmg);
+                ScreenShake = MathF.Min(0.35f, ScreenShake + 0.18f);
                 session.AddMessage($"Урон от падения: -{fallDmg} HP");
                 SoundSystem.PlayHit();
             }
@@ -170,12 +210,10 @@ public sealed class Player {
             StuckTimer = 0f;
         }
 
-        // Head bobbing logic.
+        // Head bobbing (классическое покачивание камеры)
         if (OnGround && (input.MoveX != 0f || input.MoveZ != 0f) && !input.Crouch) {
-            float bobSpeed = input.Sprint ? SprintSpeed * 2.2f : WalkSpeed * 2.2f;
-            BobTimer += dt * bobSpeed;
-            float bobAmp = input.Sprint ? 0.08f : 0.04f;
-            BobOffset = MathF.Sin(BobTimer) * bobAmp;
+            BobTimer += dt * WalkSpeed * 2.2f;
+            BobOffset = MathF.Sin(BobTimer) * 0.04f;
         } else {
             BobTimer = 0f;
             BobOffset += (0f - BobOffset) * MathF.Min(1f, dt * 8f);
@@ -261,13 +299,12 @@ public sealed class Player {
                 if (entry.Value.Quantity > 1) {
                     Inventory.InsertAt(SelectedSlot, entry.Value with { Quantity = entry.Value.Quantity - 1 });
                 }
-                var dropPos = Eye + Forward * 0.8f;
-                world.Pickups.Add(new ItemPickup(entry.Value.Item.Definition, 1, dropPos));
-                if (world.Pickups.Count > 0) {
-                    var p = world.Pickups[^1];
-                    p.Velocity = Forward * 4.5f + new Vector3(0f, 2.0f, 0f);
-                }
-                session.AddMessage($"Выброшено: {entry.Value.Item.Definition.Name}");
+                var dropPos = Eye + Forward * 0.5f;
+                var pickup = new ItemPickup(entry.Value.Item.Definition, 1, dropPos) {
+                    PickupDelay = 1.2f,
+                    Velocity = Forward * 5.0f + new Vector3(0f, 2.0f, 0f)
+                };
+                world.Pickups.Add(pickup);
             }
         }
 
@@ -276,7 +313,7 @@ public sealed class Player {
         bool wantUse = input.UsePressed || (input.UseHeld && PlaceCooldown <= 0f);
         if (wantUse) {
             PlaceCooldown = 0.25f;
-            // Проверка ПКМ на верстак / печку
+            // Проверка ПКМ на верстак / печку / сундук / кровать
             if (input.UsePressed && session.HasTarget) {
                 var targetVox = world.GetVoxel(session.TargetBlock);
                 if (targetVox.TypeId == GameData.BWorkbench.Id) {
@@ -286,6 +323,30 @@ public sealed class Player {
                     session.ActiveFurnacePos = session.TargetBlock;
                     session.Ui = UiState.Furnace;
                     wantUse = false;
+                } else if (targetVox.TypeId == GameData.BChest.Id) {
+                    session.ActiveChestPos = session.TargetBlock;
+                    session.Ui = UiState.Chest;
+                    wantUse = false;
+                } else if (targetVox.TypeId == GameData.BBed.Id || targetVox.TypeId == GameData.BBedHead.Id) {
+                    float tod = session.DayNight.TimeOfDay;
+                    bool isNight = tod > 0.75f || tod < 0.22f;
+
+                    bool hostileNearby = false;
+                    foreach (var m in world.HostileMobs) {
+                        if (m.Alive && Vector3.Distance(m.Position, Position) < 8.0f) {
+                            hostileNearby = true;
+                            break;
+                        }
+                    }
+
+                    if (hostileNearby) {
+                        session.AddMessage("Вы не можете спать: рядом бродят монстры!");
+                    } else if (isNight) {
+                        session.StartSleep(session.TargetBlock);
+                    } else {
+                        session.AddMessage("Вы можете спать только ночью");
+                    }
+                    wantUse = false;
                 }
             }
             if (wantUse && SelectedItem is { } item) {
@@ -293,12 +354,15 @@ public sealed class Player {
                     if (input.UsePressed && Health < MaxHealth) {
                         if (TryConsumeSelected(item, 1)) {
                             Health = MathF.Min(MaxHealth, Health + heal);
-                            session.AddMessage($"Съедено: {item.Name} (+{heal:0} HP)");
                             SoundSystem.PlayEat();
                         }
                     }
                 } else if (GameData.TryGetBlockByItem(item.Id, out var block)) {
-                    TryPlaceBlock(world, session, placeCell, block!, item);
+                    var targetVox = world.GetVoxel(session.TargetBlock);
+                    Vec3i targetPlace = (targetVox.TypeId == GameData.BWater.Id || targetVox.TypeId == GameData.BLava.Id)
+                        ? session.TargetBlock
+                        : placeCell;
+                    TryPlaceBlock(world, session, targetPlace, block!, item);
                 }
             }
         }
@@ -307,7 +371,11 @@ public sealed class Player {
     }
 
     private void TickVitals(float dt, GameSession session) {
-        if (Health <= 0f) session.RespawnPlayer();
+        if (FireTicks > 0f) {
+            FireTicks = MathF.Max(0f, FireTicks - dt);
+            Health = MathF.Max(0f, Health - dt * 1.5f);
+        }
+        if (Health <= 0f) session.DiePlayer();
     }
 
     // ── Ломание блоков ───────────────────────────────────────────────────────
@@ -318,13 +386,18 @@ public sealed class Player {
         world.RemoveBlock(pos);
         SoundSystem.PlayDig();
 
-        // Проверка песка/гравия выше — падение от гравитации!
-        var abovePos = pos + new Vec3i(0, 1, 0);
-        var aboveVoxel = world.GetVoxel(abovePos);
-        if (aboveVoxel.TypeId == GameData.BSand.Id || aboveVoxel.TypeId == GameData.BGravel.Id) {
-            var aboveBlock = GameData.GetBlock(aboveVoxel.TypeId);
-            world.RemoveBlock(abovePos);
-            world.FallingBlocks.Add(new FallingBlock(aboveBlock, new Vector3(abovePos.X + 0.5f, abovePos.Y + 0.5f, abovePos.Z + 0.5f)));
+        // Проверка песка/гравия выше — каскадное падение от гравитации!
+        var curAbove = pos + new Vec3i(0, 1, 0);
+        while (true) {
+            var aboveVoxel = world.GetVoxel(curAbove);
+            if (aboveVoxel.TypeId == GameData.BSand.Id || aboveVoxel.TypeId == GameData.BGravel.Id) {
+                var aboveBlock = GameData.GetBlock(aboveVoxel.TypeId);
+                world.RemoveBlock(curAbove);
+                world.FallingBlocks.Add(new FallingBlock(aboveBlock, new Vector3(curAbove.X + 0.5f, curAbove.Y + 0.5f, curAbove.Z + 0.5f)));
+                curAbove += new Vec3i(0, 1, 0);
+            } else {
+                break;
+            }
         }
 
         // Износ прочности инструмента
@@ -346,19 +419,12 @@ public sealed class Player {
         if (canHarvest) {
             int dropCount = block.DropItemCount;
             if (block.DropItemId != 0 && GameData.Items.TryGetValue(block.DropItemId, out var drop)) {
-                if (!Inventory.TryInsert(GameData.NewItem(drop), dropCount)) {
-                    world.SpawnPickup(drop.Id, dropCount, pos);
-                    session.AddMessage("Инвентарь полон — предмет упал на землю");
-                }
+                world.SpawnPickup(drop.Id, dropCount, pos);
             } else if (block.Id == GameData.BLeaves.Id) {
                 double roll = DropRng.NextDouble();
                 ItemDefinition? leafDrop = roll < 0.12 ? GameData.AppleItem : roll < 0.30 ? GameData.StickItem : null;
                 if (leafDrop != null) {
-                    if (!Inventory.TryInsert(GameData.NewItem(leafDrop), 1)) {
-                        world.SpawnPickup(leafDrop.Id, 1, pos);
-                    } else {
-                        session.AddMessage($"Выпало с листвы: {leafDrop.Name}");
-                    }
+                    world.SpawnPickup(leafDrop.Id, 1, pos);
                 }
             }
         }
@@ -385,8 +451,11 @@ public sealed class Player {
     public bool TryPlaceBlock(GameWorld world, GameSession session, Vec3i cell, BlockType block, ItemDefinition item) {
         var existing = world.GetVoxel(cell);
         if (existing.TypeId != 0) {
-            var eb = GameData.GetBlock(existing.TypeId);
-            if (eb.IsSolid || eb.IsOpaque) return false;
+            bool isFluid = existing.TypeId == GameData.BWater.Id || existing.TypeId == GameData.BLava.Id;
+            if (!isFluid) {
+                var eb = GameData.GetBlock(existing.TypeId);
+                if (eb.IsSolid || eb.IsOpaque) return false;
+            }
         }
         var center = new Vector3(cell.X + 0.5f, cell.Y + 0.5f, cell.Z + 0.5f);
         var min = center - new Vector3(0.25f, 0.25f, 0.25f);
@@ -396,9 +465,53 @@ public sealed class Player {
         if (min.X < pmax.X && max.X > pmin.X && min.Y < pmax.Y && max.Y > pmin.Y && min.Z < pmax.Z && max.Z > pmin.Z)
             return false;
 
-        int need = block.PlaceItemCount;
-        if (TryConsumeSelected(item, need)) {
-            world.PlacePlacedBlock(cell, block, block.PlaceContentVolumeM3);
+        // Вычисляем горизонтальную ориентацию блока (facing: 0..3), чтобы передняя сторона смотрела на игрока
+        byte facing = 0;
+        Vec3i forwardH;
+        if (MathF.Abs(Forward.X) > MathF.Abs(Forward.Z)) {
+            if (Forward.X > 0) { facing = 1; forwardH = new Vec3i(1, 0, 0); }
+            else { facing = 3; forwardH = new Vec3i(-1, 0, 0); }
+        } else {
+            if (Forward.Z > 0) { facing = 2; forwardH = new Vec3i(0, 0, 1); }
+            else { facing = 0; forwardH = new Vec3i(0, 0, -1); }
+        }
+
+        // Специальная установка 2-блочной кровати (изножье + изголовье)
+        if (block.Id == GameData.BBed.Id) {
+            var headCell = cell + forwardH;
+            var exHead = world.GetVoxel(headCell);
+            if (exHead.TypeId != 0 && (GameData.GetBlock(exHead.TypeId).IsSolid || GameData.GetBlock(exHead.TypeId).IsOpaque))
+                return false;
+            if (!world.IsSolidAt(cell + new Vec3i(0, -1, 0)) || !world.IsSolidAt(headCell + new Vec3i(0, -1, 0)))
+                return false;
+
+            int need = block.PlaceItemCount;
+            if (TryConsumeSelected(item, need)) {
+                world.PlacePlacedBlock(cell, GameData.BBed, block.PlaceContentVolumeM3, facing);
+                world.PlacePlacedBlock(headCell, GameData.BBedHead, block.PlaceContentVolumeM3, facing);
+                SoundSystem.PlayPlace();
+                return true;
+            }
+            return false;
+        }
+
+        // Гравитация песка и гравия при установке в воздухе
+        if (block.Id == GameData.BSand.Id || block.Id == GameData.BGravel.Id) {
+            var below = cell + new Vec3i(0, -1, 0);
+            if (!world.IsSolidAt(below)) {
+                int need = block.PlaceItemCount;
+                if (TryConsumeSelected(item, need)) {
+                    world.FallingBlocks.Add(new FallingBlock(block, new Vector3(cell.X + 0.5f, cell.Y + 0.5f, cell.Z + 0.5f)));
+                    SoundSystem.PlayPlace();
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        int needNormal = block.PlaceItemCount;
+        if (TryConsumeSelected(item, needNormal)) {
+            world.PlacePlacedBlock(cell, block, block.PlaceContentVolumeM3, facing);
             SoundSystem.PlayPlace();
             return true;
         }
@@ -424,7 +537,14 @@ public sealed class Player {
         }
         if (best == null || bestDist > 3.5f) return;
         AttackTimer = AttackCooldown;
-        best.Health -= GameData.GetWeaponDamage(SelectedItem?.Id ?? 0);
+        bool isCrit = !OnGround && Velocity.Y < -0.2f;
+        float dmg = GameData.GetWeaponDamage(SelectedItem?.Id ?? 0);
+        if (isCrit) {
+            dmg *= 1.5f;
+            session.AddMessage("Критический удар! ×1.5");
+            world.SpawnCrit(best.Position + new Vector3(0f, 0.4f, 0f), 12);
+        }
+        best.Health -= dmg;
         best.HurtTime = 0.5f;
         best.FleeTimer = 2.0f;
         var push = best.Position - Position;
@@ -444,7 +564,14 @@ public sealed class Player {
     public void AttackHostile(HostileMob mob, GameWorld world, GameSession session) {
         if (AttackTimer > 0f) return;
         AttackTimer = AttackCooldown;
-        mob.Health -= GameData.GetWeaponDamage(SelectedItem?.Id ?? 0);
+        bool isCrit = !OnGround && Velocity.Y < -0.2f;
+        float dmg = GameData.GetWeaponDamage(SelectedItem?.Id ?? 0);
+        if (isCrit) {
+            dmg *= 1.5f;
+            session.AddMessage("Критический удар! ×1.5");
+            world.SpawnCrit(mob.Position + new Vector3(0f, 0.5f, 0f), 14);
+        }
+        mob.Health -= dmg;
         mob.HurtTime = 0.4f;
         var push = mob.Position - Position;
         if (push.LengthSquared() > 0.001f) {

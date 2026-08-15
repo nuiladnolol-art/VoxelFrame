@@ -40,6 +40,10 @@ public class InstallerForm : Form {
         this.StartPosition = FormStartPosition.CenterScreen;
         this.BackColor = Color.FromArgb(24, 26, 32);
         this.ForeColor = Color.White;
+        try {
+            string ico = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app.ico");
+            if (File.Exists(ico)) this.Icon = new Icon(ico);
+        } catch { }
 
         Font titleFont = new Font("Segoe UI", 20, FontStyle.Bold);
         Font subTitleFont = new Font("Segoe UI", 10, FontStyle.Regular);

@@ -25,6 +25,7 @@ public sealed class GameWorld : IDisposable {
     public readonly List<ArrowProjectile> Arrows = new();
     public readonly List<FallingBlock> FallingBlocks = new();
     public readonly Dictionary<Vec3i, FurnaceData> Furnaces = new();
+    public readonly Dictionary<Vec3i, Container> Chests = new();
     public Vec3i SpawnBlock;
 
     private readonly WorldGrid _grid = new();
@@ -122,6 +123,18 @@ public sealed class GameWorld : IDisposable {
         return v.TypeId != 0 && GameData.GetBlock(v.TypeId).IsOpaque;
     }
 
+    public int GetColumnSurfaceHeight(int wx, int wz) {
+        int cx = wx >> 5, cz = wz >> 5;
+        int lx = wx & 31, lz = wz & 31;
+        for (int cy = 3; cy >= -2; cy--) {
+            if (_chunks.TryGetValue(new Vec3i(cx, cy, cz), out var gc)) {
+                int s = gc.Surface[gc.SurfaceIndex(lx, lz)];
+                if (s != int.MinValue) return s;
+            }
+        }
+        return int.MinValue;
+    }
+
     public byte GetBlockLight(Vec3i w) {
         var gc = TryGetChunk(Chunk.CoordOf(w));
         return gc == null ? (byte)0 : gc.BlockLight[Chunk.Index(w.X & 31, w.Y & 31, w.Z & 31)];
@@ -134,14 +147,15 @@ public sealed class GameWorld : IDisposable {
 
     // ── Запись блоков (единый путь: мир → физика → освещение → меши) ─────────
 
-    /// <summary>VoxelData установленного игроком блока: точные масса и объём.</summary>
-    public static VoxelData MakePlacedVoxel(BlockType block, float contentVolumeM3) {
+    /// <summary>VoxelData установленного игроком блока: точные масса, объём и ориентация (facing).</summary>
+    public static VoxelData MakePlacedVoxel(BlockType block, float contentVolumeM3, byte facing = 0) {
         var flags = VoxelFlags.None;
         if (block.IsSolid) flags |= VoxelFlags.Solid;
         if (block.LoadCapacityKN > 0 && block.IsSolid) flags |= VoxelFlags.Structural;
         return new VoxelData {
             TypeId = block.Id,
             Flags = flags,
+            SubGridLayerMask = facing,
             Weight = (float)block.Material.MassOf(contentVolumeM3),
             ContentVolumeM3 = contentVolumeM3,
             LoadBearingCapacity = block.LoadCapacityKN * (contentVolumeM3 / 1f),
@@ -149,11 +163,22 @@ public sealed class GameWorld : IDisposable {
         };
     }
 
-    public void PlacePlacedBlock(Vec3i w, BlockType block, float contentVolumeM3) {
-        SetVoxelInternal(w, MakePlacedVoxel(block, contentVolumeM3));
+    public void PlacePlacedBlock(Vec3i w, BlockType block, float contentVolumeM3, byte facing = 0) {
+        SetVoxelInternal(w, MakePlacedVoxel(block, contentVolumeM3, facing));
     }
 
+    public event Action<Vec3i, ushort>? OnBlockRemoved;
+    public event Action<Vector3, int>? OnDustSpawned;
+    public event Action<Vector3, int>? OnCritSpawned;
+
+    public void SpawnDust(Vector3 pos, int count = 4) => OnDustSpawned?.Invoke(pos, count);
+    public void SpawnCrit(Vector3 pos, int count = 14) => OnCritSpawned?.Invoke(pos, count);
+
     public void RemoveBlock(Vec3i w) {
+        var curVox = GetVoxel(w);
+        if (curVox.TypeId != 0) {
+            OnBlockRemoved?.Invoke(w, curVox.TypeId);
+        }
         Fire.Extinguish(w);
         if (Furnaces.Remove(w, out var furnace)) {
             if (furnace.Input.HasValue && furnace.Input.Value.Quantity > 0)
@@ -163,7 +188,87 @@ public sealed class GameWorld : IDisposable {
             if (furnace.Output.HasValue && furnace.Output.Value.Quantity > 0)
                 SpawnPickup(furnace.Output.Value.Item.Definition.Id, furnace.Output.Value.Quantity, w);
         }
+        if (Chests.Remove(w, out var chestInv)) {
+            for (int i = 0; i < chestInv.Slots.Length; i++) {
+                var entry = chestInv.Slots[i];
+                if (entry.HasValue && entry.Value.Quantity > 0) {
+                    SpawnPickup(entry.Value.Item.Definition.Id, entry.Value.Quantity, w);
+                }
+            }
+        }
+
         SetVoxelInternal(w, VoxelData.Air);
+
+        // Связанное удаление парной части кровати
+        if (curVox.TypeId == GameData.BBed.Id || curVox.TypeId == GameData.BBedHead.Id) {
+            Vec3i[] cardDirs = { new(1, 0, 0), new(-1, 0, 0), new(0, 0, 1), new(0, 0, -1) };
+            foreach (var d in cardDirs) {
+                var otherPos = w + d;
+                var otherVox = GetVoxel(otherPos);
+                if (curVox.TypeId == GameData.BBed.Id && otherVox.TypeId == GameData.BBedHead.Id) {
+                    SetVoxelInternal(otherPos, VoxelData.Air);
+                    break;
+                } else if (curVox.TypeId == GameData.BBedHead.Id && otherVox.TypeId == GameData.BBed.Id) {
+                    SetVoxelInternal(otherPos, VoxelData.Air);
+                    break;
+                }
+            }
+        }
+    }
+
+    public Container GetOrCreateChest(Vec3i pos) {
+        if (Chests.TryGetValue(pos, out var inv)) return inv;
+        var newInv = new Container(1000000.0, 1000000.0);
+        // Если сундук сгенерирован в шахте, наполняем каноничным шахтным лутом
+        if (pos.Y >= 17 && pos.Y <= 20) {
+            var rng = new Random(Seed ^ (pos.X * 73856093 ^ pos.Y * 19349663 ^ pos.Z * 83492791));
+            newInv.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.IronIngotItem), rng.Next(1, 5)));
+            newInv.InsertAt(1, new ItemEntry(GameData.NewItem(GameData.CoalItem), rng.Next(3, 9)));
+            newInv.InsertAt(2, new ItemEntry(GameData.NewItem(GameData.TorchItem), rng.Next(4, 13)));
+            newInv.InsertAt(3, new ItemEntry(GameData.NewItem(GameData.BreadItem), rng.Next(1, 4)));
+            newInv.InsertAt(4, new ItemEntry(GameData.NewItem(GameData.StringItem), rng.Next(1, 5)));
+            if (rng.NextDouble() < 0.25)
+                newInv.InsertAt(8, new ItemEntry(GameData.NewItem(GameData.GoldIngotItem), rng.Next(1, 3)));
+            if (rng.NextDouble() < 0.10)
+                newInv.InsertAt(13, new ItemEntry(GameData.NewItem(GameData.DiamondItem), 1));
+        }
+        Chests[pos] = newInv;
+        return newInv;
+    }
+
+    /// <summary>Поиск безопасной точки возрождения игрока без риска застрять в блоках или упасть в лаву/бездну.</summary>
+    public Vector3 GetSafeRespawnPosition(Vec3i baseSpawn) {
+        for (int r = 0; r <= 6; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    int wx = baseSpawn.X + dx;
+                    int wz = baseSpawn.Z + dz;
+                    for (int wy = 120; wy >= 2; wy--) {
+                        var footPos = new Vec3i(wx, wy, wz);
+                        var belowPos = new Vec3i(wx, wy - 1, wz);
+                        var headPos = new Vec3i(wx, wy + 1, wz);
+
+                        var belowVox = GetVoxel(belowPos);
+                        var footVox = GetVoxel(footPos);
+                        var headVox = GetVoxel(headPos);
+
+                        if (belowVox.TypeId != 0 && belowVox.TypeId != GameData.BLava.Id && belowVox.TypeId != GameData.BWater.Id) {
+                            var belowBlock = GameData.GetBlock(belowVox.TypeId);
+                            if (belowBlock.IsSolid) {
+                                bool footFree = footVox.TypeId == 0 || (GameData.GetBlock(footVox.TypeId) is { IsSolid: false } fb && fb.Id != GameData.BLava.Id);
+                                bool headFree = headVox.TypeId == 0 || (GameData.GetBlock(headVox.TypeId) is { IsSolid: false } hb && hb.Id != GameData.BLava.Id);
+                                if (footFree && headFree) {
+                                    // Центр хитбокса игрока (HalfExtents.Y = 0.9f) над поверхностью блока
+                                    return new Vector3(wx + 0.5f, wy + 0.95f, wz + 0.5f);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        int surf = Generator.SurfaceHeight(baseSpawn.X, baseSpawn.Z);
+        return new Vector3(baseSpawn.X + 0.5f, surf + 1.95f, baseSpawn.Z + 0.5f);
     }
 
     /// <summary>Загрузка чанка из сохранения: типы + частичные объёмы содержимого.</summary>
@@ -307,6 +412,15 @@ public sealed class GameWorld : IDisposable {
         gc.RecomputeSurfaceColumn(w.X & 31, w.Z & 31);
         _lightDirty.Add(gc);
         _meshDirty.Add(gc);
+
+        // Помечаем всю вертикальную колонку чанков для корректного пересчета солнечного света
+        for (int dy = -2; dy <= 3; dy++) {
+            if (_chunks.TryGetValue(new Vec3i(cc.X, dy, cc.Z), out var cCol)) {
+                _lightDirty.Add(cCol);
+                _meshDirty.Add(cCol);
+            }
+        }
+
         foreach (var n in NeighborCoords(cc)) {
             if (_chunks.TryGetValue(n, out var ngc)) {
                 _lightDirty.Add(ngc);
@@ -398,11 +512,11 @@ public sealed class GameWorld : IDisposable {
         Pickups.Add(new ItemPickup(def, quantity, pos));
     }
 
-    public void Tick(float dt) {
+    public void Tick(float dt, Player? player = null) {
         // Освещение.
         foreach (var gc in DrainLightDirty()) {
             gc.RecomputeAllSurfaces();
-            LightEngine.RecomputeSun(gc);
+            LightEngine.RecomputeSun(gc, this);
             LightEngine.RecomputeBlock(gc, this);
         }
 
@@ -420,7 +534,7 @@ public sealed class GameWorld : IDisposable {
             _animalSpawnTimer = 4f;
             TrySpawnAnimal();
         }
-        foreach (var a in Animals) a.Tick(dt, this);
+        foreach (var a in Animals) a.Tick(dt, this, player);
         Animals.RemoveAll(a => !a.Alive);
 
         // Падающие обломки.
@@ -429,9 +543,6 @@ public sealed class GameWorld : IDisposable {
 
         // Огонь.
         Fire.Tick(dt);
-
-        // Симуляция жидкостей (Вода и Лава)
-        Fluids.Tick(dt);
 
         // Автономная фоновая плавка печей во всех активных блоках
         foreach (var fn in Furnaces.Values) fn.Tick(dt, this);
@@ -526,15 +637,24 @@ public sealed class GameWorld : IDisposable {
         for (int i = 0; i < count; i++) {
             int lx = Math.Clamp(baseLx + _random.Next(-3, 4), 0, Chunk.SizeX - 1);
             int lz = Math.Clamp(baseLz + _random.Next(-3, 4), 0, Chunk.SizeZ - 1);
-            int surface = gc.Surface[gc.SurfaceIndex(lx, lz)];
-            if (surface == int.MinValue || surface <= WorldGenerator.SeaLevel) continue;
             int wx = gc.Coord.X * Chunk.SizeX + lx;
             int wz = gc.Coord.Z * Chunk.SizeZ + lz;
+            int surface = GetColumnSurfaceHeight(wx, wz);
+            if (surface == int.MinValue || surface <= WorldGenerator.SeaLevel) continue;
             var biome = Generator.GetBiome(wx, surface, wz);
             if (biome == BiomeType.Ocean || biome == BiomeType.River) continue;
 
-            var pos = new Vector3(wx + 0.5f, surface + 1.20f, wz + 0.5f);
-            Animals.Add(new Animal(animalType, pos));
+            var surfaceBlock = GetVoxel(new Vec3i(wx, surface, wz));
+            if (surfaceBlock.TypeId == GameData.BLeaves.Id || surfaceBlock.TypeId == GameData.BLog.Id ||
+                surfaceBlock.TypeId == GameData.BLava.Id || surfaceBlock.TypeId == GameData.BWater.Id) continue;
+
+            var anim = new Animal(animalType, Vector3.Zero);
+            var pos = new Vector3(wx + 0.5f, surface + 1.0f + anim.HalfSizeY + 0.05f, wz + 0.5f);
+            var half = new Vector3(anim.HalfSizeX, anim.HalfSizeY, anim.HalfSizeZ);
+            if (!Collision.IntersectsSolid(this, pos - half, pos + half)) {
+                anim.Position = pos;
+                Animals.Add(anim);
+            }
         }
     }
 
@@ -547,17 +667,26 @@ public sealed class GameWorld : IDisposable {
         for (int attempt = 0; attempt < 6; attempt++) {
             int lx = _random.Next(0, Chunk.SizeX);
             int lz = _random.Next(0, Chunk.SizeZ);
-            int surface = gc.Surface[gc.SurfaceIndex(lx, lz)];
-            if (surface == int.MinValue || surface <= WorldGenerator.SeaLevel) continue;
             int wx = gc.Coord.X * Chunk.SizeX + lx;
             int wz = gc.Coord.Z * Chunk.SizeZ + lz;
+            int surface = GetColumnSurfaceHeight(wx, wz);
+            if (surface == int.MinValue || surface <= WorldGenerator.SeaLevel) continue;
             var biome = Generator.GetBiome(wx, surface, wz);
             if (biome == BiomeType.Ocean || biome == BiomeType.River) continue;
 
+            var surfaceBlock = GetVoxel(new Vec3i(wx, surface, wz));
+            if (surfaceBlock.TypeId == GameData.BLeaves.Id || surfaceBlock.TypeId == GameData.BLog.Id ||
+                surfaceBlock.TypeId == GameData.BLava.Id || surfaceBlock.TypeId == GameData.BWater.Id) continue;
+
             var animalType = (AnimalType)_random.Next(0, 3);
-            var pos = new Vector3(wx + 0.5f, surface + 1.20f, wz + 0.5f);
-            Animals.Add(new Animal(animalType, pos));
-            return;
+            var anim = new Animal(animalType, Vector3.Zero);
+            var pos = new Vector3(wx + 0.5f, surface + 1.0f + anim.HalfSizeY + 0.05f, wz + 0.5f);
+            var half = new Vector3(anim.HalfSizeX, anim.HalfSizeY, anim.HalfSizeZ);
+            if (!Collision.IntersectsSolid(this, pos - half, pos + half)) {
+                anim.Position = pos;
+                Animals.Add(anim);
+                return;
+            }
         }
     }
 

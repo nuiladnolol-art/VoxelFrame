@@ -34,7 +34,13 @@ public sealed class GameChunk {
         int surface = int.MinValue;
         for (int ly = Chunk.SizeY - 1; ly >= 0; ly--) {
             var v = Chunk.Get(lx, ly, lz);
-            if ((v.Flags & VoxelFlags.Solid) != 0) { surface = Coord.Y * Chunk.SizeY + ly; break; }
+            if (v.TypeId != 0) {
+                var b = GameData.GetBlock(v.TypeId);
+                if (b.IsOpaque) {
+                    surface = Coord.Y * Chunk.SizeY + ly;
+                    break;
+                }
+            }
         }
         Surface[SurfaceIndex(lx, lz)] = surface;
     }

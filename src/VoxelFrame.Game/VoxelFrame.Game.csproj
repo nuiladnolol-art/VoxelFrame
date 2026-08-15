@@ -8,6 +8,7 @@
     <AssemblyName>VoxelFrame.Game</AssemblyName>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <CodePage>65001</CodePage>
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\VoxelFrame.Core\VoxelFrame.Core.csproj" />

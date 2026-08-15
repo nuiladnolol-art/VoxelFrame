@@ -76,6 +76,8 @@ public sealed class PhysicsGridCoordinator : IDisposable {
         lock (_islandLock) _dirtyChunks.Add(state);
     }
 
+    public const int MaxIslandNodes = 4096;
+
     /// <summary>
     /// World-gen entry point: bulk-load a chunk into the solver in one pass
     /// (no per-voxel events) and schedule it for an initial solve.
@@ -90,7 +92,7 @@ public sealed class PhysicsGridCoordinator : IDisposable {
         _chunkToState[chunk] = state.Id;
         _chunkCoordToState[chunk.Origin] = state.Id;
         state.BulkSync();
-        lock (_islandLock) _dirtyChunks.Add(state);       // pre-existing structures get one solve
+        // Do NOT flood-fill all natural world terrain on initial chunk load; only player edits trigger island solves.
         return state;
     }
 
@@ -161,6 +163,10 @@ public sealed class PhysicsGridCoordinator : IDisposable {
         work.Enqueue((stateId, cell));
         Interlocked.Or(ref states[stateId].Flags[cell], (int)StressFlags.InIsland);
         while (work.Count > 0) {
+            if (island.Nodes.Count >= MaxIslandNodes) {
+                // Large continuous terrain or massive mega-base anchored in ground: cap expansion
+                break;
+            }
             var (sid, c) = work.Dequeue();
             island.Nodes.Add(new IslandNode(sid, c));
             island.MemberChunks.Add(states[sid]);

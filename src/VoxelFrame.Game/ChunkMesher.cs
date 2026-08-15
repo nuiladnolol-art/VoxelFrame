@@ -35,17 +35,23 @@ namespace VoxelFrame.Game;
         new[] { (0, 0, 0, 0f, 1f), (0, 1, 0, 0f, 0f), (1, 1, 0, 1f, 0f), (1, 0, 0, 1f, 1f) },
     };
 
+    [ThreadStatic] private static List<float>? _tVerts;
+    [ThreadStatic] private static List<float>? _tNorms;
+    [ThreadStatic] private static List<float>? _tUvs;
+    [ThreadStatic] private static List<byte>? _tCols;
+    [ThreadStatic] private static List<ushort>? _tIndices;
+
     /// <summary>
     /// Строит GPU-меши чанка. Если вершин больше лимита ushort-индексов —
     /// возвращает НЕСКОЛЬКО мешей (большие постройки не обрезаются).
     /// </summary>
     public static List<Mesh> Build(GameChunk gc, GameWorld world) {
         var result = new List<Mesh>();
-        var verts = new List<float>(8192);
-        var norms = new List<float>(8192);
-        var uvs = new List<float>(8192);
-        var cols = new List<byte>(8192);
-        var indices = new List<ushort>(12288);
+        var verts = _tVerts ??= new List<float>(8192); verts.Clear();
+        var norms = _tNorms ??= new List<float>(8192); norms.Clear();
+        var uvs = _tUvs ??= new List<float>(8192); uvs.Clear();
+        var cols = _tCols ??= new List<byte>(8192); cols.Clear();
+        var indices = _tIndices ??= new List<ushort>(12288); indices.Clear();
 
         // Завершает текущий набор и начинает новый: индексы каждого меша
         // считаются от 0 своего меша, поэтому после сброса продолжаем так же.
@@ -73,6 +79,7 @@ namespace VoxelFrame.Game;
                     if (v.TypeId == 0) continue;
                     var block = GameData.GetBlock(v.TypeId);
                     bool isFluid = v.TypeId == GameData.BWater.Id || v.TypeId == GameData.BLava.Id;
+                    bool isWater = v.TypeId == GameData.BWater.Id;
                     if (!block.IsSolid && !block.IsOpaque && !isFluid) continue;   // факелы рисуются как 3D-декор
 
                     var tiles = TextureAtlas.BlockTiles(v.TypeId);
@@ -95,14 +102,7 @@ namespace VoxelFrame.Game;
                         if (verts.Count / 3 + 4 > MaxVertices) Flush();
 
                         int baseVertex = verts.Count / 3;
-                        byte tile = f switch {
-                            0 => tiles.PosX,
-                            1 => tiles.NegX,
-                            2 => tiles.PosY,
-                            3 => tiles.NegY,
-                            4 => tiles.PosZ,
-                            _ => tiles.NegZ,
-                        };
+                        byte tile = GetRotatedFaceTile(tiles, v.TypeId, v.SubGridLayerMask, f);
                         var (sun, blockL) = GetFaceLight(neighbors, gc, lx, ly, lz, dx, dy, dz);
                         var (u0, v0, u1, v1) = TileUv(tile);
                         float worldOffsetX = gc.Coord.X * Chunk.SizeX;
@@ -117,17 +117,20 @@ namespace VoxelFrame.Game;
                         byte shadeDir = (byte)(255f * faceDir);
 
                         foreach (var (fx, fy, fz, fu, fv) in FaceVerts[f]) {
-                            float ao = isFluid ? 1.0f : GetVertexAO(neighbors, lx, ly, lz, f, fx, fy, fz);
+                            float ao = (SaveSystem.FancyGraphics && !isFluid) ? GetVertexAO(neighbors, lx, ly, lz, f, fx, fy, fz) : 1.0f;
                             byte shadeSun = (byte)(255f * sun * ao);
                             byte shadeBlock = (byte)(255f * blockL * ao);
 
+                            float actualFy = fy;
+                            if (isWater && f == 2 && fy > 0.5f) actualFy = 0.90f; // Верхний уровень воды чуть ниже целого блока
+
                             verts.Add(worldOffsetX + lx + fx);
-                            verts.Add(worldOffsetY + ly + fy);
+                            verts.Add(worldOffsetY + ly + actualFy);
                             verts.Add(worldOffsetZ + lz + fz);
                             norms.Add(nx); norms.Add(ny); norms.Add(nz);
                             uvs.Add(u0 + (u1 - u0) * fu);
                             uvs.Add(v0 + (v1 - v0) * fv);
-                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(shadeDir); cols.Add(255);
+                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(shadeDir); cols.Add(isWater ? (byte)210 : (byte)255);
                         }
                         indices.Add((ushort)(baseVertex + 0));
                         indices.Add((ushort)(baseVertex + 1));
@@ -309,6 +312,48 @@ namespace VoxelFrame.Game;
             1 => 0.72f,
             2 => 0.48f,
             _ => 0.28f,
+        };
+    }
+
+    private static byte GetRotatedFaceTile(in TextureAtlas.BlockFaceTiles tiles, ushort typeId, byte facing, int f) {
+        if (f == 2) return tiles.PosY; // Верх (+Y)
+        if (f == 3) return tiles.NegY; // Низ (-Y)
+
+        // Для блоков с ориентацией (Печь, Сундук, Кровать) поворачиваем 4 боковые грани
+        if (typeId == GameData.BFurnace.Id || typeId == GameData.BChest.Id || typeId == GameData.BBed.Id || typeId == GameData.BBedHead.Id) {
+            return facing switch {
+                1 => f switch { // перед на -X (f=1)
+                    1 => tiles.PosZ, // перед
+                    0 => tiles.NegZ, // зад
+                    4 => tiles.NegX, // бок
+                    _ => tiles.PosX  // бок
+                },
+                2 => f switch { // перед на -Z (f=5)
+                    5 => tiles.PosZ, // перед
+                    4 => tiles.NegZ, // зад
+                    0 => tiles.NegX, // бок
+                    _ => tiles.PosX  // бок
+                },
+                3 => f switch { // перед на +X (f=0)
+                    0 => tiles.PosZ, // перед
+                    1 => tiles.NegZ, // зад
+                    4 => tiles.PosX, // бок
+                    _ => tiles.NegX  // бок
+                },
+                _ => f switch { // default 0: перед на +Z (f=4)
+                    4 => tiles.PosZ, // перед
+                    5 => tiles.NegZ, // зад
+                    0 => tiles.PosX, // бок
+                    _ => tiles.NegX  // бок
+                }
+            };
+        }
+
+        return f switch {
+            0 => tiles.PosX,
+            1 => tiles.NegX,
+            4 => tiles.PosZ,
+            _ => tiles.NegZ,
         };
     }
 }
