@@ -169,13 +169,13 @@ public static class TextureAtlas {
     }
 
     public static void GenerateAtlasFile() {
-        GenerateDefaultTextures(forceOverwrite: true);
+        GenerateDefaultTextures(forceOverwrite: false);
     }
 
     public static void Load() {
         if (_ready) return;
 
-        GenerateDefaultTextures(forceOverwrite: true);
+        GenerateDefaultTextures(forceOverwrite: false);
 
         var atlasImage = Raylib.GenImageColor(AtlasW, AtlasH, new Color(0, 0, 0, 0));
         var fallbackProcedural = GenerateProceduralImage();
