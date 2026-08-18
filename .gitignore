@@ -1,0 +1,22 @@
+# Build & Output
+bin/
+obj/
+dist/
+versions/
+publish/
+
+# Saves & Local Data
+saves/
+*.log
+*.tmp
+
+# IDE & Editor
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# OS
+Thumbs.db
+Desktop.ini

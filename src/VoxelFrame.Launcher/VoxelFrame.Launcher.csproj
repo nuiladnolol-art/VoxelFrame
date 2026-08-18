@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>VoxelFrame.Launcher</RootNamespace>
+    <AssemblyName>VoxelFrame.Launcher</AssemblyName>
+    <UseWindowsForms>true</UseWindowsForms>
+    <CodePage>65001</CodePage>
+    <ApplicationIcon>launcher.ico</ApplicationIcon>
+  </PropertyGroup>
+</Project>
