@@ -232,32 +232,110 @@ public class InstallerForm : Form {
         lblStatus.ForeColor = Color.FromArgb(200, 220, 255);
 
         try {
-            await Task.Run(() => {
+            await Task.Run(async () => {
                 Directory.CreateDirectory(targetDir);
+                bool installed = false;
 
-                // Копирование файлов лаунчера и игры
-                string? sourceDir = FindSourceDir();
-                if (sourceDir != null && Directory.Exists(sourceDir)) {
-                    CopyDirectory(sourceDir, targetDir, progressBar);
-                } else {
-                    // Копируем только явные исполняемые файлы проекта VoxelFrame, если они лежат рядом
-                    string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                    string[] allowedFiles = { "VoxelFrame.Launcher.exe", "VoxelFrame.Game.exe", "launcher.ico", "app.ico" };
-                    bool copiedAny = false;
-                    foreach (var fname in allowedFiles) {
-                        string src = Path.Combine(baseDir, fname);
-                        if (File.Exists(src)) {
-                            File.Copy(src, Path.Combine(targetDir, fname), true);
-                            copiedAny = true;
+                // 1. Попытка извлечь встроенный payload.zip (автономный инсталлятор)
+                var assembly = Assembly.GetExecutingAssembly();
+                string[] resNames = assembly.GetManifestResourceNames();
+                string? payloadRes = Array.Find(resNames, r => r.EndsWith("payload.zip", StringComparison.OrdinalIgnoreCase));
+                if (payloadRes != null) {
+                    lblStatus.Invoke(() => lblStatus.Text = "Распаковка встроенных файлов...");
+                    using var stream = assembly.GetManifestResourceStream(payloadRes);
+                    if (stream != null) {
+                        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+                        int total = archive.Entries.Count;
+                        int current = 0;
+                        foreach (var entry in archive.Entries) {
+                            if (string.IsNullOrEmpty(entry.Name)) {
+                                Directory.CreateDirectory(Path.Combine(targetDir, entry.FullName));
+                                continue;
+                            }
+                            string dest = Path.Combine(targetDir, entry.FullName);
+                            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                            entry.ExtractToFile(dest, true);
+                            current++;
+                            int progress = Math.Clamp(10 + (current * 80) / Math.Max(1, total), 10, 95);
+                            progressBar.Invoke(() => progressBar.Value = progress);
+                        }
+                        installed = true;
+                    }
+                }
+
+                // 2. Попытка скопировать из локальной папки сборки или файлов рядом
+                if (!installed) {
+                    string? sourceDir = FindSourceDir();
+                    if (sourceDir != null && Directory.Exists(sourceDir)) {
+                        lblStatus.Invoke(() => lblStatus.Text = "Копирование локальных файлов...");
+                        CopyDirectory(sourceDir, targetDir, progressBar);
+                        installed = true;
+                    } else {
+                        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                        string[] allowedFiles = { "VoxelFrame.Launcher.exe", "VoxelFrame.Game.exe", "launcher.ico", "app.ico" };
+                        bool copiedAny = false;
+                        foreach (var fname in allowedFiles) {
+                            string src = Path.Combine(baseDir, fname);
+                            if (File.Exists(src)) {
+                                File.Copy(src, Path.Combine(targetDir, fname), true);
+                                copiedAny = true;
+                            }
+                        }
+                        string srcAssets = Path.Combine(baseDir, "assets");
+                        if (Directory.Exists(srcAssets)) {
+                            CopyDirectory(srcAssets, Path.Combine(targetDir, "assets"), progressBar);
+                        }
+                        if (copiedAny) installed = true;
+                    }
+                }
+
+                // 3. Если файлов нет — загрузка последней версии с GitHub Releases
+                if (!installed) {
+                    lblStatus.Invoke(() => lblStatus.Text = "Загрузка компонентов с GitHub Releases...");
+                    progressBar.Invoke(() => progressBar.Value = 20);
+                    using var http = new HttpClient();
+                    http.DefaultRequestHeaders.UserAgent.ParseAdd("VoxelFrame-Setup/1.0");
+                    string downloadUrl = "https://github.com/nuiladnolol-art/VoxelFrame/releases/download/v0.7.0/VoxelFrame-v0.7.0-win-x64.zip";
+
+                    try {
+                        string apiUrl = "https://api.github.com/repos/nuiladnolol-art/VoxelFrame/releases/latest";
+                        string json = await http.GetStringAsync(apiUrl);
+                        using var doc = System.Text.Json.JsonDocument.Parse(json);
+                        if (doc.RootElement.TryGetProperty("assets", out var assetsElem)) {
+                            foreach (var asset in assetsElem.EnumerateArray()) {
+                                string name = asset.GetProperty("name").GetString() ?? "";
+                                if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) {
+                                    downloadUrl = asset.GetProperty("browser_download_url").GetString() ?? downloadUrl;
+                                    break;
+                                }
+                            }
+                        }
+                    } catch { }
+
+                    string tempZip = Path.Combine(Path.GetTempPath(), "VoxelFrame_Install.zip");
+                    var response = await http.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+                    response.EnsureSuccessStatusCode();
+                    var totalBytes = response.Content.Headers.ContentLength ?? -1L;
+                    await using (var fs = File.Create(tempZip))
+                    await using (var contentStream = await response.Content.ReadAsStreamAsync()) {
+                        byte[] buffer = new byte[81920];
+                        long downloaded = 0;
+                        int bytesRead;
+                        while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0) {
+                            await fs.WriteAsync(buffer, 0, bytesRead);
+                            downloaded += bytesRead;
+                            if (totalBytes > 0) {
+                                int progress = Math.Clamp(20 + (int)((downloaded * 60) / totalBytes), 20, 80);
+                                progressBar.Invoke(() => progressBar.Value = progress);
+                            }
                         }
                     }
-                    string srcAssets = Path.Combine(baseDir, "assets");
-                    if (Directory.Exists(srcAssets)) {
-                        CopyDirectory(srcAssets, Path.Combine(targetDir, "assets"), progressBar);
-                    }
-                    if (!copiedAny) {
-                        throw new FileNotFoundException("Файлы игры VoxelFrame не найдены рядом с установщиком.");
-                    }
+
+                    lblStatus.Invoke(() => lblStatus.Text = "Распаковка загруженных файлов...");
+                    progressBar.Invoke(() => progressBar.Value = 85);
+                    ZipFile.ExtractToDirectory(tempZip, targetDir, true);
+                    try { File.Delete(tempZip); } catch { }
+                    installed = true;
                 }
 
                 // Создание деинсталлятора
