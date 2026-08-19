@@ -221,6 +221,39 @@ public sealed class WorldGenerator {
 
         // Деревья на поверхности
         PlaceTrees(chunk, ox, oz);
+
+        // Растительность (2D трава)
+        PlaceFoliage(chunk, ox, oz);
+    }
+
+    private void PlaceFoliage(Chunk chunk, int ox, int oz) {
+        for (int lx = 0; lx < Chunk.SizeX; lx++) {
+            for (int lz = 0; lz < Chunk.SizeZ; lz++) {
+                int wx = ox + lx, wz = oz + lz;
+                int surface = SurfaceHeight(wx, wz);
+                if (surface <= SeaLevel) continue;
+
+                int ly = surface + 1 - chunk.Origin.Y * Chunk.SizeY;
+                int lyBelow = surface - chunk.Origin.Y * Chunk.SizeY;
+
+                if (ly >= 0 && ly < Chunk.SizeY && lyBelow >= 0 && lyBelow < Chunk.SizeY) {
+                    int idxBelow = Chunk.Index(lx, lyBelow, lz);
+                    int idx = Chunk.Index(lx, ly, lz);
+
+                    if (chunk.Get(idxBelow).TypeId == GameData.BGrass.Id && chunk.Get(idx).TypeId == 0) {
+                        float fNoise = _treeNoise.Get(wx * 0.4f, wz * 0.4f);
+                        var biome = GetBiome(wx, BaseHeight, wz);
+                        bool isForest = biome == BiomeType.Forest;
+                        float chance = isForest ? 0.20f : 0.35f;
+
+                        if (fNoise < chance) {
+                            var vx = MakeVoxel(GameData.BTallGrass.Id);
+                            chunk.SetVoxel(idx, in vx);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>

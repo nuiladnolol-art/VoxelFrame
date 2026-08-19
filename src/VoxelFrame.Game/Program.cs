@@ -114,7 +114,8 @@ internal static class Program {
 
                 if (action == MenuAction.NewGame) {
                     Screens.Reset();
-                    session = GameSession.NewGame(new Random().Next(), headless: false);
+                    int seed = Screens.CustomWorldSeed != 0 ? Screens.CustomWorldSeed : new Random().Next();
+                    session = GameSession.NewGame(seed, headless: false);
                     renderer = new WorldRenderer(session);
                     session.Ui = UiState.Loading;
                     session.LoadTotal = 1;
@@ -325,6 +326,7 @@ internal static class Program {
             Sprint = Raylib.IsKeyDown(KeyBinds.Sprint) || Raylib.IsKeyDown(KeyboardKey.LeftControl),
             Drop = Raylib.IsKeyPressed(KeyBinds.Drop),
             AttackHeld = Raylib.IsMouseButtonDown(MouseButton.Left),
+            AttackPressed = Raylib.IsMouseButtonPressed(MouseButton.Left),
             UsePressed = Raylib.IsMouseButtonPressed(MouseButton.Right),
             UseHeld = Raylib.IsMouseButtonDown(MouseButton.Right),
             OpenInventory = Raylib.IsKeyPressed(KeyBinds.Inventory),
@@ -358,16 +360,7 @@ internal static class Program {
         TextureAtlas.SetBlockTiles(GameData.BCoalOre.Id, TextureAtlas.TCoalOre, TextureAtlas.TCoalOre, TextureAtlas.TCoalOre);
         TextureAtlas.SetBlockTiles(GameData.BBedrock.Id, TextureAtlas.TBedrock, TextureAtlas.TBedrock, TextureAtlas.TBedrock);
         TextureAtlas.SetBlockTiles(GameData.BIronOre.Id,  TextureAtlas.TIronOre,    TextureAtlas.TIronOre,    TextureAtlas.TIronOre);
-        TextureAtlas.SetBlockTiles(GameData.BGrass.Id, TextureAtlas.TGrassTop, TextureAtlas.TGrassSide, TextureAtlas.TDirt);
-        TextureAtlas.SetBlockTiles(GameData.BDirt.Id, TextureAtlas.TDirt, TextureAtlas.TDirt, TextureAtlas.TDirt);
-        TextureAtlas.SetBlockTiles(GameData.BStone.Id, TextureAtlas.TStone, TextureAtlas.TStone, TextureAtlas.TStone);
-        TextureAtlas.SetBlockTiles(GameData.BLog.Id, TextureAtlas.TLogTop, TextureAtlas.TLogSide, TextureAtlas.TLogTop);
-        TextureAtlas.SetBlockTiles(GameData.BLeaves.Id, TextureAtlas.TLeaves, TextureAtlas.TLeaves, TextureAtlas.TLeaves);
-        TextureAtlas.SetBlockTiles(GameData.BPlanks.Id, TextureAtlas.TPlanks, TextureAtlas.TPlanks, TextureAtlas.TPlanks);
-        TextureAtlas.SetBlockTiles(GameData.BCoalOre.Id, TextureAtlas.TCoalOre, TextureAtlas.TCoalOre, TextureAtlas.TCoalOre);
         TextureAtlas.SetBlockTiles(GameData.BTorch.Id, TextureAtlas.TTorch, TextureAtlas.TTorch, TextureAtlas.TTorch);
-        TextureAtlas.SetBlockTiles(GameData.BBedrock.Id, TextureAtlas.TBedrock, TextureAtlas.TBedrock, TextureAtlas.TBedrock);
-        TextureAtlas.SetBlockTiles(GameData.BIronOre.Id, TextureAtlas.TIronOre, TextureAtlas.TIronOre, TextureAtlas.TIronOre);
         TextureAtlas.SetBlockFaces(GameData.BWorkbench.Id, TextureAtlas.TLogSide, TextureAtlas.TLogSide, TextureAtlas.TWorkbench, TextureAtlas.TPlanks, TextureAtlas.TLogSide, TextureAtlas.TLogSide);
         TextureAtlas.SetBlockFaces(GameData.BFurnace.Id, TextureAtlas.TStone, TextureAtlas.TStone, TextureAtlas.TStone, TextureAtlas.TStone, TextureAtlas.TFurnace, TextureAtlas.TStone);
         TextureAtlas.SetBlockTiles(GameData.BCobblestone.Id, TextureAtlas.TCobblestone, TextureAtlas.TCobblestone, TextureAtlas.TCobblestone);
@@ -447,5 +440,13 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.ChestItem.Id, TextureAtlas.TChestFront);
         TextureAtlas.SetItemTile(GameData.BedItem.Id, TextureAtlas.TBedTop);
         TextureAtlas.SetItemTile(GameData.RottenFleshItem.Id, TextureAtlas.TRottenFlesh);
+        TextureAtlas.SetItemTile(GameData.WheatItem.Id, TextureAtlas.TWheat);
+        TextureAtlas.SetItemTile(GameData.WheatSeedsItem.Id, TextureAtlas.TWheatSeeds);
+        TextureAtlas.SetItemTile(GameData.WoodHoeItem.Id, TextureAtlas.THoeWood);
+        TextureAtlas.SetItemTile(GameData.StoneHoeItem.Id, TextureAtlas.THoeStone);
+        TextureAtlas.SetItemTile(GameData.IronHoeItem.Id, TextureAtlas.THoeIron);
+        TextureAtlas.SetItemTile(GameData.DiamondHoeItem.Id, TextureAtlas.THoeDiamond);
+        TextureAtlas.SetBlockTiles(GameData.BFarmland.Id, TextureAtlas.TFarmland, TextureAtlas.TDirt, TextureAtlas.TDirt);
+        TextureAtlas.SetBlockTiles(GameData.BTallGrass.Id, TextureAtlas.TTallGrass, TextureAtlas.TTallGrass, TextureAtlas.TTallGrass);
     }
 }

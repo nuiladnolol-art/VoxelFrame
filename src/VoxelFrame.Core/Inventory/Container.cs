@@ -64,6 +64,7 @@ public sealed class Container : IInventorySource, IInventorySink {
 
     public bool TryInsert(ItemInstance item, int quantity = 1) {
         if (quantity <= 0) return false;
+        if (!HasSpaceFor(item.Definition, quantity)) return false;
         
         const int maxStack = 64;
         int remaining = quantity;
@@ -93,20 +94,14 @@ public sealed class Container : IInventorySource, IInventorySink {
                 if (remaining <= 0) return true;
             }
         }
-        return false;
+        return remaining <= 0;
     }
 
     public bool TryRemove(ItemDefinition definition, int quantity = 1) {
-        for (int i = _slots.Length - 1; i >= 0; i--) {
-            var e = _slots[i];
-            if (e == null || e.Value.Item.Definition != definition || e.Value.Quantity < quantity) continue;
-            if (e.Value.Quantity == quantity) _slots[i] = null;
-            else _slots[i] = e.Value with { Quantity = e.Value.Quantity - quantity };
-            UsedVolumeM3 = Math.Max(0, UsedVolumeM3 - e.Value.Item.VolumeM3 * quantity);
-            UsedMassKg = Math.Max(0, UsedMassKg - e.Value.Item.MassKg * quantity);
-            return true;
-        }
-        return false;
+        if (quantity <= 0) return false;
+        if (CountOf(definition) < quantity) return false;
+        RemoveItems(definition, quantity);
+        return true;
     }
 
     // ── Упорядочивание (UI: хотбар ⇄ хранилище) ──────────────────────────────
@@ -207,6 +202,9 @@ public sealed class Container : IInventorySource, IInventorySink {
         double v = 0, m = 0;
         foreach (var p in parts) { v += p.StorageVolumeM3; m += p.MassKg; }
         if (!CanFit(v, m)) return false;
+        foreach (var p in parts) {
+            if (p is ItemPart ip && !HasSpaceFor(ip.Item, ip.Quantity)) return false;
+        }
         foreach (var p in parts) {
             switch (p) {
                 case ItemPart ip: TryInsert(new ItemInstance(ip.Item, 0), ip.Quantity); break;

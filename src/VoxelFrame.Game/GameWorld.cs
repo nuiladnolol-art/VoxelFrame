@@ -37,6 +37,7 @@ public sealed class GameWorld : IDisposable {
     private readonly Random _random;
     private float _animalSpawnTimer = 3f;
     private float _hostileSpawnTimer = 5f;
+    private float _cropTimer = 1.0f;
 
     public GameWorld(int seed) {
         Seed = seed;
@@ -68,9 +69,18 @@ public sealed class GameWorld : IDisposable {
         }
         _lightDirty.Add(gc);
         _meshDirty.Add(gc);
-        // Границы соседей могли измениться — их меши тоже пересобрать.
+        // Помечаем всю вертикальную колонку чанков для корректного пересчета солнечного света
+        for (int dy = -2; dy <= 3; dy++) {
+            if (_chunks.TryGetValue(new Vec3i(cc.X, dy, cc.Z), out var cCol)) {
+                _lightDirty.Add(cCol);
+                _meshDirty.Add(cCol);
+            }
+        }
         foreach (var n in NeighborCoords(cc)) {
-            if (_chunks.TryGetValue(n, out var ngc)) _meshDirty.Add(ngc);
+            if (_chunks.TryGetValue(n, out var ngc)) {
+                _lightDirty.Add(ngc);
+                _meshDirty.Add(ngc);
+            }
         }
         return gc;
     }
@@ -164,6 +174,19 @@ public sealed class GameWorld : IDisposable {
 
     public void PlacePlacedBlock(Vec3i w, BlockType block, float contentVolumeM3 = 1f, byte facing = 0) {
         SetVoxelInternal(w, MakePlacedVoxel(block, contentVolumeM3, facing));
+    }
+
+    public void SetBlock(Vec3i w, ushort typeId) {
+        if (typeId == 0) {
+            RemoveBlock(w);
+        } else {
+            var block = GameData.GetBlock(typeId);
+            PlacePlacedBlock(w, block, 1f);
+        }
+    }
+
+    public void SetVoxelRaw(Vec3i w, in VoxelData v) {
+        SetVoxelInternal(w, v);
     }
 
     public void CheckGravityBlocksAbove(Vec3i pos) {
@@ -312,8 +335,17 @@ public sealed class GameWorld : IDisposable {
         ScanDecorations(gc);
         _lightDirty.Add(gc);
         _meshDirty.Add(gc);
+        for (int dy = -2; dy <= 3; dy++) {
+            if (_chunks.TryGetValue(new Vec3i(cc.X, dy, cc.Z), out var cCol)) {
+                _lightDirty.Add(cCol);
+                _meshDirty.Add(cCol);
+            }
+        }
         foreach (var n in NeighborCoords(cc)) {
-            if (_chunks.TryGetValue(n, out var ngc)) _meshDirty.Add(ngc);
+            if (_chunks.TryGetValue(n, out var ngc)) {
+                _lightDirty.Add(ngc);
+                _meshDirty.Add(ngc);
+            }
         }
     }
 
@@ -395,7 +427,7 @@ public sealed class GameWorld : IDisposable {
         return false;
     }
 
-    /// <summary>Реестр декора (факелы/костры) для рендера без сканирования вокселей.</summary>
+    /// <summary>Реестр декора (факелы, посевы, трава) для рендера без сканирования всех вокселей.</summary>
     public IEnumerable<Vec3i> DecorPositions => _decor.Values.SelectMany(v => v);
 
     private void ScanDecorations(GameChunk gc) {
@@ -403,14 +435,14 @@ public sealed class GameWorld : IDisposable {
         var list = new List<Vec3i>();
         for (int i = 0; i < Chunk.VoxelCount; i++) {
             ushort t = gc.Chunk.Get(i).TypeId;
-            if (t == GameData.BTorch.Id)
+            if (t == GameData.BTorch.Id || t == GameData.BWheatCrop.Id || t == GameData.BTallGrass.Id)
                 list.Add(ChunkLocalToWorld(cc, i));
         }
         _decor[cc] = list;
     }
 
     private void UpdateDecor(Vec3i cc, Vec3i w, in VoxelData voxel) {
-        bool isDecor = voxel.TypeId == GameData.BTorch.Id;
+        bool isDecor = voxel.TypeId == GameData.BTorch.Id || voxel.TypeId == GameData.BWheatCrop.Id || voxel.TypeId == GameData.BTallGrass.Id;
         if (!_decor.TryGetValue(cc, out var list)) {
             if (!isDecor) return;
             _decor[cc] = list = new List<Vec3i>();
@@ -495,15 +527,17 @@ public sealed class GameWorld : IDisposable {
         float tDeltaY = dir.Y != 0 ? MathF.Abs(1f / dir.Y) : float.MaxValue;
         float tDeltaZ = dir.Z != 0 ? MathF.Abs(1f / dir.Z) : float.MaxValue;
         Vec3i last = new(x, y, z);
+        bool first = true;
 
         while (true) {
             var cell = new Vec3i(x, y, z);
-            if (IsBlockAt(cell)) {
+            if (!first && IsBlockAt(cell)) {
                 hit = cell;
                 prevCell = last;
                 normal = new Vec3i(x - last.X, y - last.Y, z - last.Z);
                 return true;
             }
+            first = false;
             if (tMaxX >= maxDist && tMaxY >= maxDist && tMaxZ >= maxDist) return false;
             last = cell;
             if (tMaxX < tMaxY && tMaxX < tMaxZ) { x += stepX; tMaxX += tDeltaX; }
@@ -555,15 +589,52 @@ public sealed class GameWorld : IDisposable {
         foreach (var a in Animals) a.Tick(dt, this, player);
         Animals.RemoveAll(a => !a.Alive);
 
-        // Падающие обломки.
-        foreach (var f in FallingBlocks) f.Tick(dt, this);
+        // Падающие обломки (обратный цикл защищает от исключения при падении блоков сверху)
+        for (int i = FallingBlocks.Count - 1; i >= 0; i--) {
+            FallingBlocks[i].Tick(dt, this);
+        }
         FallingBlocks.RemoveAll(f => !f.Alive);
 
         // Огонь.
         Fire.Tick(dt);
 
+        // Рост посевов пшеницы на грядках
+        TickCrops(dt);
+
         // Автономная фоновая плавка печей во всех активных блоках
         foreach (var fn in Furnaces.Values) fn.Tick(dt, this);
+    }
+
+    public const float CropGrowthInterval = 25f;
+
+    public void TickCrops(float dt) {
+        _cropTimer -= dt;
+        if (_cropTimer > 0f) return;
+        _cropTimer = 1.0f;
+
+        var decorCopy = DecorPositions.ToList();
+        foreach (var pos in decorCopy) {
+            var vox = GetVoxel(pos);
+            if (vox.TypeId == GameData.BWheatCrop.Id) {
+                var below = pos + new Vec3i(0, -1, 0);
+                var belowVox = GetVoxel(below);
+                if (belowVox.TypeId != GameData.BFarmland.Id) {
+                    // Без грядки посев ломается и падает семенами
+                    SetBlock(pos, 0);
+                    SpawnPickup(GameData.WheatSeedsItem.Id, 1, pos);
+                    continue;
+                }
+
+                // Случайный рост на следующую стадию (0..3)
+                int currentStage = vox.SubGridLayerMask; // 0..3
+                if (currentStage < 3) {
+                    int nextStage = currentStage + 1;
+                    var newVox = MakePlacedVoxel(GameData.BWheatCrop, 1f);
+                    newVox.SubGridLayerMask = (byte)nextStage;
+                    SetVoxelRaw(pos, in newVox);
+                }
+            }
+        }
     }
 
     public void TickHostileMobs(float dt, Player player, GameSession session) {

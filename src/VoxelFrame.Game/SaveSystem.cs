@@ -13,8 +13,9 @@ namespace VoxelFrame.Game;
 /// </summary>
 public static class SaveSystem {
     public const uint Magic = 0x56465331;   // "VFS1"
-    public const int Version = 5;
+    public const int Version = 7;
 
+    public static string CurrentWorldPath = "";
     public static int SelectedWorldSlot = 1;
     public static string SaveDirectory {
         get {
@@ -23,14 +24,54 @@ public static class SaveSystem {
             return dir;
         }
     }
+
+    public record WorldSaveInfo(string FilePath, string Name, DateTime LastPlayed, long SizeBytes, int Seed);
+
+    public static List<WorldSaveInfo> GetAllWorlds() {
+        var list = new List<WorldSaveInfo>();
+        try {
+            var files = Directory.GetFiles(SaveDirectory, "*.dat");
+            foreach (var f in files) {
+                var fi = new FileInfo(f);
+                string worldName = Path.GetFileNameWithoutExtension(f);
+                int seed = 0;
+                try {
+                    using var fs = File.OpenRead(f);
+                    using var gz = new GZipStream(fs, CompressionMode.Decompress);
+                    using var br = new BinaryReader(gz, Encoding.UTF8);
+                    uint magic = br.ReadUInt32();
+                    if (magic == Magic) {
+                        int ver = br.ReadInt32();
+                        if (ver >= 7) {
+                            worldName = br.ReadString();
+                        }
+                        seed = br.ReadInt32();
+                    }
+                } catch { }
+                list.Add(new WorldSaveInfo(f, worldName, fi.LastWriteTime, fi.Length, seed));
+            }
+        } catch { }
+        return list.OrderByDescending(w => w.LastPlayed).ToList();
+    }
+
+    public static string CreateWorldSavePath(string worldName) {
+        string safeName = string.Join("_", worldName.Split(Path.GetInvalidFileNameChars()));
+        if (string.IsNullOrWhiteSpace(safeName)) safeName = "World";
+        string path = Path.Combine(SaveDirectory, $"{safeName}.dat");
+        int counter = 1;
+        while (File.Exists(path)) {
+            path = Path.Combine(SaveDirectory, $"{safeName}_{counter++}.dat");
+        }
+        return path;
+    }
+
     public static string SavePathForWorld(int slot) => Path.Combine(SaveDirectory, $"world_{slot}.dat");
     public static bool SaveExistsForWorld(int slot) => File.Exists(SavePathForWorld(slot));
-    public static string SavePath => SavePathForWorld(SelectedWorldSlot);
-    public static bool SaveExists => SaveExistsForWorld(SelectedWorldSlot);
+    public static string SavePath => !string.IsNullOrEmpty(CurrentWorldPath) ? CurrentWorldPath : SavePathForWorld(SelectedWorldSlot);
+    public static bool SaveExists => File.Exists(SavePath);
     public static string SettingsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VoxelFrame", "settings.json");
 
-    public static void DeleteSave(int slot) {
-        string path = SavePathForWorld(slot);
+    public static void DeleteSave(string path) {
         if (File.Exists(path)) File.Delete(path);
     }
 
@@ -42,6 +83,8 @@ public static class SaveSystem {
         using (var bw = new BinaryWriter(gz, Encoding.UTF8, leaveOpen: false)) {
             bw.Write(Magic);
             bw.Write(Version);
+            string worldName = Path.GetFileNameWithoutExtension(path);
+            bw.Write(worldName);
             bw.Write(session.World.Seed);
             bw.Write(session.DayNight.TimeOfDay);
             bw.Write(session.World.Fire.TotalSmokeKg);
@@ -54,7 +97,9 @@ public static class SaveSystem {
             bw.Write(p.Yaw);
             bw.Write(p.Pitch);
             bw.Write(p.Health);
-            bw.Write(0f); // placeholder
+            bw.Write(p.Hunger);
+            bw.Write(p.Saturation);
+            bw.Write(p.HighestYInAir);
             bw.Write(p.SelectedSlot);
 
             var inv = p.Inventory;
@@ -153,6 +198,7 @@ public static class SaveSystem {
         int version = br.ReadInt32();
         if (version < 2 || version > Version) throw new InvalidDataException($"Версия сохранения {version} не поддерживается");
 
+        string worldName = version >= 7 ? br.ReadString() : Path.GetFileNameWithoutExtension(path);
         int seed = br.ReadInt32();
         float timeOfDay = br.ReadSingle();
         double smokeKg = br.ReadDouble();
@@ -170,7 +216,11 @@ public static class SaveSystem {
         session.Player.Yaw = br.ReadSingle();
         session.Player.Pitch = br.ReadSingle();
         session.Player.Health = br.ReadSingle();
-        br.ReadSingle(); // placeholder
+        if (version >= 7) {
+            session.Player.Hunger = br.ReadSingle();
+            session.Player.Saturation = br.ReadSingle();
+        }
+        session.Player.HighestYInAir = br.ReadSingle();
         session.Player.SelectedSlot = br.ReadInt32();
 
         int entryCount = br.ReadInt32();

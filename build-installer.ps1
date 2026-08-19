@@ -23,9 +23,8 @@ $setupExe = Join-Path $setupDir "VoxelFrame-Setup.exe"
 $distSetupExe = Join-Path $distDir "VoxelFrame-Setup-$Version.exe"
 
 if (Test-Path $setupExe) {
-    Copy-Item -Force $setupExe $distSetupExe
     Copy-Item -Force $setupExe "$distDir/VoxelFrame-Setup.exe"
-    Write-Host "== Инсталлятор успешно собран: $distSetupExe ==" -ForegroundColor Green
+    Write-Host "== Инсталлятор успешно собран: $distDir/VoxelFrame-Setup.exe ==" -ForegroundColor Green
 } else {
     Write-Host "Предупреждение: Setup exe собран в $setupDir" -ForegroundColor Yellow
 }

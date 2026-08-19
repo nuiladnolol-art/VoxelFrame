@@ -165,6 +165,10 @@ public sealed class PhysicsGridCoordinator : IDisposable {
         while (work.Count > 0) {
             if (island.Nodes.Count >= MaxIslandNodes) {
                 // Large continuous terrain or massive mega-base anchored in ground: cap expansion
+                while (work.Count > 0) {
+                    var (remSid, remCell) = work.Dequeue();
+                    Interlocked.And(ref states[remSid].Flags[remCell], ~(int)StressFlags.InIsland);
+                }
                 break;
             }
             var (sid, c) = work.Dequeue();

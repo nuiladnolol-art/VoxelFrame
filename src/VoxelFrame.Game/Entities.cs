@@ -24,24 +24,33 @@ public static class Collision {
 
         // Автоматическое выталкивание вверх при застревании внутри твердого блока
         if (IntersectsSolid(world, pos - half, pos + half)) {
+            var origPos = pos;
+            bool freed = false;
             for (int step = 0; step < 24; step++) {
                 pos.Y += 0.05f;
                 if (!IntersectsSolid(world, pos - half, pos + half)) {
                     vel.Y = 0f;
+                    freed = true;
                     break;
                 }
             }
+            if (!freed) pos = origPos;
         }
 
-        // Если крадемся (Shift) — не даем упасть с края блока
+        // Если крадемся (Shift) — не даем упасть с края блока (включая диагональные углы)
         if (sneaking) {
             float testX = pos.X + vel.X * dt;
-            if (!IntersectsSolid(world, new Vector3(testX, pos.Y - 0.1f, pos.Z) - half, new Vector3(testX, pos.Y - 0.1f, pos.Z) + half)) {
-                vel.X = 0f;
-            }
             float testZ = pos.Z + vel.Z * dt;
-            if (!IntersectsSolid(world, new Vector3(pos.X, pos.Y - 0.1f, testZ) - half, new Vector3(pos.X, pos.Y - 0.1f, testZ) + half)) {
-                vel.Z = 0f;
+            bool groundBoth = IntersectsSolid(world, new Vector3(testX, pos.Y - 0.1f, testZ) - half, new Vector3(testX, pos.Y - 0.1f, testZ) + half);
+            if (!groundBoth) {
+                bool groundX = IntersectsSolid(world, new Vector3(testX, pos.Y - 0.1f, pos.Z) - half, new Vector3(testX, pos.Y - 0.1f, pos.Z) + half);
+                bool groundZ = IntersectsSolid(world, new Vector3(pos.X, pos.Y - 0.1f, testZ) - half, new Vector3(pos.X, pos.Y - 0.1f, testZ) + half);
+                if (!groundX) vel.X = 0f;
+                if (!groundZ) vel.Z = 0f;
+                if (groundX && groundZ) {
+                    vel.X = 0f;
+                    vel.Z = 0f;
+                }
             }
         }
 

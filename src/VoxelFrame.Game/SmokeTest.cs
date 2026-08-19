@@ -219,22 +219,31 @@ internal static class SmokeTest {
         Check(true, "распространение огня стабильно");
     }
 
-    // ── 6. Еда (лечение) ────────────────────────────────────────────────────
+    // ── 6. Еда, сытость и спринт ────────────────────────────────────────────
 
     private static void TestFood() {
-        Console.WriteLine("[6] Еда и лечение");
+        Console.WriteLine("[6] Еда, сытость и спринт");
         var s = NewSession();
         var inv = s.Player.Inventory;
         inv.TryInsert(GameData.NewItem(GameData.AppleItem), 1);
-        s.Player.Health = 10f;
+        s.Player.Hunger = 10f;
         s.Player.SelectedSlot = 0;
 
-        var input = PlayerInput.Idle;
-        input.UsePressed = true;
-        s.Tick(Dt, input);            // начата еда
-        Tick(s, 1.8f);                // доедание (EatTimer = 1.6с)
-        Check(Math.Abs(s.Player.Health - 14f) < 0.01f, "яблоко вылечило +4 HP");
+        var input = PlayerInput.Idle with { UsePressed = true };
+        s.Tick(Dt, input);
+        Check(Math.Abs(s.Player.Hunger - 14f) < 0.01f, "яблоко восстановило +4 сытости");
         Check(inv.CountOf(GameData.AppleItem) == 0, "яблоко съедено");
+
+        // Блокировка спринта при низком голоде (<= 6)
+        s.Player.Hunger = 5f;
+        var sprintInput = PlayerInput.Idle with { Sprint = true, MoveZ = 1f };
+        s.Player.Update(0.1f, sprintInput, s.World, s);
+        Check(!s.Player.IsSprinting, "спринт заблокирован при голоде <= 6");
+
+        // Разрешение спринта при нормальном голоде (> 6)
+        s.Player.Hunger = 15f;
+        s.Player.Update(0.1f, sprintInput, s.World, s);
+        Check(s.Player.IsSprinting, "спринт работает при сытости > 6");
     }
 
     // ── 7. Животные ──────────────────────────────────────────────────────────
@@ -267,14 +276,17 @@ internal static class SmokeTest {
         s.Player.AttackAnimal(w, s);
         Check(pig.Alive, "голыми руками свинья выживает после 3 ударов");
 
-        // С деревянным мечом (урон 5) — убита за 3 удара.
+        // С деревянным мечом (урон 5) — убита за 3 удара при полной перезарядке.
         Check(s.Player.Inventory.TryInsert(GameData.NewItem(GameData.WoodSwordItem), 1), "выдан деревянный меч");
         s.Player.SelectedSlot = 0;
         s.Player.AttackTimer = 0f;
+        s.Player.AttackRechargeTimer = 1.0f;
         s.Player.AttackAnimal(w, s);
         s.Player.AttackTimer = 0f;
+        s.Player.AttackRechargeTimer = 1.0f;
         s.Player.AttackAnimal(w, s);
         s.Player.AttackTimer = 0f;
+        s.Player.AttackRechargeTimer = 1.0f;
         s.Player.AttackAnimal(w, s);
         Check(!pig.Alive, "свинья убита мечом за 3 удара");
         Check(w.Pickups.Any(p => p.Definition == GameData.RawPorkItem), "выпала свинина");
@@ -618,5 +630,77 @@ internal static class SmokeTest {
         Check(Screens.InGameplayScreen, "экран игрового процесса активируется");
         Screens.InGameplayScreen = false;
         Screens.InSettingsScreen = false;
+
+        // 18. Детерминированные сиды (FNV-1a)
+        int seed1 = GameData.ParseSeed("MyMinecraftWorld123");
+        int seed2 = GameData.ParseSeed("MyMinecraftWorld123");
+        int seedNum = GameData.ParseSeed("42891");
+        Check(seed1 == seed2 && seed1 != 0, "одинаковый текстовый сид дает одинаковый детерминированный int");
+        Check(seedNum == 42891, "числовой сид парсится напрямую");
+
+        // 19. Мотыги, вспашка грядок, посадка семян и сбор пшеницы
+        var farmPos = new Vec3i(60, w.SpawnBlock.Y, 60);
+        w.PlacePlacedBlock(farmPos, GameData.BGrass, 1f);
+        w.RemoveBlock(farmPos + new Vec3i(0, 1, 0));
+        s.Player.Position = new Vector3(60.5f, w.SpawnBlock.Y + 1.0f, 60.5f);
+        s.Player.Pitch = -1.5f;
+        s.Player.Yaw = 0f;
+        s.Player.PlaceCooldown = 0f;
+        inv.Slots[0] = new ItemEntry(GameData.NewItem(GameData.WoodHoeItem), 1);
+        s.Player.SelectedSlot = 0;
+        var useInput = PlayerInput.Idle with { UsePressed = true };
+        s.Player.Update(0.1f, useInput, w, s);
+        Check(w.GetVoxel(farmPos).TypeId == GameData.BFarmland.Id, "трава вспахана мотыгой в грядку (Farmland)");
+
+        // Посадка семян
+        inv.Slots[0] = new ItemEntry(GameData.NewItem(GameData.WheatSeedsItem), 3);
+        s.Player.PlaceCooldown = 0f;
+        s.Player.Update(0.1f, useInput, w, s);
+        var cropPos = farmPos + new Vec3i(0, 1, 0);
+        Check(w.GetVoxel(cropPos).TypeId == GameData.BWheatCrop.Id, "семена посажены на грядку");
+
+        // Рост пшеницы
+        for (int i = 0; i < 4; i++) {
+            w.SetBlock(farmPos, GameData.BFarmland.Id);
+            w.TickCrops(GameWorld.CropGrowthInterval + 0.1f);
+        }
+        var grownCrop = w.GetVoxel(cropPos);
+        Check(grownCrop.TypeId == GameData.BWheatCrop.Id && grownCrop.SubGridLayerMask == 3, "пшеница созрела до стадии 3");
+
+        // Сбор урожая
+        s.Player.BreakBlock(w, s, cropPos, GameData.BWheatCrop);
+        Check(w.Pickups.Any(p => p.Definition.Id == GameData.WheatItem.Id), "со сбора зрелой пшеницы выпала пшеница");
+        Check(w.Pickups.Any(p => p.Definition.Id == GameData.WheatSeedsItem.Id), "со сбора зрелой пшеницы выпали семена");
+
+        // 20. 2D Трава (кустики)
+        var grassPos = new Vec3i(65, w.SpawnBlock.Y, 65);
+        w.PlacePlacedBlock(grassPos, GameData.BTallGrass, 1f);
+        Check(w.GetVoxel(grassPos).TypeId == GameData.BTallGrass.Id, "2D трава установлена в мире");
+        s.Player.BreakBlock(w, s, grassPos, GameData.BTallGrass);
+        Check(w.GetVoxel(grassPos).TypeId == 0, "2D трава ломается");
+
+        // 21. Боевая система MC 1.9+ с перезарядкой ударов
+        var dummyZombie = new HostileMob(HostileType.Zombie, new Vector3(70.5f, w.SpawnBlock.Y + 1f, 70.5f));
+        w.HostileMobs.Add(dummyZombie);
+        s.Player.Position = new Vector3(70.5f, w.SpawnBlock.Y + 1f, 68.5f);
+        s.Player.Yaw = 0f;
+        s.Player.Pitch = 0f;
+        s.Player.SelectedSlot = 0;
+        inv.Slots[0] = new ItemEntry(GameData.NewItem(GameData.DiamondSwordItem), 1);
+        
+        // Быстрый спам-удар без перезарядки (charge ~ 0.1)
+        s.Player.AttackRechargeTimer = 0.05f;
+        float prevHp = dummyZombie.Health;
+        s.Player.AttackHostile(dummyZombie, w, s);
+        float weakDmg = prevHp - dummyZombie.Health;
+        Check(weakDmg < 3.0f, "быстрый спам кликом наносит слабый урон без накопления силы");
+
+        // Полный удар с накоплением силы (charge = 1.0)
+        s.Player.AttackRechargeTimer = 2.0f;
+        s.Player.AttackTimer = 0f;
+        prevHp = dummyZombie.Health;
+        s.Player.AttackHostile(dummyZombie, w, s);
+        float fullDmg = prevHp - dummyZombie.Health;
+        Check(fullDmg >= 7.0f, "полный удар заряженным мечом наносит максимальный урон (>= 7 HP)");
     }
 }

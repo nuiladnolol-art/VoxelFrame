@@ -105,14 +105,16 @@ public sealed class HostileMob {
                 var mobCenter = Position + new Vector3(0f, 0.45f, 0f);
                 var playerCenter = player.Position + new Vector3(0f, 0.60f, 0f);
                 bool canSeePlayer = HasLineOfSight(world, mobCenter, playerCenter) || HasLineOfSight(world, mobCenter, player.Eye);
-                if (dist < 3.0f && canSeePlayer) {
+                // Начинает шипеть и взводиться на расстоянии до 3.8 блоков (не вплотную)
+                if (dist < 3.8f && canSeePlayer) {
+                    speed = 0.4f; // Замедляется при раздувании
                     FuseTimer += dt;
-                    if (FuseTimer >= 1.5f) {
+                    if (FuseTimer >= 1.3f) {
                         Explode(world, session);
                         Alive = false;
                         return;
                     }
-                } else {
+                } else if (dist > 5.5f || !canSeePlayer) {
                     FuseTimer = MathF.Max(0f, FuseTimer - dt * 1.5f);
                 }
             } else if (Type == HostileType.Skeleton) {
@@ -160,8 +162,7 @@ public sealed class HostileMob {
                 if (HasLineOfSight(world, mobCenter, playerCenter) || HasLineOfSight(world, mobCenter, player.Eye)) {
                     AttackCooldown = 1.0f;
                     float dmg = Type == HostileType.Spider ? 3f : 4f;
-                    player.Health = MathF.Max(0f, player.Health - dmg);
-                    SoundSystem.PlayHit();
+                    player.ApplyDamage(dmg, session, Position);
                 }
             }
 
@@ -239,14 +240,14 @@ public sealed class HostileMob {
     private void Explode(GameWorld world, GameSession session) {
         var center = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z));
         session.AddMessage("КРИПЕР ВЗОРВАЛСЯ!");
+        SoundSystem.PlayExplosion();
 
         // Урон игроку в зависимости от расстояния
         float dist = Vector3.Distance(playerPos(session), Position);
         if (dist < 5.5f) {
             float dmg = (1.0f - dist / 5.5f) * 24f;
-            session.Player.Health = MathF.Max(0f, session.Player.Health - dmg);
+            session.Player.ApplyDamage(dmg, session, Position);
             session.AddMessage($"Взрыв нанёс урон -{dmg:F0} HP!");
-            SoundSystem.PlayHit();
         }
 
         // Уничтожение блоков в радиусе 3 с дропом ~30%
@@ -298,9 +299,8 @@ public sealed class ArrowProjectile {
         var toPlayer = (player.Position + new Vector3(0f, Player.EyeHeight * 0.5f, 0f)) - Position;
         if (toPlayer.Length() < 0.85f) {
             Alive = false;
-            player.Health = MathF.Max(0f, player.Health - 3f);
+            player.ApplyDamage(3f, session, Position);
             session.AddMessage("В вас попала стрела скелета! -3 HP");
-            SoundSystem.PlayHit();
             return;
         }
 

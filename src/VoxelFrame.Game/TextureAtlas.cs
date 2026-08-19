@@ -26,12 +26,14 @@ public static class TextureAtlas {
                      TSwordWood = 44, TSwordStone = 45, TSwordIron = 46, TSwordDiamond = 47,
                      TAxeWood = 48, TAxeStone = 49, TAxeIron = 50, TAxeDiamond = 51,
                      TShovelWood = 52, TShovelStone = 53, TShovelIron = 54, TShovelDiamond = 55,
-                     // Дроп мобов и новые предметы
                      TFeather = 56, TGunpowder = 57, TString = 58, TArrow = 59, TBone = 60,
                      TCharcoal = 61, TRawBeef = 62, TCookedBeef = 63, TLeather = 64, TWool = 65,
                      TChestTop = 66, TChestSide = 67, TChestFront = 68,
                      TBedTop = 69, TBedSide = 70, TBedEnd = 71,
-                     TRottenFlesh = 72;
+                     TRottenFlesh = 72, TWheat = 73, TWheatSeeds = 74,
+                     TFarmland = 75, TWheatCrop0 = 76, TWheatCrop1 = 77, TWheatCrop2 = 78, TWheatCrop3 = 79,
+                     THoeWood = 80, THoeStone = 81, THoeIron = 82, THoeDiamond = 83,
+                     TTallGrass = 84;
 
     public record struct BlockFaceTiles(byte PosX, byte NegX, byte PosY, byte NegY, byte PosZ, byte NegZ);
 
@@ -108,7 +110,7 @@ public static class TextureAtlas {
         [TFlint] = "items/flint.png",
         [TClay] = "items/clay.png",
 
-        // Интерфейс / HUD (36..39)
+        // GUI (36..39)
         [THeart] = "gui/heart.png",
         [THeartEmpty] = "gui/heart_empty.png",
         [TFood] = "gui/food.png",
@@ -119,17 +121,14 @@ public static class TextureAtlas {
         [TPickaxeStone] = "items/stone_pickaxe.png",
         [TPickaxeIron] = "items/iron_pickaxe.png",
         [TPickaxeDiamond] = "items/diamond_pickaxe.png",
-
         [TSwordWood] = "items/wooden_sword.png",
         [TSwordStone] = "items/stone_sword.png",
         [TSwordIron] = "items/iron_sword.png",
         [TSwordDiamond] = "items/diamond_sword.png",
-
         [TAxeWood] = "items/wooden_axe.png",
         [TAxeStone] = "items/stone_axe.png",
         [TAxeIron] = "items/iron_axe.png",
         [TAxeDiamond] = "items/diamond_axe.png",
-
         [TShovelWood] = "items/wooden_shovel.png",
         [TShovelStone] = "items/stone_shovel.png",
         [TShovelIron] = "items/iron_shovel.png",
@@ -147,16 +146,42 @@ public static class TextureAtlas {
         [TLeather] = "items/leather.png",
         [TWool] = "items/wool.png",
         [TRottenFlesh] = "items/rotten_flesh.png",
+        [TWheat] = "items/wheat.png",
+        [TWheatSeeds] = "items/seeds.png",
+        [TTallGrass] = "blocks/tallgrass.png",
     };
 
     public static Texture2D Atlas => _atlas;
     public static bool Ready => _ready;
 
+    public static bool IsCompletelyBlackImage(Image img) {
+        if (img.Width <= 0 || img.Height <= 0) return true;
+        int nonTransparent = 0;
+        for (int py = 0; py < img.Height; py++) {
+            for (int px = 0; px < img.Width; px++) {
+                var c = Raylib.GetImageColor(img, px, py);
+                if (c.A > 10) {
+                    nonTransparent++;
+                    if (c.R > 0 || c.G > 0 || c.B > 0) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
     public static void GenerateDefaultTextures(bool forceOverwrite = false) {
         var masterImage = GenerateProceduralImage();
         foreach (var (tile, relPath) in TileFiles) {
             string fullPath = Path.Combine(TextureDirectory, relPath);
-            if (forceOverwrite || !File.Exists(fullPath)) {
+            bool shouldWrite = forceOverwrite || !File.Exists(fullPath);
+            if (!shouldWrite && File.Exists(fullPath)) {
+                var existing = Raylib.LoadImage(fullPath);
+                if (IsCompletelyBlackImage(existing)) shouldWrite = true;
+                unsafe { Raylib.UnloadImage(existing); }
+            }
+            if (shouldWrite) {
                 Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
                 int sx = tile % Cols * TilePx;
                 int sy = tile / Cols * TilePx;
@@ -192,21 +217,24 @@ public static class TextureAtlas {
                         if (tileImage.Width != TilePx || tileImage.Height != TilePx) {
                             Raylib.ImageResize(ref tileImage, TilePx, TilePx);
                         }
-                        for (int py = 0; py < TilePx; py++) {
-                            for (int px = 0; px < TilePx; px++) {
-                                var col = Raylib.GetImageColor(tileImage, px, py);
-                                unsafe {
-                                    Raylib.ImageDrawPixel(ref atlasImage, dx + px, dy + py, col);
+                        if (!IsCompletelyBlackImage(tileImage)) {
+                            for (int py = 0; py < TilePx; py++) {
+                                for (int px = 0; px < TilePx; px++) {
+                                    var col = Raylib.GetImageColor(tileImage, px, py);
+                                    unsafe {
+                                        Raylib.ImageDrawPixel(ref atlasImage, dx + px, dy + py, col);
+                                    }
                                 }
                             }
+                            unsafe { Raylib.UnloadImage(tileImage); }
+                            continue;
                         }
                     }
                     unsafe { Raylib.UnloadImage(tileImage); }
-                    continue;
                 }
             }
 
-            // Если файла нет — копируем из процедурного фолбека
+            // Если файла нет или он был полностью черным — копируем из процедурного фолбека
             for (int py = 0; py < TilePx; py++) {
                 for (int px = 0; px < TilePx; px++) {
                     var col = Raylib.GetImageColor(fallbackProcedural, dx + px, dy + py);
@@ -286,6 +314,18 @@ public static class TextureAtlas {
         palette[TBedSide] = (new Color(210, 40, 40, 255), true);
         palette[TBedEnd] = (new Color(210, 40, 40, 255), true);
         palette[TRottenFlesh] = (new Color(150, 75, 45, 255), true);
+        palette[TWheat] = (new Color(225, 190, 60, 255), true);
+        palette[TWheatSeeds] = (new Color(160, 180, 80, 255), false);
+        palette[TFarmland] = (new Color(85, 55, 30, 255), true);
+        palette[TWheatCrop0] = (new Color(80, 180, 40, 255), false);
+        palette[TWheatCrop1] = (new Color(100, 200, 50, 255), false);
+        palette[TWheatCrop2] = (new Color(170, 190, 50, 255), false);
+        palette[TWheatCrop3] = (new Color(225, 190, 50, 255), false);
+        palette[THoeWood] = (new Color(140, 95, 55, 255), false);
+        palette[THoeStone] = (new Color(150, 150, 150, 255), false);
+        palette[THoeIron] = (new Color(220, 220, 220, 255), false);
+        palette[THoeDiamond] = (new Color(90, 230, 240, 255), false);
+        palette[TTallGrass] = (new Color(90, 175, 45, 255), false);
 
         var rng = new Random(20260812);
         for (int tile = 0; tile < palette.Length; tile++) {
@@ -674,6 +714,88 @@ public static class TextureAtlas {
                         else if (rottenSpot) { r = 70; g = 100; b = 40; a = 255; }
                         else if (inMeat) { r = 140 + (px % 3) * 8; g = 60 + (py % 3) * 6; b = 40; a = 255; }
                         else { a = 0; }
+                    } else if (tile == TWheat) {
+                        // Сноп пшеницы
+                        bool inSheaf = (px >= 4 && px <= 11 && py >= 3 && py <= 13) &&
+                                       !(py < 6 && (px == 4 || px == 11));
+                        bool isTie = inSheaf && (py == 8 || py == 9);
+                        if (isTie) {
+                            r = 160; g = 50; b = 30; a = 255; // Красная лента
+                        } else if (inSheaf) {
+                            int shade = (px * 3 + py * 7) % 25;
+                            r = 220 + shade; g = 185 + shade; b = 55; a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == TWheatSeeds) {
+                        // Зерна/семена пшеницы
+                        bool inSeed1 = (px >= 4 && px <= 6 && py >= 9 && py <= 12);
+                        bool inSeed2 = (px >= 8 && px <= 10 && py >= 6 && py <= 10);
+                        bool inSeed3 = (px >= 6 && px <= 8 && py >= 11 && py <= 13);
+                        if (inSeed1 || inSeed2 || inSeed3) {
+                            r = 150 + (px * 7) % 30; g = 175 + (py * 5) % 30; b = 75; a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == TFarmland) {
+                        // Грядка: бороздки влажной вспаханной земли
+                        bool isGroove = py % 4 == 0;
+                        if (isGroove) {
+                            r = 60; g = 40; b = 20; a = 255;
+                        } else {
+                            int d = (px * 3 + py * 7) % 20;
+                            r = 95 + d; g = 65 + d; b = 35; a = 255;
+                        }
+                    } else if (tile >= TWheatCrop0 && tile <= TWheatCrop3) {
+                        // Посевы пшеницы (4 стадии роста: 0..3)
+                        int stage = tile - TWheatCrop0;
+                        int minH = 14 - (stage * 3 + 2); // 0: 12..14, 1: 9..14, 2: 6..14, 3: 3..14
+                        bool inStem = (px == 4 || px == 7 || px == 11) && py >= minH && py <= 14;
+                        bool inLeaf = stage >= 1 && ((px == 3 || px == 5 || px == 8 || px == 10 || px == 12) && py >= minH + 1 && py <= 14);
+                        bool inWheatHead = stage >= 3 && py >= 2 && py <= 6 && (px >= 3 && px <= 12 && (px % 3 != 0));
+                        if (inWheatHead) {
+                            r = 180 + (px + py) % 15; g = 190 + (px * 3) % 20; b = 50; a = 255;
+                        } else if (inStem || inLeaf) {
+                            r = 85 + (stage * 30); g = 180 + (stage * 10); b = 45; a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile >= THoeWood && tile <= THoeDiamond) {
+                        // Мотыга
+                        int mat = tile - THoeWood;
+                        Color matCol = mat == 0 ? new Color(140, 95, 55, 255)
+                                     : mat == 1 ? new Color(150, 150, 150, 255)
+                                     : mat == 2 ? new Color(220, 220, 220, 255)
+                                     : new Color(90, 230, 240, 255);
+                        bool isHandle = (px + py >= 14 && px + py <= 16 && px >= 3 && py >= 3 && px <= 13 && py <= 13);
+                        bool isBladeTop = (py >= 2 && py <= 4 && px >= 4 && px <= 12);
+                        bool isBladeHook = (px >= 4 && px <= 6 && py >= 4 && py <= 7);
+                        if (isBladeTop || isBladeHook) {
+                            r = matCol.R; g = matCol.G; b = matCol.B; a = 255;
+                        } else if (isHandle) {
+                            r = 130; g = 90; b = 45; a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == TTallGrass) {
+                        // Трава: реалистичные лепестки и стебельки травы (Cross-billboard)
+                        bool isGrassBlade = false;
+                        if (py >= 4 && (px == 3 || px == 4) && py >= 6) isGrassBlade = true;
+                        if (py >= 2 && (px == 6 || px == 7 || px == 8)) isGrassBlade = true;
+                        if (py >= 5 && (px == 10 || px == 11)) isGrassBlade = true;
+                        if (py >= 3 && px == 13 && py >= 7) isGrassBlade = true;
+                        if (py >= 8 && (px == 2 || px == 5 || px == 9 || px == 12 || px == 14)) isGrassBlade = true;
+                        if (py >= 13 && px >= 2 && px <= 14) isGrassBlade = true;
+
+                        if (isGrassBlade) {
+                            int shade = (px * 7 + py * 11) % 40;
+                            r = 70 + shade;
+                            g = 150 + shade;
+                            b = 35 + shade / 2;
+                            a = 255;
+                        } else {
+                            a = 0;
+                        }
                     } else {
                         if (tile == TPlanks && (py == 4 || py == 11)) { r -= 40; g -= 30; b -= 20; }
                         if (tile == TLogSide && py % 5 == 4) { r -= 30; g -= 24; b -= 14; }

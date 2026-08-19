@@ -39,9 +39,11 @@ public sealed class Chunk {
     }
 
     public void ReleaseSubGrid(int index) {
-        _subGrids[index] = null;
-        _voxels[index].Flags &= ~VoxelFlags.Occupied;
-        _voxels[index].SubGridLayerMask = 0;
+        if (_subGrids[index] != null) {
+            _subGrids[index] = null;
+            _voxels[index].Flags &= ~VoxelFlags.Occupied;
+            _voxels[index].SubGridLayerMask = 0;
+        }
     }
 
     /// <summary>

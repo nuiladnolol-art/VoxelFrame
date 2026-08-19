@@ -34,22 +34,20 @@ public sealed class FallingBlock {
             return;
         }
 
-        // Ячейка под центром: если твёрдая — приземляемся.
-        var below = new Vec3i(
-            (int)MathF.Floor(Position.X),
-            (int)MathF.Floor(Position.Y - HalfSize - 0.02f),
-            (int)MathF.Floor(Position.Z));
+        // Ищем твёрдое основание под падающим блоком
+        int bx = (int)MathF.Floor(Position.X);
+        int bz = (int)MathF.Floor(Position.Z);
+        int by = (int)MathF.Floor(Position.Y - HalfSize);
+
+        var below = new Vec3i(bx, by, bz);
         if (world.IsSolidAt(below)) {
-            var land = new Vec3i(
-                (int)MathF.Floor(Position.X),
-                (int)MathF.Floor(Position.Y - HalfSize),
-                (int)MathF.Floor(Position.Z));
-            if (!world.IsSolidAt(land)) {
-                world.PlacePlacedBlock(land, Block, 1f);
-            } else {
-                ushort dropId = Block.DropItemId != 0 ? Block.DropItemId : (Block.Id == GameData.BSand.Id ? GameData.SandItem.Id : GameData.GravelItem.Id);
-                world.SpawnPickup(dropId, 1, land);
+            // Нашли препятствие — ищем ближайшую свободную ячейку выше и устанавливаем блок обратно в мир
+            int placeY = by + 1;
+            while (placeY < Chunk.SizeY * 3 && world.IsSolidAt(new Vec3i(bx, placeY, bz))) {
+                placeY++;
             }
+            var land = new Vec3i(bx, placeY, bz);
+            world.PlacePlacedBlock(land, Block, 1f);
             Alive = false;
         }
     }

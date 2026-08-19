@@ -93,6 +93,8 @@ public static class LightEngine {
         byte incoming = world.GetBlockLight(outsideWorld);
         if (incoming <= 1) return;
         int idx = Chunk.Index(lx, ly, lz);
+        var v = gc.Chunk.Get(idx);
+        if (v.TypeId != 0 && GameData.GetBlock(v.TypeId).IsOpaque) return;
         if (incoming - 1 > gc.BlockLight[idx]) {
             gc.BlockLight[idx] = (byte)(incoming - 1);
             queue.Enqueue((lx, ly, lz, (byte)(incoming - 1)));

@@ -86,7 +86,7 @@ public class LauncherForm : Form {
         headerPanel.Controls.Add(lblTitle);
 
         Label lblBadge = new Label {
-            Text = "ALPHA 0.5.0",
+            Text = "ALPHA 0.7.0",
             Font = new Font("Segoe UI", 9, FontStyle.Bold),
             ForeColor = Color.FromArgb(100, 220, 120),
             BackColor = Color.FromArgb(30, 60, 40),
@@ -672,6 +672,9 @@ public class LauncherForm : Form {
 }
 
 public static class IconHelper {
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyIcon(IntPtr hIcon);
+
     public static Icon GetLauncherIcon() {
         try {
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -681,7 +684,12 @@ public static class IconHelper {
             }
             using var bmp = RenderVoxelBlockIcon(64);
             IntPtr hIcon = bmp.GetHicon();
-            return Icon.FromHandle(hIcon);
+            try {
+                using var tempIcon = Icon.FromHandle(hIcon);
+                return (Icon)tempIcon.Clone();
+            } finally {
+                DestroyIcon(hIcon);
+            }
         } catch {
             return SystemIcons.Application;
         }

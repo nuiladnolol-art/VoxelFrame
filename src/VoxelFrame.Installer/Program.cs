@@ -240,8 +240,24 @@ public class InstallerForm : Form {
                 if (sourceDir != null && Directory.Exists(sourceDir)) {
                     CopyDirectory(sourceDir, targetDir, progressBar);
                 } else {
-                    // Извлекаем встроенный или локальный релиз
-                    ExtractFallbackFiles(targetDir);
+                    // Копируем только явные исполняемые файлы проекта VoxelFrame, если они лежат рядом
+                    string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                    string[] allowedFiles = { "VoxelFrame.Launcher.exe", "VoxelFrame.Game.exe", "launcher.ico", "app.ico" };
+                    bool copiedAny = false;
+                    foreach (var fname in allowedFiles) {
+                        string src = Path.Combine(baseDir, fname);
+                        if (File.Exists(src)) {
+                            File.Copy(src, Path.Combine(targetDir, fname), true);
+                            copiedAny = true;
+                        }
+                    }
+                    string srcAssets = Path.Combine(baseDir, "assets");
+                    if (Directory.Exists(srcAssets)) {
+                        CopyDirectory(srcAssets, Path.Combine(targetDir, "assets"), progressBar);
+                    }
+                    if (!copiedAny) {
+                        throw new FileNotFoundException("Файлы игры VoxelFrame не найдены рядом с установщиком.");
+                    }
                 }
 
                 // Создание деинсталлятора
@@ -336,17 +352,9 @@ public class InstallerForm : Form {
         }
     }
 
-    private static void ExtractFallbackFiles(string destinationDir) {
-        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-        foreach (var f in Directory.GetFiles(baseDir)) {
-            if (!f.EndsWith(".exe") || Path.GetFileName(f).Contains("Setup", StringComparison.OrdinalIgnoreCase)) continue;
-            string dest = Path.Combine(destinationDir, Path.GetFileName(f));
-            File.Copy(f, dest, true);
-        }
-    }
-
     private static void CreateUninstallerScript(string targetDir) {
-        string uninstBat = Path.Combine(targetDir, "uninstall.bat");
+        string cleanTargetDir = targetDir.TrimEnd('\\');
+        string uninstBat = Path.Combine(cleanTargetDir, "uninstall.bat");
         string batContent = $"""
             @echo off
             echo Удаление VoxelFrame Launcher...
@@ -356,7 +364,7 @@ public class InstallerForm : Form {
             del "%userprofile%\Desktop\VoxelFrame Launcher.lnk" 2>nul
             rmdir /s /q "%appdata%\Microsoft\Windows\Start Menu\Programs\VoxelFrame" 2>nul
             cd /d "%temp%"
-            rmdir /s /q "{targetDir}" 2>nul
+            rmdir /s /q "{cleanTargetDir}" 2>nul
             echo VoxelFrame успешно удален.
             pause
             """;

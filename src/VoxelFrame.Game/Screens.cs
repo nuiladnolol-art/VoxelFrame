@@ -19,6 +19,13 @@ public static class Screens {
 
     public static string MenuError = "";
     public static bool InWorldSelectScreen = false;
+    public static bool InCreateWorldScreen = false;
+    public static int SelectedWorldListIndex = 0;
+    public static string WorldNameInput = "Новый мир";
+    public static string WorldSeedInput = "";
+    public static int ActiveTextInputField = 0; // 0 = none, 1 = name, 2 = seed
+    public static int CustomWorldSeed = 0;
+
     public static bool InSettingsScreen = false;
     public static bool InControlsScreen = false;
     public static bool InGraphicsScreen = false;
@@ -84,30 +91,123 @@ public static class Screens {
 
         var action = MenuAction.None;
 
-        if (InWorldSelectScreen) {
-            Fonts.DrawCentered("ВЫБОР МИРА", w / 2f, h * 0.12f, 44f, new Color(255, 220, 120, 255));
+        if (InCreateWorldScreen) {
+            Fonts.DrawCentered("СОЗДАНИЕ МИРА", w / 2f, h * 0.10f, 40f, new Color(255, 220, 120, 255));
 
-            float startY = h * 0.22f;
-            float btnW = 340f;
-            float delW = 60f;
-            float gap = 52f;
+            float boxW = 380f;
+            float cx = w / 2f - boxW / 2f;
 
-            for (int slot = 1; slot <= 5; slot++) {
-                bool exists = SaveSystem.SaveExistsForWorld(slot);
-                string label = exists ? $"Мир {slot} (Загрузить)" : $"[Создать новый Мир {slot}]";
-                float rowY = startY + (slot - 1) * gap;
+            // Название мира
+            Fonts.Draw("Название мира:", cx, h * 0.22f, 18f, new Color(200, 200, 200, 255));
+            var nameRec = new Rectangle(cx, h * 0.26f, boxW, 42f);
+            if (Raylib.IsMouseButtonPressed(MouseButton.Left)) {
+                if (Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), nameRec)) ActiveTextInputField = 1;
+            }
+            Raylib.DrawRectangleRec(nameRec, ActiveTextInputField == 1 ? new Color(60, 65, 80, 255) : new Color(40, 45, 55, 255));
+            Raylib.DrawRectangleLinesEx(nameRec, 1.5f, ActiveTextInputField == 1 ? new Color(255, 220, 120, 255) : new Color(90, 100, 120, 255));
+            Fonts.Draw(WorldNameInput + (ActiveTextInputField == 1 && ((int)(Raylib.GetTime() * 2) % 2 == 0) ? "_" : ""), cx + 10f, h * 0.26f + 11f, 18f, Color.White);
 
-                if (Button(w / 2f - (btnW + delW + 8f) / 2f, rowY, btnW, 46f, label, true)) {
-                    SaveSystem.SelectedWorldSlot = slot;
-                    action = exists ? MenuAction.Continue : MenuAction.NewGame;
-                    InWorldSelectScreen = false;
+            // Режим игры (Выживание)
+            Fonts.Draw("Режим игры: Выживание", cx, h * 0.36f, 18f, new Color(200, 200, 200, 255));
+            Fonts.Draw("Поиск ресурсов, крафт, опасные мобы и шкала здоровья.", cx, h * 0.40f, 13f, new Color(150, 160, 170, 255));
+
+            // Сид генерации
+            Fonts.Draw("Сид для генератора мира (оставьте пустым для случайного):", cx, h * 0.48f, 16f, new Color(200, 200, 200, 255));
+            var seedRec = new Rectangle(cx, h * 0.52f, boxW, 42f);
+            if (Raylib.IsMouseButtonPressed(MouseButton.Left)) {
+                if (Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), seedRec)) ActiveTextInputField = 2;
+                else if (!Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), nameRec)) ActiveTextInputField = 0;
+            }
+            Raylib.DrawRectangleRec(seedRec, ActiveTextInputField == 2 ? new Color(60, 65, 80, 255) : new Color(40, 45, 55, 255));
+            Raylib.DrawRectangleLinesEx(seedRec, 1.5f, ActiveTextInputField == 2 ? new Color(255, 220, 120, 255) : new Color(90, 100, 120, 255));
+            Fonts.Draw(WorldSeedInput + (ActiveTextInputField == 2 && ((int)(Raylib.GetTime() * 2) % 2 == 0) ? "_" : ""), cx + 10f, h * 0.52f + 11f, 18f, Color.White);
+
+            // Обработка ввода с клавиатуры
+            int key = Raylib.GetCharPressed();
+            while (key > 0) {
+                if (key >= 32 && key <= 126 || key >= 1040 && key <= 1103) {
+                    if (ActiveTextInputField == 1 && WorldNameInput.Length < 24) WorldNameInput += (char)key;
+                    else if (ActiveTextInputField == 2 && WorldSeedInput.Length < 32) WorldSeedInput += (char)key;
                 }
-                if (exists && Button(w / 2f - (btnW + delW + 8f) / 2f + btnW + 8f, rowY, delW, 46f, "Удалить", true)) {
-                    SaveSystem.DeleteSave(slot);
+                key = Raylib.GetCharPressed();
+            }
+            if (Raylib.IsKeyPressed(KeyboardKey.Backspace)) {
+                if (ActiveTextInputField == 1 && WorldNameInput.Length > 0) WorldNameInput = WorldNameInput[..^1];
+                else if (ActiveTextInputField == 2 && WorldSeedInput.Length > 0) WorldSeedInput = WorldSeedInput[..^1];
+            }
+
+            // Кнопки Создать и Отмена
+            float btnY = h * 0.72f;
+            if (Button(w / 2f - 195f, btnY, 190f, 46f, "Создать новый мир", true)) {
+                string name = string.IsNullOrWhiteSpace(WorldNameInput) ? "Новый мир" : WorldNameInput.Trim();
+                SaveSystem.CurrentWorldPath = SaveSystem.CreateWorldSavePath(name);
+                CustomWorldSeed = GameData.ParseSeed(WorldSeedInput);
+                action = MenuAction.NewGame;
+                InCreateWorldScreen = false;
+                InWorldSelectScreen = false;
+            }
+            if (Button(w / 2f + 5f, btnY, 190f, 46f, "Отмена", true)) {
+                InCreateWorldScreen = false;
+            }
+        } else if (InWorldSelectScreen) {
+            Fonts.DrawCentered("ВЫБОР МИРА", w / 2f, h * 0.08f, 40f, new Color(255, 220, 120, 255));
+
+            var worlds = SaveSystem.GetAllWorlds();
+            if (SelectedWorldListIndex >= worlds.Count) SelectedWorldListIndex = Math.Max(0, worlds.Count - 1);
+
+            float listY = h * 0.16f;
+            float listH = h * 0.58f;
+            float cardW = MathF.Min(560f, w - 80f);
+            float cardH = 64f;
+            float cardX = w / 2f - cardW / 2f;
+
+            if (worlds.Count == 0) {
+                Fonts.DrawCentered("Нет созданных миров. Нажмите 'Создать новый мир'", w / 2f, h * 0.40f, 20f, new Color(180, 180, 180, 255));
+            } else {
+                for (int i = 0; i < worlds.Count && i < 5; i++) {
+                    var wi = worlds[i];
+                    float cy = listY + i * (cardH + 8f);
+                    var cardRec = new Rectangle(cardX, cy, cardW, cardH);
+                    bool isSelected = (i == SelectedWorldListIndex);
+
+                    if (Raylib.IsMouseButtonPressed(MouseButton.Left) && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), cardRec)) {
+                        SelectedWorldListIndex = i;
+                    }
+
+                    Raylib.DrawRectangleRec(cardRec, isSelected ? new Color(60, 68, 85, 240) : new Color(36, 42, 54, 200));
+                    Raylib.DrawRectangleLinesEx(cardRec, isSelected ? 2f : 1f, isSelected ? new Color(255, 220, 120, 255) : new Color(65, 75, 95, 255));
+
+                    Fonts.Draw(wi.Name, cardX + 12f, cy + 8f, 20f, Color.White);
+                    string dateStr = $"{wi.LastPlayed:dd.MM.yyyy HH:mm}";
+                    string sizeStr = $"{wi.SizeBytes / 1024} KB";
+                    string seedStr = wi.Seed != 0 ? $" (Сид: {wi.Seed})" : "";
+                    Fonts.Draw($"{dateStr} • {sizeStr}{seedStr}", cardX + 12f, cy + 34f, 14f, new Color(160, 175, 195, 255));
                 }
             }
 
-            if (Button(w / 2f - 140f, h * 0.85f, 280f, 46f, "Назад", true)) {
+            // Нижняя панель действий
+            float bY1 = h * 0.78f;
+            float bY2 = h * 0.86f;
+            float bW = 180f;
+
+            bool hasSelection = worlds.Count > 0 && SelectedWorldListIndex >= 0 && SelectedWorldListIndex < worlds.Count;
+            if (Button(w / 2f - bW - 6f, bY1, bW, 44f, "Играть в мире", hasSelection)) {
+                SaveSystem.CurrentWorldPath = worlds[SelectedWorldListIndex].FilePath;
+                action = MenuAction.Continue;
+                InWorldSelectScreen = false;
+            }
+            if (Button(w / 2f + 6f, bY1, bW, 44f, "Создать новый мир", true)) {
+                InCreateWorldScreen = true;
+                WorldNameInput = "Новый мир";
+                WorldSeedInput = "";
+                ActiveTextInputField = 0;
+            }
+
+            if (Button(w / 2f - bW - 6f, bY2, bW, 44f, "Удалить", hasSelection)) {
+                SaveSystem.DeleteSave(worlds[SelectedWorldListIndex].FilePath);
+                if (SelectedWorldListIndex >= worlds.Count - 1) SelectedWorldListIndex = Math.Max(0, worlds.Count - 2);
+            }
+            if (Button(w / 2f + 6f, bY2, bW, 44f, "Отмена", true)) {
                 InWorldSelectScreen = false;
             }
         } else {
@@ -129,7 +229,7 @@ public static class Screens {
             if (MenuError.Length > 0)
                 Fonts.DrawCentered(MenuError, w / 2f, h * 0.68f, 18f, new Color(255, 120, 120, 255));
 
-            Fonts.Draw("VoxelFrame Alpha 0.5.0", 10f, h - 25f, 14f, new Color(200, 200, 200, 180));
+            Fonts.Draw("VoxelFrame Alpha 0.7.0", 10f, h - 25f, 14f, new Color(200, 200, 200, 180));
             Fonts.Draw("SenStol Studio", w - 180f, h - 25f, 14f, new Color(200, 200, 200, 180));
         }
 
@@ -736,6 +836,35 @@ public static class Screens {
         var entryInSlot = inv.Slots[idx];
         const int maxStack = 64;
 
+        bool shift = Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift);
+        if (shift && !rightClick && entryInSlot != null) {
+            // Shift-Click: быстрое перемещение между хотбаром (0..8) и основным инвентарем (9..35)
+            var item = entryInSlot.Value;
+            int targetStart = idx < 9 ? 9 : 0;
+            int targetEnd = idx < 9 ? 36 : 9;
+            inv.RemoveAt(idx);
+            int rem = item.Quantity;
+            for (int t = targetStart; t < targetEnd && rem > 0; t++) {
+                var te = inv.Slots[t];
+                if (te != null && te.Value.Item.Definition == item.Item.Definition && te.Value.Quantity < maxStack) {
+                    int add = Math.Min(maxStack - te.Value.Quantity, rem);
+                    inv.InsertAt(t, te.Value with { Quantity = te.Value.Quantity + add });
+                    rem -= add;
+                }
+            }
+            for (int t = targetStart; t < targetEnd && rem > 0; t++) {
+                if (inv.Slots[t] == null) {
+                    int add = Math.Min(maxStack, rem);
+                    inv.InsertAt(t, new ItemEntry(item.Item, add));
+                    rem -= add;
+                }
+            }
+            if (rem > 0) {
+                inv.InsertAt(idx, item with { Quantity = rem });
+            }
+            return true;
+        }
+
         if (rightClick) {
             if (Held.HasValue && Held.Value.Quantity > 0) {
                 var held = Held.Value;
@@ -1150,16 +1279,18 @@ public static class Screens {
     private static void HandleFurnaceSlotClick(ref ItemEntry? slotItem, bool leftClick, bool rightClick, Func<ushort, bool> filter) {
         const int maxStack = 64;
         if (rightClick) {
-            if (Held.HasValue && Held.Value.Quantity > 0 && filter(Held.Value.Item.Definition.Id)) {
-                var held = Held.Value;
-                if (!slotItem.HasValue) {
-                    slotItem = new ItemEntry(held.Item, 1);
-                    Held = held with { Quantity = held.Quantity - 1 };
-                    if (Held.Value.Quantity <= 0) Held = null;
-                } else if (slotItem.Value.Item.Definition == held.Item.Definition && slotItem.Value.Quantity < maxStack) {
-                    slotItem = slotItem.Value with { Quantity = slotItem.Value.Quantity + 1 };
-                    Held = held with { Quantity = held.Quantity - 1 };
-                    if (Held.Value.Quantity <= 0) Held = null;
+            if (Held.HasValue && Held.Value.Quantity > 0) {
+                if (filter(Held.Value.Item.Definition.Id)) {
+                    var held = Held.Value;
+                    if (!slotItem.HasValue) {
+                        slotItem = new ItemEntry(held.Item, 1);
+                        Held = held with { Quantity = held.Quantity - 1 };
+                        if (Held.Value.Quantity <= 0) Held = null;
+                    } else if (slotItem.Value.Item.Definition == held.Item.Definition && slotItem.Value.Quantity < maxStack) {
+                        slotItem = slotItem.Value with { Quantity = slotItem.Value.Quantity + 1 };
+                        Held = held with { Quantity = held.Quantity - 1 };
+                        if (Held.Value.Quantity <= 0) Held = null;
+                    }
                 }
             } else if (slotItem.HasValue && slotItem.Value.Quantity > 0) {
                 int qty = slotItem.Value.Quantity;
@@ -1247,7 +1378,7 @@ public static class Screens {
                 }
 
                 if ((leftClick || rightClick) && hov) {
-                    HandleContainerSlotClick(chestInv, idx, leftClick, rightClick);
+                    HandleContainerSlotClick(chestInv, idx, leftClick, rightClick, pInv);
                 }
             }
         }
@@ -1271,9 +1402,18 @@ public static class Screens {
         HandleWorkbenchInput(session, pInv, invX, invY, hotY);
     }
 
-    private static void HandleContainerSlotClick(Container inv, int slotIdx, bool leftClick, bool rightClick) {
+    private static void HandleContainerSlotClick(Container inv, int slotIdx, bool leftClick, bool rightClick, Container? targetTransferInv = null) {
         const int maxStack = 64;
         var slotItem = inv.Slots[slotIdx];
+
+        bool shift = Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift);
+        if (shift && !rightClick && slotItem != null && targetTransferInv != null) {
+            var item = slotItem.Value;
+            if (targetTransferInv.TryInsert(item.Item, item.Quantity)) {
+                inv.RemoveAt(slotIdx);
+                return;
+            }
+        }
 
         if (rightClick) {
             if (Held.HasValue && Held.Value.Quantity > 0) {

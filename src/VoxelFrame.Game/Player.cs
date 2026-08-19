@@ -39,15 +39,49 @@ public sealed class Player {
     public float AttackTimer;
     public float BobTimer;
     public float BobOffset;
+    public float StepSoundTimer;
     public float PlaceCooldown;
     public float HighestYInAir;
     public float AirSupply = 10f;
     public float FireTicks;
     /// <summary>Урон от застревания в блоках.</summary>
     public float StuckTimer;
+    public const float MaxHunger = 20f;
+    public float Hunger = 20f;
+    public float Saturation = 5f;
+    public float Exhaustion = 0f;
+    public float StarveTimer = 0f;
     public bool IsSprinting { get; private set; }
     public float SprintFovProgress { get; private set; }
     public float ScreenShake { get; set; }
+    public float AttackRechargeTimer = 1.0f;
+    public float HurtTimer { get; set; }
+    public float HurtDirection { get; set; } = 1f;
+    public float InvulnerabilityTimer { get; set; }
+
+    public void ApplyDamage(float amount, GameSession session, Vector3? attackerPos = null) {
+        if (amount <= 0f) return;
+        if (InvulnerabilityTimer > 0f) return;
+
+        InvulnerabilityTimer = 0.4f;
+        HurtTimer = 0.5f;
+        ScreenShake = MathF.Min(0.5f, ScreenShake + 0.25f);
+        Health = MathF.Max(0f, Health - amount);
+
+        if (attackerPos.HasValue) {
+            var diff = attackerPos.Value - Position;
+            var right = Vector3.Cross(Forward, Vector3.UnitY);
+            HurtDirection = Vector3.Dot(diff, right) >= 0 ? 1f : -1f;
+        } else {
+            HurtDirection = (new Random().Next(0, 2) == 0) ? 1f : -1f;
+        }
+
+        SoundSystem.PlayPlayerHurt();
+
+        if (Health <= 0f) {
+            session.DiePlayer();
+        }
+    }
 
     public Vector3 Forward => new(
         MathF.Cos(Pitch) * MathF.Sin(Yaw),
@@ -86,25 +120,33 @@ public sealed class Player {
         // Движение (каноничная ходьба, спринт, приседание, плавание).
         float targetEyeHeight = EyeHeight;
         float speed = WalkSpeed;
+        bool canSprint = Hunger > 6f;
         if (input.Crouch) {
             targetEyeHeight = 0.35f;
             speed = WalkSpeed * 0.35f;
             IsSprinting = false;
             SprintFovProgress = MathF.Max(0f, SprintFovProgress - dt * 5f);
-        } else if (input.Sprint && input.MoveZ > 0.1f) {
+        } else if (input.Sprint && canSprint && input.MoveZ > 0.1f) {
             IsSprinting = true;
             speed = WalkSpeed * 1.35f;
             SprintFovProgress = MathF.Min(1f, SprintFovProgress + dt * 4f);
+            Exhaustion += dt * 0.15f;
         } else {
             IsSprinting = false;
             SprintFovProgress = MathF.Max(0f, SprintFovProgress - dt * 5f);
         }
         CurrentEyeHeight += (targetEyeHeight - CurrentEyeHeight) * MathF.Min(1f, dt * 15f);
 
-        var feetBlock = world.GetVoxel(new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z)));
+        var feetCell = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z));
+        var feetBlock = world.GetVoxel(feetCell);
         var eyeVoxel = world.GetVoxel(new Vec3i((int)MathF.Floor(Eye.X), (int)MathF.Floor(Eye.Y), (int)MathF.Floor(Eye.Z)));
         bool inWater = feetBlock.TypeId == GameData.BWater.Id || eyeVoxel.TypeId == GameData.BWater.Id;
         bool inLava = feetBlock.TypeId == GameData.BLava.Id || eyeVoxel.TypeId == GameData.BLava.Id;
+        bool inFire = world.Fire.Burning.ContainsKey(feetCell) || world.Fire.Campfires.Contains(feetCell);
+
+        if (inFire && !inWater) {
+            FireTicks = MathF.Max(FireTicks, 5.0f);
+        }
 
         var forwardH = new Vector3(Forward.X, 0f, Forward.Z);
         if (forwardH.LengthSquared() > 0.001f) forwardH = Vector3.Normalize(forwardH);
@@ -122,7 +164,8 @@ public sealed class Player {
             Velocity.Y -= 6f * dt; // уменьшенная гравитация в воде
             if (input.Jump) {
                 bool nearSurface = eyeVoxel.TypeId != GameData.BWater.Id;
-                Velocity.Y = nearSurface ? JumpSpeed * 0.85f : 4.2f;
+                // Импульс 1.15x позволяет свободно выпрыгивать на берег высотой 1 блок
+                Velocity.Y = nearSurface ? JumpSpeed * 1.15f : 4.8f;
             }
             Velocity.X *= MathF.Exp(-2.5f * dt);
             Velocity.Z *= MathF.Exp(-2.5f * dt);
@@ -130,8 +173,7 @@ public sealed class Player {
             OnGround = Collision.Move(world, ref Position, HalfExtents, ref Velocity, dt, false);
         } else if (inLava) {
             FireTicks = MathF.Max(FireTicks, 8.0f); // Поджигает на 8 секунд
-            Health = MathF.Max(0f, Health - dt * 8.0f); // Урон от лавы
-            ScreenShake = MathF.Min(0.35f, ScreenShake + dt * 0.4f);
+            ApplyDamage(dt * 8.0f, session);
             speed *= 0.35f;
             Velocity.X = wish.X * speed;
             Velocity.Z = wish.Z * speed;
@@ -146,7 +188,10 @@ public sealed class Player {
         } else {
             Velocity.X = wish.X * speed;
             Velocity.Z = wish.Z * speed;
-            if (input.Jump && OnGround) Velocity.Y = JumpSpeed;
+            if (input.Jump && OnGround) {
+                Velocity.Y = JumpSpeed;
+                Exhaustion += IsSprinting ? 0.2f : 0.05f;
+            }
             Velocity.Y -= Gravity * dt;
             OnGround = Collision.Move(world, ref Position, HalfExtents, ref Velocity, dt, input.Crouch && OnGround);
         }
@@ -158,12 +203,16 @@ public sealed class Player {
             world.SpawnDust(Position - new Vector3(0f, HalfExtents.Y, 0f), 5);
         }
 
-        // Звуки шагов и пыль при спринте
+        // Звуки шагов по типу материала и пыль при спринте
         if (OnGround && (Velocity.X != 0f || Velocity.Z != 0f) && !input.Crouch) {
-            if (BobTimer % MathF.PI < 0.2f) {
-                SoundSystem.PlayStep();
+            StepSoundTimer -= dt * (IsSprinting ? 1.5f : 1.0f);
+            if (StepSoundTimer <= 0f) {
+                StepSoundTimer = 0.38f;
+                SoundSystem.PlayStep(feetBlock.TypeId);
                 if (IsSprinting) world.SpawnDust(Position - new Vector3(0f, HalfExtents.Y, 0f), 2);
             }
+        } else {
+            StepSoundTimer = 0.1f;
         }
 
         // Урон от падения
@@ -173,25 +222,22 @@ public sealed class Player {
             float fallDist = HighestYInAir - Position.Y;
             if (fallDist > 3.5f) {
                 float fallDmg = MathF.Floor((fallDist - 3f) * 2f);
-                Health = MathF.Max(0f, Health - fallDmg);
-                ScreenShake = MathF.Min(0.35f, ScreenShake + 0.18f);
+                ApplyDamage(fallDmg, session);
                 session.AddMessage($"Урон от падения: -{fallDmg} HP");
-                SoundSystem.PlayHit();
             }
             HighestYInAir = Position.Y;
         }
 
-        // Проверка удушья под водой
+        // Проверка удушья под водой (плавный расход и восстановление воздуха)
         if (eyeVoxel.TypeId == GameData.BWater.Id) {
             AirSupply -= dt;
             if (AirSupply <= 0f) {
                 AirSupply = 0f;
-                Health = MathF.Max(0f, Health - dt * 3f);
+                ApplyDamage(dt * 3f, session);
                 session.AddMessage("Вы тонете!");
-                SoundSystem.PlayHit();
             }
         } else {
-            AirSupply = 10f;
+            AirSupply = MathF.Min(10f, AirSupply + dt * 4f);
         }
 
         // Урон и мягкое выталкивание при застревании в блоках
@@ -200,9 +246,8 @@ public sealed class Player {
             StuckTimer += dt;
             if (StuckTimer >= 0.5f) {
                 StuckTimer = 0f;
-                Health = MathF.Max(0f, Health - 1f);
+                ApplyDamage(1f, session);
                 session.AddMessage("Вы застряли в блоках!");
-                SoundSystem.PlayHit();
                 Position.Y += 0.25f;
                 Velocity.Y = 0f;
             }
@@ -226,52 +271,65 @@ public sealed class Player {
         session.TargetBlock = hit;
         session.PlaceCell = placeCell;
 
-        // Ломание / атака.
+        // Таймеры боя и урона
         AttackTimer -= dt;
-        if (input.AttackHeld) {
-            Animal? targetedAnimal = null;
-            HostileMob? targetedHostile = null;
-            float bestDist = float.MaxValue;
+        AttackRechargeTimer += dt;
+        if (HurtTimer > 0f) HurtTimer = MathF.Max(0f, HurtTimer - dt);
+        if (InvulnerabilityTimer > 0f) InvulnerabilityTimer = MathF.Max(0f, InvulnerabilityTimer - dt);
 
-            foreach (var a in world.Animals) {
-                if (!a.Alive) continue;
-                var min = a.Position - new Vector3(Animal.HalfSize, Animal.HalfSize, Animal.HalfSize);
-                var max = a.Position + new Vector3(Animal.HalfSize, Animal.HalfSize, Animal.HalfSize);
-                if (RayAabb(Eye, Forward, min, max, out float t) && t < bestDist && t <= 3.5f) {
-                    var hitPoint = Eye + Forward * MathF.Max(0.1f, t - 0.05f);
-                    if (HostileMob.HasLineOfSight(world, Eye, hitPoint)) {
-                        bestDist = t;
-                        targetedAnimal = a;
-                        targetedHostile = null;
-                    }
+        // 1. Атака сущностей (мобы/животные) требует дискретного клика ЛКМ (AttackPressed), как в MC 1.9+
+        Animal? targetedAnimal = null;
+        HostileMob? targetedHostile = null;
+        float bestEntityDist = float.MaxValue;
+
+        foreach (var a in world.Animals) {
+            if (!a.Alive) continue;
+            var min = a.Position - new Vector3(Animal.HalfSize, Animal.HalfSize, Animal.HalfSize);
+            var max = a.Position + new Vector3(Animal.HalfSize, Animal.HalfSize, Animal.HalfSize);
+            if (RayAabb(Eye, Forward, min, max, out float t) && t < bestEntityDist && t <= 3.5f) {
+                var hitPoint = Eye + Forward * MathF.Max(0.1f, t - 0.05f);
+                if (HostileMob.HasLineOfSight(world, Eye, hitPoint)) {
+                    bestEntityDist = t;
+                    targetedAnimal = a;
+                    targetedHostile = null;
                 }
             }
+        }
 
-            foreach (var m in world.HostileMobs) {
-                if (!m.Alive) continue;
-                float halfX = m.Type == HostileType.Spider ? 0.65f : 0.45f;
-                float halfY = m.Type == HostileType.Spider ? 0.35f : 0.85f;
-                float halfZ = m.Type == HostileType.Spider ? 0.65f : 0.45f;
-                var min = m.Position - new Vector3(halfX, halfY, halfZ);
-                var max = m.Position + new Vector3(halfX, halfY, halfZ);
-                if (RayAabb(Eye, Forward, min, max, out float t) && t < bestDist && t <= 3.5f) {
-                    var hitPoint = Eye + Forward * MathF.Max(0.1f, t - 0.05f);
-                    if (HostileMob.HasLineOfSight(world, Eye, hitPoint)) {
-                        bestDist = t;
-                        targetedHostile = m;
-                        targetedAnimal = null;
-                    }
+        foreach (var m in world.HostileMobs) {
+            if (!m.Alive) continue;
+            float halfX = m.Type == HostileType.Spider ? 0.65f : 0.45f;
+            float halfY = m.Type == HostileType.Spider ? 0.35f : 0.85f;
+            float halfZ = m.Type == HostileType.Spider ? 0.65f : 0.45f;
+            var min = m.Position - new Vector3(halfX, halfY, halfZ);
+            var max = m.Position + new Vector3(halfX, halfY, halfZ);
+            if (RayAabb(Eye, Forward, min, max, out float t) && t < bestEntityDist && t <= 3.5f) {
+                var hitPoint = Eye + Forward * MathF.Max(0.1f, t - 0.05f);
+                if (HostileMob.HasLineOfSight(world, Eye, hitPoint)) {
+                    bestEntityDist = t;
+                    targetedHostile = m;
+                    targetedAnimal = null;
                 }
             }
+        }
 
-            if ((targetedAnimal != null || targetedHostile != null) && bestDist <= 3.5f) {
-                BreakTarget = new Vec3i(int.MinValue, int.MinValue, int.MinValue);
-                BreakProgress = 0f;
-                BreakDuration = 0f;
-                if (targetedAnimal != null) AttackAnimal(world, session);
-                else if (targetedHostile != null) AttackHostile(targetedHostile, world, session);
-            } else if (hasTarget && GameData.GetBlock(world.GetVoxel(hit).TypeId) is { IsUnbreakable: false } targetBlock) {
-                if (hit != BreakTarget) { BreakTarget = hit; BreakProgress = 0f; }
+        if (input.AttackPressed && (targetedAnimal != null || targetedHostile != null) && bestEntityDist <= 3.5f) {
+            BreakTarget = new Vec3i(int.MinValue, int.MinValue, int.MinValue);
+            BreakProgress = 0f;
+            BreakDuration = 0f;
+            if (targetedAnimal != null) AttackAnimal(world, session);
+            else if (targetedHostile != null) AttackHostile(targetedHostile, world, session);
+        } else if (input.AttackHeld && (targetedAnimal == null && targetedHostile == null)) {
+            // 2. Непрерывное ломание блоков при зажатии ЛКМ
+            if (hasTarget && GameData.GetBlock(world.GetVoxel(hit).TypeId) is { IsUnbreakable: false } targetBlock) {
+                if (hit != BreakTarget) {
+                    BreakTarget = hit;
+                    BreakProgress = 0f;
+                    ushort tId = SelectedItem?.Id ?? 0;
+                    if (!GameData.CanHarvestBlock(targetBlock, tId) && GameData.GetRequiredTier(targetBlock.Id) > 0) {
+                        session.AddMessage("Внимание: нужен более прочный инструмент для добычи этого блока!");
+                    }
+                }
                 float breakTime = GameData.GetMiningTime(targetBlock, SelectedItem);
                 BreakDuration = breakTime;
                 BreakProgress += dt;
@@ -326,6 +384,7 @@ public sealed class Player {
                 } else if (targetVox.TypeId == GameData.BChest.Id) {
                     session.ActiveChestPos = session.TargetBlock;
                     session.Ui = UiState.Chest;
+                    SoundSystem.PlayChest();
                     wantUse = false;
                 } else if (targetVox.TypeId == GameData.BBed.Id || targetVox.TypeId == GameData.BBedHead.Id) {
                     float tod = session.DayNight.TimeOfDay;
@@ -350,19 +409,62 @@ public sealed class Player {
                 }
             }
             if (wantUse && SelectedItem is { } item) {
-                if (GameData.FoodValue.TryGetValue(item.Id, out float heal)) {
-                    if (input.UsePressed && Health < MaxHealth) {
-                        if (TryConsumeSelected(item, 1)) {
-                            Health = MathF.Min(MaxHealth, Health + heal);
-                            SoundSystem.PlayEat();
+                // Вспахивание земли/травы мотыгой в грядку (Farmland)
+                if (GameData.IsHoe(item.Id) && session.HasTarget) {
+                    var targetVox = world.GetVoxel(session.TargetBlock);
+                    if (targetVox.TypeId == GameData.BGrass.Id || targetVox.TypeId == GameData.BDirt.Id) {
+                        var above = session.TargetBlock + new Vec3i(0, 1, 0);
+                        if (!world.IsSolidAt(above)) {
+                            world.SetBlock(session.TargetBlock, GameData.BFarmland.Id);
+                            SoundSystem.PlayDig(GameData.BDirt.Id);
+
+                            var entry = SelectedEntry;
+                            if (entry != null) {
+                                var inst = entry.Value.Item;
+                                int maxDur = GameData.GetMaxToolDurability(inst.Definition.Id);
+                                inst.Condition -= 1.0 / maxDur;
+                                if (inst.Condition <= 0) {
+                                    Inventory.RemoveAt(SelectedSlot);
+                                    session.AddMessage($"Инструмент {inst.Definition.Name} сломался!");
+                                    SoundSystem.PlayBreakTool();
+                                }
+                            }
+                            wantUse = false;
                         }
                     }
-                } else if (GameData.TryGetBlockByItem(item.Id, out var block)) {
+                } else if (item.Id == GameData.WheatSeedsItem.Id && session.HasTarget) {
+                    // Посадка семян пшеницы на грядку
                     var targetVox = world.GetVoxel(session.TargetBlock);
-                    Vec3i targetPlace = (targetVox.TypeId == GameData.BWater.Id || targetVox.TypeId == GameData.BLava.Id)
-                        ? session.TargetBlock
-                        : placeCell;
-                    TryPlaceBlock(world, session, targetPlace, block!, item);
+                    if (targetVox.TypeId == GameData.BFarmland.Id) {
+                        var cropPos = session.TargetBlock + new Vec3i(0, 1, 0);
+                        var cropVox = world.GetVoxel(cropPos);
+                        if (cropVox.TypeId == 0) {
+                            if (TryConsumeSelected(item, 1)) {
+                                var planted = GameData.BWheatCrop;
+                                world.PlacePlacedBlock(cropPos, planted, 1f, 0);
+                                SoundSystem.PlayDig(GameData.BGrass.Id);
+                                wantUse = false;
+                            }
+                        }
+                    }
+                }
+
+                if (wantUse) {
+                    if (GameData.FoodValue.TryGetValue(item.Id, out float foodVal)) {
+                        if (input.UsePressed && (Hunger < MaxHunger || Health < MaxHealth)) {
+                            if (TryConsumeSelected(item, 1)) {
+                                Hunger = MathF.Min(MaxHunger, Hunger + foodVal);
+                                Saturation = MathF.Min(Hunger, Saturation + foodVal * 0.6f);
+                                SoundSystem.PlayEat();
+                            }
+                        }
+                    } else if (GameData.TryGetBlockByItem(item.Id, out var block)) {
+                        var targetVox = world.GetVoxel(session.TargetBlock);
+                        Vec3i targetPlace = (targetVox.TypeId == GameData.BWater.Id || targetVox.TypeId == GameData.BLava.Id)
+                            ? session.TargetBlock
+                            : placeCell;
+                        TryPlaceBlock(world, session, targetPlace, block!, item);
+                    }
                 }
             }
         }
@@ -371,9 +473,40 @@ public sealed class Player {
     }
 
     private void TickVitals(float dt, GameSession session) {
+        // Фоновый расход сытости и голод
+        if (Exhaustion >= 4.0f) {
+            Exhaustion -= 4.0f;
+            if (Saturation > 0f) Saturation = MathF.Max(0f, Saturation - 1f);
+            else Hunger = MathF.Max(0f, Hunger - 1f);
+        }
+
+        // Естественная регенерация здоровья при сытости >= 18
+        if (Hunger >= 18f && Health < MaxHealth) {
+            HealthRegenTimer += dt;
+            if (HealthRegenTimer >= 4.0f) {
+                HealthRegenTimer = 0f;
+                Health = MathF.Min(MaxHealth, Health + 1f);
+                Exhaustion += 6.0f;
+            }
+        } else {
+            HealthRegenTimer = 0f;
+        }
+
+        // Урон от голода при Hunger <= 0
+        if (Hunger <= 0f) {
+            StarveTimer += dt;
+            if (StarveTimer >= 4.0f) {
+                StarveTimer = 0f;
+                ApplyDamage(1f, session);
+                session.AddMessage("Вы умираете от голода!");
+            }
+        } else {
+            StarveTimer = 0f;
+        }
+
         if (FireTicks > 0f) {
             FireTicks = MathF.Max(0f, FireTicks - dt);
-            Health = MathF.Max(0f, Health - dt * 1.5f);
+            ApplyDamage(dt * 1.5f, session);
         }
         if (Health <= 0f) session.DiePlayer();
     }
@@ -383,8 +516,9 @@ public sealed class Player {
     private static readonly Random DropRng = new();
 
     public void BreakBlock(GameWorld world, GameSession session, Vec3i pos, BlockType block) {
+        var oldVox = world.GetVoxel(pos);
         world.RemoveBlock(pos);
-        SoundSystem.PlayDig();
+        SoundSystem.PlayDig(block.Id);
 
         // Проверка песка/гравия выше — каскадное падение от гравитации!
         var curAbove = pos + new Vec3i(0, 1, 0);
@@ -410,6 +544,7 @@ public sealed class Player {
             if (inst.Condition <= 0) {
                 Inventory.RemoveAt(SelectedSlot);
                 session.AddMessage($"Инструмент {inst.Definition.Name} сломался!");
+                SoundSystem.PlayBreakTool();
             }
         }
 
@@ -418,7 +553,22 @@ public sealed class Player {
 
         if (canHarvest) {
             int dropCount = block.DropItemCount;
-            if (block.DropItemId != 0 && GameData.Items.TryGetValue(block.DropItemId, out var drop)) {
+            if (block.Id == GameData.BWheatCrop.Id) {
+                int stage = oldVox.SubGridLayerMask; // 0..3
+                if (stage >= 3) {
+                    // Зрелая пшеница: 1 пшеница + 1..3 семян
+                    world.SpawnPickup(GameData.WheatItem.Id, 1, pos);
+                    int seedCount = DropRng.Next(1, 4);
+                    world.SpawnPickup(GameData.WheatSeedsItem.Id, seedCount, pos);
+                } else {
+                    // Недозрелая: только 1 семечко
+                    world.SpawnPickup(GameData.WheatSeedsItem.Id, 1, pos);
+                }
+            } else if (block.Id == GameData.BTallGrass.Id) {
+                if (DropRng.NextDouble() < 0.30) {
+                    world.SpawnPickup(GameData.WheatSeedsItem.Id, 1, pos);
+                }
+            } else if (block.DropItemId != 0 && GameData.Items.TryGetValue(block.DropItemId, out var drop)) {
                 world.SpawnPickup(drop.Id, dropCount, pos);
             } else if (block.Id == GameData.BLeaves.Id) {
                 double roll = DropRng.NextDouble();
@@ -533,26 +683,42 @@ public sealed class Player {
             }
         }
         if (best == null || bestDist > 3.5f) return;
+
+        ushort toolId = SelectedItem?.Id ?? 0;
+        float weaponCd = GameData.GetWeaponCooldown(toolId);
+        float charge = Math.Clamp(AttackRechargeTimer / weaponCd, 0f, 1f);
+        AttackRechargeTimer = 0f;
         AttackTimer = AttackCooldown;
-        bool isCrit = !OnGround && Velocity.Y < -0.2f;
-        float dmg = GameData.GetWeaponDamage(SelectedItem?.Id ?? 0);
+
+        bool isStrong = charge >= 0.85f;
+        bool isCrit = isStrong && !OnGround && Velocity.Y < -0.2f;
+
+        float baseDmg = GameData.GetWeaponDamage(toolId);
+        float dmg = baseDmg * (0.2f + 0.8f * charge * charge);
+
         if (isCrit) {
             dmg *= 1.5f;
             session.AddMessage("Критический удар! ×1.5");
             world.SpawnCrit(best.Position + new Vector3(0f, 0.4f, 0f), 12);
         }
+
         best.Health -= dmg;
         best.HurtTime = 0.5f;
         best.FleeTimer = 2.0f;
         var push = best.Position - Position;
         if (push.LengthSquared() > 0.001f) {
             var pushH = Vector2.Normalize(new Vector2(push.X, push.Z));
-            best.Velocity += new Vector3(pushH.X * 5.0f, 3.5f, pushH.Y * 5.0f);
+            float knockback = isStrong ? 5.0f : 1.5f;
+            float vertKnock = isStrong ? 3.5f : 1.0f;
+            best.Velocity += new Vector3(pushH.X * knockback, vertKnock, pushH.Y * knockback);
             best.WanderDir = pushH;
         } else {
-            best.Velocity += new Vector3(0f, 3.5f, 0f);
+            best.Velocity += new Vector3(0f, isStrong ? 3.5f : 1.0f, 0f);
         }
-        SoundSystem.PlayHit();
+
+        if (isStrong) SoundSystem.PlayStrongAttack();
+        else SoundSystem.PlayWeakAttack();
+
         if (best.Health <= 0f) {
             best.Die(world, session);
         }
@@ -560,22 +726,38 @@ public sealed class Player {
 
     public void AttackHostile(HostileMob mob, GameWorld world, GameSession session) {
         if (AttackTimer > 0f) return;
+
+        ushort toolId = SelectedItem?.Id ?? 0;
+        float weaponCd = GameData.GetWeaponCooldown(toolId);
+        float charge = Math.Clamp(AttackRechargeTimer / weaponCd, 0f, 1f);
+        AttackRechargeTimer = 0f;
         AttackTimer = AttackCooldown;
-        bool isCrit = !OnGround && Velocity.Y < -0.2f;
-        float dmg = GameData.GetWeaponDamage(SelectedItem?.Id ?? 0);
+
+        bool isStrong = charge >= 0.85f;
+        bool isCrit = isStrong && !OnGround && Velocity.Y < -0.2f;
+
+        float baseDmg = GameData.GetWeaponDamage(toolId);
+        float dmg = baseDmg * (0.2f + 0.8f * charge * charge);
+
         if (isCrit) {
             dmg *= 1.5f;
             session.AddMessage("Критический удар! ×1.5");
             world.SpawnCrit(mob.Position + new Vector3(0f, 0.5f, 0f), 14);
         }
+
         mob.Health -= dmg;
         mob.HurtTime = 0.4f;
         var push = mob.Position - Position;
         if (push.LengthSquared() > 0.001f) {
             var pushH = Vector2.Normalize(new Vector2(push.X, push.Z));
-            mob.Velocity += new Vector3(pushH.X * 6.0f, 3.0f, pushH.Y * 6.0f);
+            float knockback = isStrong ? 6.0f : 2.0f;
+            float vertKnock = isStrong ? 3.0f : 1.0f;
+            mob.Velocity += new Vector3(pushH.X * knockback, vertKnock, pushH.Y * knockback);
         }
-        SoundSystem.PlayHit();
+
+        if (isStrong) SoundSystem.PlayStrongAttack();
+        else SoundSystem.PlayWeakAttack();
+
         if (mob.Health <= 0f) {
             mob.Die(world, session);
         }

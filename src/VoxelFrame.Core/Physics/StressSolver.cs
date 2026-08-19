@@ -202,19 +202,19 @@ public static class StressSolver {
                 float total = loadA[i];
                 int pc = parentCount[i];
                 if (pc == 0) continue;               // grounded on the floor: everything sinks here
-                float spareSum = 0f;
+                float capSum = 0f;
                 for (int k = 0; k < pc; k++) {
                     int p = parents[i * MaxParents + k];
                     if (!grounded[p]) continue;
-                    spareSum += Spare(island, states, loadA, p);
+                    capSum += states[island.Nodes[p].StateId].CapacityKN[island.Nodes[p].Cell];
                 }
-                if (spareSum <= 0f) continue;        // parents saturated: node keeps the load → fails
+                if (capSum <= 0f) continue;
                 for (int k = 0; k < pc; k++) {
                     int p = parents[i * MaxParents + k];
                     if (!grounded[p]) continue;
-                    float spare = Spare(island, states, loadA, p);
-                    if (spare <= 0f) continue;
-                    loadB[p] += total * (spare / spareSum);
+                    float cap = states[island.Nodes[p].StateId].CapacityKN[island.Nodes[p].Cell];
+                    if (cap <= 0f) continue;
+                    loadB[p] += total * (cap / capSum);
                 }
             }
             float maxDiff = 0f;
@@ -222,11 +222,6 @@ public static class StressSolver {
             Array.Copy(loadB, loadA, n);
             if (maxDiff < ConvergenceKN) break;
         }
-    }
-
-    private static float Spare(SupportIsland island, ChunkStressState[] states, float[] load, int nodeIndex) {
-        var nd = island.Nodes[nodeIndex];
-        return MathF.Max(states[nd.StateId].CapacityKN[nd.Cell] - load[nodeIndex], 0f);
     }
 
     /// Islands without framework nodes are pure vertical stacks: load(node) =

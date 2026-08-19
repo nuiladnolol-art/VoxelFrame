@@ -293,18 +293,42 @@ public sealed class WorldRenderer : IDisposable {
         unsafe {
             foreach (var pos in _world.DecorPositions) {
                 var v = _world.GetVoxel(pos);
-                if (v.TypeId != GameData.BTorch.Id) continue;
-                byte tile = (byte)TextureAtlas.TTorch;
-                var src = new Rectangle(
-                    tile % TextureAtlas.Cols * TextureAtlas.TilePx,
-                    tile / TextureAtlas.Cols * TextureAtlas.TilePx,
-                    TextureAtlas.TilePx, TextureAtlas.TilePx);
                 var p = new Vector3(pos.X + 0.5f, pos.Y + 0.5f, pos.Z + 0.5f);
-                var size = new Vector2(0.4f, 0.4f);
-                Raylib.DrawBillboardRec(_session.Camera, TextureAtlas.Atlas, src, p, size, Color.White);
-                // Пламя над телом.
-                var flamePos = new Vector3(p.X, p.Y + 0.35f, p.Z);
-                DrawFlame(flamePos, 0.3f, dt);
+                var light = GetLightFactor(p);
+
+                if (v.TypeId == GameData.BTorch.Id) {
+                    byte tile = (byte)TextureAtlas.TTorch;
+                    var src = new Rectangle(
+                        tile % TextureAtlas.Cols * TextureAtlas.TilePx,
+                        tile / TextureAtlas.Cols * TextureAtlas.TilePx,
+                        TextureAtlas.TilePx, TextureAtlas.TilePx);
+                    var size = new Vector2(0.4f, 0.4f);
+                    Raylib.DrawBillboardRec(_session.Camera, TextureAtlas.Atlas, src, p, size, Color.White);
+                    // Пламя над телом.
+                    var flamePos = new Vector3(p.X, p.Y + 0.35f, p.Z);
+                    DrawFlame(flamePos, 0.3f, dt);
+                } else if (v.TypeId == GameData.BWheatCrop.Id) {
+                    int stage = Math.Clamp((int)v.SubGridLayerMask, 0, 3);
+                    byte tile = (byte)(TextureAtlas.TWheatCrop0 + stage);
+                    var src = new Rectangle(
+                        tile % TextureAtlas.Cols * TextureAtlas.TilePx,
+                        tile / TextureAtlas.Cols * TextureAtlas.TilePx,
+                        TextureAtlas.TilePx, TextureAtlas.TilePx);
+                    var size = new Vector2(0.85f, 0.85f);
+                    var cropPos = new Vector3(pos.X + 0.5f, pos.Y + 0.425f, pos.Z + 0.5f);
+                    Color tint = ShadeColor(Color.White, light);
+                    Raylib.DrawBillboardRec(_session.Camera, TextureAtlas.Atlas, src, cropPos, size, tint);
+                } else if (v.TypeId == GameData.BTallGrass.Id) {
+                    byte tile = (byte)TextureAtlas.TTallGrass;
+                    var src = new Rectangle(
+                        tile % TextureAtlas.Cols * TextureAtlas.TilePx,
+                        tile / TextureAtlas.Cols * TextureAtlas.TilePx,
+                        TextureAtlas.TilePx, TextureAtlas.TilePx);
+                    var size = new Vector2(0.9f, 0.9f);
+                    var grassPos = new Vector3(pos.X + 0.5f, pos.Y + 0.45f, pos.Z + 0.5f);
+                    Color tint = ShadeColor(Color.White, light);
+                    Raylib.DrawBillboardRec(_session.Camera, TextureAtlas.Atlas, src, grassPos, size, tint);
+                }
             }
             foreach (var pos in _world.Fire.Burning.Keys) {
                 DrawFlame(new Vector3(pos.X + 0.5f, pos.Y + 0.85f, pos.Z + 0.5f), 0.5f, dt);

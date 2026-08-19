@@ -142,7 +142,6 @@ public static class GameData {
     public static readonly ItemDefinition DiamondSwordItem = Item(45, "Алмазный меч", DiamondM, 0.04);
     public static readonly ItemDefinition DiamondShovelItem = Item(46, "Алмазная лопата", DiamondM, 0.03);
 
-    // Дроп мобов и новые предметы
     public static readonly ItemDefinition FeatherItem = Item(47, "Перо", LeavesM, 0.0001);
     public static readonly ItemDefinition GunpowderItem = Item(48, "Порох", Coal, 0.0005);
     public static readonly ItemDefinition StringItem = Item(49, "Нить", StringM, 0.0002);
@@ -156,6 +155,12 @@ public static class GameData {
     public static readonly ItemDefinition ChestItem = Item(57, "Сундук", Oak, 0.05);
     public static readonly ItemDefinition BedItem = Item(58, "Кровать", Oak, 0.08);
     public static readonly ItemDefinition RottenFleshItem = Item(59, "Гнилая плоть", BeefM, 0.02);
+    public static readonly ItemDefinition WoodHoeItem = Item(60, "Деревянная мотыга", WoodToolM, 0.03);
+    public static readonly ItemDefinition StoneHoeItem = Item(61, "Каменная мотыга", StoneToolM, 0.03);
+    public static readonly ItemDefinition IronHoeItem = Item(62, "Железная мотыга", IronToolM, 0.03);
+    public static readonly ItemDefinition DiamondHoeItem = Item(63, "Алмазная мотыга", DiamondM, 0.03);
+    public static readonly ItemDefinition WheatItem = Item(64, "Пшеница", LeavesM, 0.01);
+    public static readonly ItemDefinition WheatSeedsItem = Item(65, "Семена пшеницы", LeavesM, 0.001);
 
     // ── Блоки ─────────────────────────────────────────────────────────────────
     public static readonly BlockType BGrass = Block(1, "Трава", DirtM, drop: DirtItem);
@@ -187,10 +192,16 @@ public static class GameData {
     public static readonly BlockType BChest = Block(25, "Сундук", Oak, drop: ChestItem, flammable: true, burnTime: 8f);
     public static readonly BlockType BBed = Block(26, "Кровать", Oak, drop: BedItem, flammable: true, burnTime: 6f);
     public static readonly BlockType BBedHead = Block(27, "Кровать (изголовье)", Oak, drop: BedItem, flammable: true, burnTime: 6f);
+    public static readonly BlockType BFarmland = Block(28, "Грядка", DirtM, drop: DirtItem);
+    public static readonly BlockType BWheatCrop = Block(29, "Посевы пшеницы", LeavesM, drop: WheatSeedsItem)
+        .With(b => { b.IsSolid = false; b.IsOpaque = false; });
+    public static readonly BlockType BTallGrass = Block(30, "Трава", LeavesM, drop: WheatSeedsItem)
+        .With(b => { b.IsSolid = false; b.IsOpaque = false; });
 
     public static readonly BlockType[] Blocks =
         { BGrass, BDirt, BStone, BLog, BLeaves, BPlanks, BCoalOre, BTorch, BBedrock, BIronOre, BWorkbench, BFurnace,
-          BCobblestone, BSand, BGravel, BGlass, BWater, BLava, BGoldOre, BDiamondOre, BRedstoneOre, BObsidian, BChest, BBed, BBedHead };
+          BCobblestone, BSand, BGravel, BGlass, BWater, BLava, BGoldOre, BDiamondOre, BRedstoneOre, BObsidian, BChest, BBed, BBedHead,
+          BFarmland, BWheatCrop, BTallGrass };
 
 
     private static readonly Dictionary<ushort, BlockType> _byId = Blocks.ToDictionary(b => b.Id);
@@ -241,18 +252,18 @@ public static class GameData {
     // ── Тир инструментов ──────────────────────────────────────────────────────
     /// <summary>Уровень инструмента: 0=руки, 1=дерево, 2=камень, 3=железо, 5=алмаз.</summary>
     public static int GetToolTier(ushort itemId) {
-        if (itemId == WoodPickaxeItem.Id || itemId == WoodAxeItem.Id || itemId == WoodShovelItem.Id || itemId == WoodSwordItem.Id) return 1;
-        if (itemId == StonePickaxeItem.Id || itemId == StoneAxeItem.Id || itemId == StoneShovelItem.Id || itemId == StoneSwordItem.Id) return 2;
-        if (itemId == IronPickaxeItem.Id || itemId == IronAxeItem.Id || itemId == IronShovelItem.Id || itemId == IronSwordItem.Id) return 3;
-        if (itemId == DiamondPickaxeItem.Id || itemId == DiamondAxeItem.Id || itemId == DiamondShovelItem.Id || itemId == DiamondSwordItem.Id) return 5;
+        if (itemId == WoodPickaxeItem.Id || itemId == WoodAxeItem.Id || itemId == WoodShovelItem.Id || itemId == WoodSwordItem.Id || itemId == WoodHoeItem.Id) return 1;
+        if (itemId == StonePickaxeItem.Id || itemId == StoneAxeItem.Id || itemId == StoneShovelItem.Id || itemId == StoneSwordItem.Id || itemId == StoneHoeItem.Id) return 2;
+        if (itemId == IronPickaxeItem.Id || itemId == IronAxeItem.Id || itemId == IronShovelItem.Id || itemId == IronSwordItem.Id || itemId == IronHoeItem.Id) return 3;
+        if (itemId == DiamondPickaxeItem.Id || itemId == DiamondAxeItem.Id || itemId == DiamondShovelItem.Id || itemId == DiamondSwordItem.Id || itemId == DiamondHoeItem.Id) return 5;
         return 0;
     }
 
     public static int GetMaxToolDurability(ushort itemId) {
-        if (itemId == WoodPickaxeItem.Id || itemId == WoodAxeItem.Id || itemId == WoodShovelItem.Id || itemId == WoodSwordItem.Id) return 60;
-        if (itemId == StonePickaxeItem.Id || itemId == StoneAxeItem.Id || itemId == StoneShovelItem.Id || itemId == StoneSwordItem.Id) return 132;
-        if (itemId == IronPickaxeItem.Id || itemId == IronAxeItem.Id || itemId == IronShovelItem.Id || itemId == IronSwordItem.Id) return 251;
-        if (itemId == DiamondPickaxeItem.Id || itemId == DiamondAxeItem.Id || itemId == DiamondShovelItem.Id || itemId == DiamondSwordItem.Id) return 1562;
+        if (itemId == WoodPickaxeItem.Id || itemId == WoodAxeItem.Id || itemId == WoodShovelItem.Id || itemId == WoodSwordItem.Id || itemId == WoodHoeItem.Id) return 60;
+        if (itemId == StonePickaxeItem.Id || itemId == StoneAxeItem.Id || itemId == StoneShovelItem.Id || itemId == StoneSwordItem.Id || itemId == StoneHoeItem.Id) return 132;
+        if (itemId == IronPickaxeItem.Id || itemId == IronAxeItem.Id || itemId == IronShovelItem.Id || itemId == IronSwordItem.Id || itemId == IronHoeItem.Id) return 251;
+        if (itemId == DiamondPickaxeItem.Id || itemId == DiamondAxeItem.Id || itemId == DiamondShovelItem.Id || itemId == DiamondSwordItem.Id || itemId == DiamondHoeItem.Id) return 1562;
         return 60;
     }
 
@@ -291,6 +302,25 @@ public static class GameData {
     public static bool IsSword(ushort itemId) =>
         itemId == WoodSwordItem.Id || itemId == StoneSwordItem.Id || itemId == IronSwordItem.Id || itemId == DiamondSwordItem.Id;
 
+    public static bool IsHoe(ushort itemId) =>
+        itemId == WoodHoeItem.Id || itemId == StoneHoeItem.Id || itemId == IronHoeItem.Id || itemId == DiamondHoeItem.Id;
+
+    /// <summary>
+    /// Детерминированный парсинг сида (FNV-1a), не зависящий от рандомизации .NET процесса.
+    /// Два игрока с одинаковым текстом сида гарантированно получат одинаковый мир.
+    /// </summary>
+    public static int ParseSeed(string seedInput) {
+        if (string.IsNullOrWhiteSpace(seedInput)) return new Random().Next();
+        if (int.TryParse(seedInput.Trim(), out int numericSeed)) return numericSeed;
+        unchecked {
+            int hash = (int)2166136261;
+            foreach (char c in seedInput.Trim()) {
+                hash = (hash ^ c) * 16777619;
+            }
+            return hash;
+        }
+    }
+
     public static float GetWeaponDamage(ushort itemId) {
         if (itemId == DiamondSwordItem.Id) return 7f;   // Алмазный меч: 7 HP (3.5 сердца)
         if (itemId == IronSwordItem.Id) return 6f;      // Железный меч: 6 HP (3 сердца)
@@ -315,10 +345,27 @@ public static class GameData {
         return 1f; // Рука / любой другой предмет: 1 HP (0.5 сердца)
     }
 
+    /// <summary>
+    /// Длительность перезарядки атаки оружия (Minecraft 1.9+):
+    /// Мечи ~0.625с (1.6 ск/с), Топоры ~1.0с (1.0 ск/с), Кирки ~0.83с, Рука/Мотыга ~0.35с
+    /// </summary>
+    public static float GetWeaponCooldown(ushort itemId) {
+        if (IsSword(itemId)) return 0.625f;
+        if (IsAxe(itemId)) return 1.0f;
+        if (IsPickaxe(itemId)) return 0.833f;
+        if (IsShovel(itemId)) return 1.0f;
+        if (IsHoe(itemId)) return 0.35f;
+        return 0.35f;
+    }
+
     // ── Добыча блоков ─────────────────────────────────────────────────────────
 
     public static float GetBlockHardness(BlockType b) {
         if (b.Id == BTorch.Id) return 0.2f;
+        if (b.Id == BBed.Id || b.Id == BBedHead.Id) return 0.2f;
+        if (b.Id == BWheatCrop.Id) return 0.0f;
+        if (b.Id == BTallGrass.Id) return 0.0f;
+        if (b.Id == BFarmland.Id) return 0.6f;
         if (b.Id == BCoalOre.Id) return 3.0f;
         if (b.Id == BIronOre.Id || b.Id == BGoldOre.Id) return 3.0f;
         if (b.Id == BDiamondOre.Id || b.Id == BRedstoneOre.Id) return 3.0f;
@@ -419,6 +466,8 @@ public static class GameData {
             FeatherItem, GunpowderItem, StringItem, ArrowItem, BoneItem,
             CharcoalItem, RawBeefItem, CookedBeefItem, LeatherItem, WhiteWoolItem,
             ChestItem, BedItem, RottenFleshItem,
+            WoodHoeItem, StoneHoeItem, IronHoeItem, DiamondHoeItem,
+            WheatItem, WheatSeedsItem,
         }) {
             Items.Add(item.Id, item);
         }
@@ -574,8 +623,19 @@ public static class GameData {
         // Нити из шерсти (1 шерсть -> 4 нити)
         AddShapeRecipe(new ItemDefinition?[] { WhiteWoolItem,null,null, null,null,null, null,null,null }, StringItem, 4);
 
-        // Сундук: 8 досок вокруг пустого центра
-        AddShapeRecipe(new ItemDefinition?[] { PlankItem,PlankItem,PlankItem, PlankItem,null,PlankItem, PlankItem,PlankItem,PlankItem }, ChestItem, 1);
+        // Мотыги
+        AddShapeRecipe(new ItemDefinition?[] { PlankItem,PlankItem,null, null,StickItem,null, null,StickItem,null }, WoodHoeItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { null,PlankItem,PlankItem, null,StickItem,null, null,StickItem,null }, WoodHoeItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { CobblestoneItem,CobblestoneItem,null, null,StickItem,null, null,StickItem,null }, StoneHoeItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { null,CobblestoneItem,CobblestoneItem, null,StickItem,null, null,StickItem,null }, StoneHoeItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { StoneItem,StoneItem,null, null,StickItem,null, null,StickItem,null }, StoneHoeItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { IronIngotItem,IronIngotItem,null, null,StickItem,null, null,StickItem,null }, IronHoeItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { null,IronIngotItem,IronIngotItem, null,StickItem,null, null,StickItem,null }, IronHoeItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { DiamondItem,DiamondItem,null, null,StickItem,null, null,StickItem,null }, DiamondHoeItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { null,DiamondItem,DiamondItem, null,StickItem,null, null,StickItem,null }, DiamondHoeItem, 1);
+
+        // Хлеб (3 пшеницы в ряд)
+        AddShapeRecipe(new ItemDefinition?[] { WheatItem,WheatItem,WheatItem, null,null,null, null,null,null }, BreadItem, 1);
 
         // Кровать: 3 шерсти в верхнем ряду + 3 доски во втором ряду
         AddShapeRecipe(new ItemDefinition?[] { WhiteWoolItem,WhiteWoolItem,WhiteWoolItem, PlankItem,PlankItem,PlankItem, null,null,null }, BedItem, 1);

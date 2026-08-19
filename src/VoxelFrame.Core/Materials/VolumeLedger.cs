@@ -10,17 +10,25 @@ public sealed class VolumeLedger {
 
     public void Add(Material material, double volumeM3) {
         long cm3 = (long)Math.Round(volumeM3 * Units.Cm3PerM3);
-        _cm3.TryGetValue(material.Id, out long current);
-        _cm3[material.Id] = current + cm3;
+        lock (_cm3) {
+            _cm3.TryGetValue(material.Id, out long current);
+            _cm3[material.Id] = current + cm3;
+        }
     }
 
-    public long Cm3Of(ushort materialId) => _cm3.TryGetValue(materialId, out long v) ? v : 0;
+    public long Cm3Of(ushort materialId) {
+        lock (_cm3) {
+            return _cm3.TryGetValue(materialId, out long v) ? v : 0;
+        }
+    }
     public double TotalVolumeM3 => TotalCm3 / Units.Cm3PerM3;
 
     public long TotalCm3 {
         get {
             long total = 0;
-            foreach (var kv in _cm3) total += kv.Value;
+            lock (_cm3) {
+                foreach (var kv in _cm3) total += kv.Value;
+            }
             return total;
         }
     }

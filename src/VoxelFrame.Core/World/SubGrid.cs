@@ -70,13 +70,13 @@ public sealed class SubGrid {
         for (int i = 0; i < c.LengthCells; i++) {
             var (cx, cy, cz) = c.CellAt(x, y, z, i);
             _cells[Index(cx, cy, cz)] = (byte)id;
+            OccupiedLayerMask |= (byte)(1 << cy);
         }
         _components.Add(c);
         _anchors.Add(((byte)x, (byte)y, (byte)z));
         TotalVolumeM3 += c.VolumeM3;
         TotalMassKg += c.MassKg;
         TotalCapacityKN += c.LoadCapacityKN;
-        OccupiedLayerMask |= (byte)(1 << y);
         return true;
     }
 
@@ -101,8 +101,8 @@ public sealed class SubGrid {
             for (int k = 0; k < c.LengthCells; k++) {
                 var (cx, cy, cz) = c.CellAt(x, y, z, k);
                 _cells[Index(cx, cy, cz)] = (byte)(i + 1);
+                OccupiedLayerMask |= (byte)(1 << cy);
             }
-            OccupiedLayerMask |= (byte)(1 << y);
         }
     }
 }

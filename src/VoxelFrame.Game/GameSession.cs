@@ -153,6 +153,16 @@ public sealed class GameSession {
             Camera.Position = Player.Eye + new Vector3(0f, Player.BobOffset, 0f) + shake;
             Camera.Target = Player.Eye + new Vector3(0f, Player.BobOffset, 0f) + Player.Forward + shake;
             Camera.FovY = 70f + Player.SprintFovProgress * 10f;
+
+            // Minecraft Camera Hurt Tilt (наклон камеры при получении урона)
+            if (Player.HurtTimer > 0f) {
+                float tiltFactor = MathF.Sin(Player.HurtTimer / 0.5f * MathF.PI);
+                float tiltAngle = tiltFactor * (Player.HurtDirection * 0.12f); // ~7 градусов
+                var rot = Matrix4x4.CreateFromAxisAngle(Vector3.Normalize(Player.Forward), tiltAngle);
+                Camera.Up = Vector3.Transform(Vector3.UnitY, rot);
+            } else {
+                Camera.Up = Vector3.UnitY;
+            }
             if (input.OpenInventory) Ui = UiState.Inventory;
             else if (input.OpenCrafting) Ui = UiState.Crafting;
             else if (input.Pause) Ui = UiState.Paused;

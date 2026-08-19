@@ -19,11 +19,31 @@ public static class Hud {
         Raylib.DrawRectangle(cx - 7, cy, 15, 1, new Color(255, 255, 255, 240));
         Raylib.DrawRectangle(cx, cy - 7, 1, 15, new Color(255, 255, 255, 240));
 
+        // Красная вспышка/виньетка при получении урона
+        if (player.HurtTimer > 0f) {
+            float alphaProgress = player.HurtTimer / 0.5f;
+            int redAlpha = (int)(110 * Math.Clamp(alphaProgress, 0f, 1f));
+            Raylib.DrawRectangle(0, 0, w, h, new Color(220, 20, 20, redAlpha));
+        }
+
+        // Индикатор перезарядки удара (Minecraft 1.9+ Attack Meter под прицелом)
+        ushort selectedId = player.SelectedItem?.Id ?? 0;
+        float cd = GameData.GetWeaponCooldown(selectedId);
+        float charge = Math.Clamp(player.AttackRechargeTimer / cd, 0f, 1f);
+        if (charge < 1.0f) {
+            int meterW = 20, meterH = 4;
+            int mx = cx - meterW / 2, my = cy + 12;
+            Raylib.DrawRectangle(mx - 1, my - 1, meterW + 2, meterH + 2, new Color(0, 0, 0, 160));
+            Raylib.DrawRectangle(mx, my, meterW, meterH, new Color(40, 40, 40, 200));
+            var chargeCol = charge >= 0.85f ? new Color(255, 255, 255, 240) : new Color(180, 180, 180, 220);
+            Raylib.DrawRectangle(mx, my, (int)(meterW * charge), meterH, chargeCol);
+        }
+
         // Сообщения.
         float msgY = 14f;
         foreach (var (text, age) in session.Messages.Reverse()) {
-            byte alpha = (byte)(255 * Math.Clamp(1f - age / 6f, 0f, 1f));
-            Fonts.DrawShadowed(text, 14f, msgY, 20f, new Color((byte)255, (byte)255, (byte)255, alpha));
+            int alpha = (int)(255 * Math.Clamp(1f - age / 6f, 0f, 1f));
+            Fonts.DrawShadowed(text, 14f, msgY, 20f, new Color(255, 255, 255, alpha));
             msgY += 24f;
         }
 
@@ -101,20 +121,25 @@ public static class Hud {
             DrawItemIconRotated(held.Item.Definition, handRect, 1f, swing);
         }
 
-        // Здоровье (сердечки) над хотбаром
+        // Здоровье (сердечки слева) и Сытость (окорочка справа) над хотбаром
         float vitalsY = h - 84f;
         float iconSize = 20f;
         float spacing = 15f;
-        DrawStatusRow(TextureAtlas.THeart, TextureAtlas.THeartEmpty, w / 2f - 110f, vitalsY, iconSize, spacing, player.Health);
+        bool isHurt = player.HurtTimer > 0f;
+        bool isLowHealth = player.Health <= 4f;
+        DrawStatusRow(TextureAtlas.THeart, TextureAtlas.THeartEmpty, w / 2f - 165f, vitalsY, iconSize, spacing, player.Health, isHurt || isLowHealth);
 
-        // Индикатор воздуха под водой (пузырьки)
+        bool isStarving = player.Hunger <= 6f;
+        DrawStatusRow(TextureAtlas.TFood, TextureAtlas.TFoodEmpty, w / 2f + 15f, vitalsY, iconSize, spacing, player.Hunger, isStarving);
+
+        // Индикатор воздуха под водой (пузырьки над полосой сытости)
         if (player.AirSupply < 10f) {
             int bubbles = (int)MathF.Ceiling(player.AirSupply);
             for (int b = 0; b < 10; b++) {
-                float bx = w / 2f + 110f - b * 13f;
+                float bx = w / 2f + 150f - b * 13f;
                 var bColor = b < bubbles ? new Color(60, 180, 255, 230) : new Color(30, 60, 90, 120);
-                Raylib.DrawCircle((int)bx, (int)vitalsY + 10, 5f, bColor);
-                Raylib.DrawCircleLines((int)bx, (int)vitalsY + 10, 5f, new Color(20, 30, 50, 180));
+                Raylib.DrawCircle((int)bx, (int)(vitalsY - 14f), 5f, bColor);
+                Raylib.DrawCircleLines((int)bx, (int)(vitalsY - 14f), 5f, new Color(20, 30, 50, 180));
             }
         }
 
@@ -137,10 +162,11 @@ public static class Hud {
         }
     }
 
-    private static void DrawStatusRow(byte filledTile, byte emptyTile, float xStart, float y, float size, float spacing, float value) {
+    private static void DrawStatusRow(byte filledTile, byte emptyTile, float xStart, float y, float size, float spacing, float value, bool shake = false) {
         for (int i = 0; i < 10; i++) {
             float x = xStart + i * spacing;
-            var dest = new Rectangle(x, y, size, size);
+            float yOffset = shake ? (MathF.Sin((float)Raylib.GetTime() * 25f + i * 1.5f) * 2.5f) : 0f;
+            var dest = new Rectangle(x, y + yOffset, size, size);
             
             // Сначала рисуем пустое сердечко/еду как фон
             DrawItemIconByTile(emptyTile, dest);
