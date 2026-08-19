@@ -432,18 +432,20 @@ public sealed class Player {
                             wantUse = false;
                         }
                     }
-                } else if (item.Id == GameData.WheatSeedsItem.Id && session.HasTarget) {
-                    // Посадка семян пшеницы на грядку
-                    var targetVox = world.GetVoxel(session.TargetBlock);
-                    if (targetVox.TypeId == GameData.BFarmland.Id) {
-                        var cropPos = session.TargetBlock + new Vec3i(0, 1, 0);
-                        var cropVox = world.GetVoxel(cropPos);
-                        if (cropVox.TypeId == 0) {
-                            if (TryConsumeSelected(item, 1)) {
-                                var planted = GameData.BWheatCrop;
-                                world.PlacePlacedBlock(cropPos, planted, 1f, 0);
-                                SoundSystem.PlayDig(GameData.BGrass.Id);
-                                wantUse = false;
+                } else if (item.Id == GameData.WheatSeedsItem.Id) {
+                    wantUse = false;
+                    // Посадка семян пшеницы СТРОГО на вспаханную грядку (Farmland)
+                    if (session.HasTarget) {
+                        var targetVox = world.GetVoxel(session.TargetBlock);
+                        if (targetVox.TypeId == GameData.BFarmland.Id) {
+                            var cropPos = session.TargetBlock + new Vec3i(0, 1, 0);
+                            var cropVox = world.GetVoxel(cropPos);
+                            if (cropVox.TypeId == 0) {
+                                if (TryConsumeSelected(item, 1)) {
+                                    var planted = GameData.BWheatCrop;
+                                    world.PlacePlacedBlock(cropPos, planted, 1f, 0);
+                                    SoundSystem.PlayDig(GameData.BGrass.Id);
+                                }
                             }
                         }
                     }

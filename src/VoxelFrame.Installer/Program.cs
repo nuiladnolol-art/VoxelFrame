@@ -295,7 +295,7 @@ public class InstallerForm : Form {
                     progressBar.Invoke(() => progressBar.Value = 20);
                     using var http = new HttpClient();
                     http.DefaultRequestHeaders.UserAgent.ParseAdd("VoxelFrame-Setup/1.0");
-                    string downloadUrl = "https://github.com/nuiladnolol-art/VoxelFrame/releases/download/v0.7.0/VoxelFrame-v0.7.0-win-x64.zip";
+                    string downloadUrl = "https://github.com/nuiladnolol-art/VoxelFrame/releases/download/v0.7.5/VoxelFrame-v0.7.5-win-x64.zip";
 
                     try {
                         string apiUrl = "https://api.github.com/repos/nuiladnolol-art/VoxelFrame/releases/latest";

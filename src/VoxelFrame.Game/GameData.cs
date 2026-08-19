@@ -206,7 +206,7 @@ public static class GameData {
 
     private static readonly Dictionary<ushort, BlockType> _byId = Blocks.ToDictionary(b => b.Id);
     private static readonly Dictionary<ushort, ushort> _blockByItem =
-        Blocks.Where(b => b.DropItemId != 0)
+        Blocks.Where(b => b.DropItemId != 0 && b.Id != BWheatCrop.Id && b.Id != BTallGrass.Id)
               .GroupBy(b => b.DropItemId)
               .ToDictionary(g => g.Key, g => g.First().Id); // grass/dirt share the dirt item
 
@@ -574,9 +574,6 @@ public static class GameData {
 
         // Верстак: 2×2 доски
         AddShapeRecipe(new ItemDefinition?[] { PlankItem,PlankItem,null, PlankItem,PlankItem,null, null,null,null }, WorkbenchItem, 1);
-
-        // Хлеб
-        AddShapeRecipe(new ItemDefinition?[] { PlankItem,PlankItem,PlankItem, null,null,null, null,null,null }, BreadItem, 1);
 
         // Печка: 8 булыжников вокруг пустого центра
         AddShapeRecipe(new ItemDefinition?[] { CobblestoneItem,CobblestoneItem,CobblestoneItem, CobblestoneItem,null,CobblestoneItem, CobblestoneItem,CobblestoneItem,CobblestoneItem }, FurnaceItem, 1);

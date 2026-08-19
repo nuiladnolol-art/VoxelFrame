@@ -241,14 +241,17 @@ public sealed class WorldGenerator {
                     int idx = Chunk.Index(lx, ly, lz);
 
                     if (chunk.Get(idxBelow).TypeId == GameData.BGrass.Id && chunk.Get(idx).TypeId == 0) {
-                        float fNoise = _treeNoise.Get(wx * 0.4f, wz * 0.4f);
+                        float fNoise = _treeNoise.Get(wx * 0.35f, wz * 0.35f);
                         var biome = GetBiome(wx, BaseHeight, wz);
                         bool isForest = biome == BiomeType.Forest;
-                        float chance = isForest ? 0.20f : 0.35f;
-
-                        if (fNoise < chance) {
-                            var vx = MakeVoxel(GameData.BTallGrass.Id);
-                            chunk.SetVoxel(idx, in vx);
+                        bool isPlains = biome == BiomeType.Plains;
+                        if (isForest || isPlains) {
+                            // Высокая плотность 2D-травы на полях и в лесах (Minecraft-стиль)
+                            float chance = isPlains ? 0.70f : 0.55f;
+                            if (fNoise < chance) {
+                                var vx = MakeVoxel(GameData.BTallGrass.Id);
+                                chunk.SetVoxel(idx, in vx);
+                            }
                         }
                     }
                 }

@@ -716,10 +716,11 @@ public sealed class GameWorld : IDisposable {
     }
 
     private void SpawnInitialChunkAnimals(GameChunk gc) {
-        // Шанс 30% спавна стада животных в новом чанке
-        if (_random.NextDouble() > 0.30) return;
+        // Редкий спавн животных (8% шанс на чанк, максимум 8-10 на мир)
+        if (_random.NextDouble() > 0.08) return;
+        if (Animals.Count >= 10) return;
         var animalType = (AnimalType)_random.Next(0, 3); // Pig, Cow, Sheep
-        int count = _random.Next(2, 5); // 2..4 особи в стаде
+        int count = _random.Next(1, 3); // 1..2 особи
         int baseLx = _random.Next(4, Chunk.SizeX - 4);
         int baseLz = _random.Next(4, Chunk.SizeZ - 4);
 
@@ -731,11 +732,10 @@ public sealed class GameWorld : IDisposable {
             int surface = GetColumnSurfaceHeight(wx, wz);
             if (surface == int.MinValue || surface <= WorldGenerator.SeaLevel) continue;
             var biome = Generator.GetBiome(wx, surface, wz);
-            if (biome == BiomeType.Ocean || biome == BiomeType.River) continue;
+            if (biome == BiomeType.Ocean || biome == BiomeType.River || biome == BiomeType.Desert) continue;
 
             var surfaceBlock = GetVoxel(new Vec3i(wx, surface, wz));
-            if (surfaceBlock.TypeId == GameData.BLeaves.Id || surfaceBlock.TypeId == GameData.BLog.Id ||
-                surfaceBlock.TypeId == GameData.BLava.Id || surfaceBlock.TypeId == GameData.BWater.Id) continue;
+            if (surfaceBlock.TypeId != GameData.BGrass.Id) continue;
 
             var anim = new Animal(animalType, Vector3.Zero);
             var pos = new Vector3(wx + 0.5f, surface + 1.0f + anim.HalfSizeY + 0.05f, wz + 0.5f);
@@ -748,12 +748,13 @@ public sealed class GameWorld : IDisposable {
     }
 
     private void TrySpawnAnimal() {
-        if (Animals.Count >= 20 || _chunks.Count == 0) return;
+        if (Animals.Count >= 8 || _chunks.Count == 0) return;
+        if (_random.NextDouble() > 0.15) return;
         var gcList = _chunks.Values.ToList();
         var gc = gcList[_random.Next(gcList.Count)];
         if (gc.Coord.Y != 1) return;
 
-        for (int attempt = 0; attempt < 6; attempt++) {
+        for (int attempt = 0; attempt < 4; attempt++) {
             int lx = _random.Next(0, Chunk.SizeX);
             int lz = _random.Next(0, Chunk.SizeZ);
             int wx = gc.Coord.X * Chunk.SizeX + lx;
@@ -761,11 +762,10 @@ public sealed class GameWorld : IDisposable {
             int surface = GetColumnSurfaceHeight(wx, wz);
             if (surface == int.MinValue || surface <= WorldGenerator.SeaLevel) continue;
             var biome = Generator.GetBiome(wx, surface, wz);
-            if (biome == BiomeType.Ocean || biome == BiomeType.River) continue;
+            if (biome == BiomeType.Ocean || biome == BiomeType.River || biome == BiomeType.Desert) continue;
 
             var surfaceBlock = GetVoxel(new Vec3i(wx, surface, wz));
-            if (surfaceBlock.TypeId == GameData.BLeaves.Id || surfaceBlock.TypeId == GameData.BLog.Id ||
-                surfaceBlock.TypeId == GameData.BLava.Id || surfaceBlock.TypeId == GameData.BWater.Id) continue;
+            if (surfaceBlock.TypeId != GameData.BGrass.Id) continue;
 
             var animalType = (AnimalType)_random.Next(0, 3);
             var anim = new Animal(animalType, Vector3.Zero);

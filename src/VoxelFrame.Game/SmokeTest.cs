@@ -199,6 +199,16 @@ internal static class SmokeTest {
         Check(GameData.TryCraftShape(torchGrid, inv, out var torches)
               && torches.Item.Id == GameData.TorchItem.Id && torches.Count == 4, "крафт факела успешен");
         Check(inv.CountOf(GameData.TorchItem) == 4, "получено 4 факела");
+
+        // Хлеб: 3 пшеницы в ряд -> 1 хлеб (доски не крафтят хлеб)
+        Check(inv.TryInsert(GameData.NewItem(GameData.WheatItem), 3), "выдано 3 пшеницы");
+        var breadGrid = new ItemDefinition?[] { GameData.WheatItem, GameData.WheatItem, GameData.WheatItem, null, null, null, null, null, null };
+        Check(GameData.TryCraftShape(breadGrid, inv, out var breadResult)
+              && breadResult.Item.Id == GameData.BreadItem.Id && breadResult.Count == 1, "крафт хлеба из 3 пшениц успешен");
+        Check(inv.CountOf(GameData.BreadItem) == 1, "получен 1 хлеб");
+
+        var fakeBreadGrid = new ItemDefinition?[] { GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, null, null, null, null, null, null };
+        Check(!GameData.TryCraftShape(fakeBreadGrid, inv, out _), "доски больше не крафтят хлеб");
     }
 
     // ── 5. Огонь ─────────────────────────────────────────────────────────────
