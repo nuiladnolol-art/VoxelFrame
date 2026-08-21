@@ -93,13 +93,53 @@ public sealed class GameWorld : IDisposable {
         foreach (var o in NeighborOffsets) yield return cc + o;
     }
 
-    /// <summary>Генерирует чанки вокруг позиции игрока в радиусе видимости.</summary>
-    public void EnsureLoadedAround(Vector3 playerPos, int radius = RenderDistance) {
+    /// <summary>Синхронно загружает все чанки в заданном радиусе (используется при создании мира).</summary>
+    public void EnsureLoadedAroundSync(Vector3 playerPos, int radius = RenderDistance) {
         var pc = Chunk.CoordOf(new Vec3i((int)MathF.Floor(playerPos.X), (int)MathF.Floor(playerPos.Y), (int)MathF.Floor(playerPos.Z)));
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -1; dy <= 2; dy++) {
                     GetOrCreateChunk(new Vec3i(pc.X + dx, pc.Y + dy, pc.Z + dz));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Генерирует чанки вокруг игрока:
+    /// - Ближние чанки (радиус 1 вокруг игрока) загружаются немедленно, чтобы игрок никогда не падал в пустоту.
+    /// - Внешние чанки (радиус 2..radius) плавно догружаются пачками (до 4 чанков за кадр).
+    /// </summary>
+    public void EnsureLoadedAround(Vector3 playerPos, int radius = RenderDistance) {
+        var pc = Chunk.CoordOf(new Vec3i((int)MathF.Floor(playerPos.X), (int)MathF.Floor(playerPos.Y), (int)MathF.Floor(playerPos.Z)));
+        
+        // 1. Ближний радиус (дистанция 0..1): критичен для физики, гарантируем загрузку
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                for (int dy = -1; dy <= 2; dy++) {
+                    var cc = new Vec3i(pc.X + dx, pc.Y + dy, pc.Z + dz);
+                    if (!_chunks.ContainsKey(cc)) {
+                        GetOrCreateChunk(cc);
+                    }
+                }
+            }
+        }
+
+        // 2. Внешний радиус: стримим пачками до 4 чанков за кадр от ближних к дальним
+        int newChunkThisFrame = 0;
+        const int maxNewPerFrame = 4;
+        for (int dist = 2; dist <= radius; dist++) {
+            for (int dx = -dist; dx <= dist; dx++) {
+                for (int dz = -dist; dz <= dist; dz++) {
+                    if (Math.Abs(dx) != dist && Math.Abs(dz) != dist) continue;
+                    for (int dy = -1; dy <= 2; dy++) {
+                        var cc = new Vec3i(pc.X + dx, pc.Y + dy, pc.Z + dz);
+                        if (!_chunks.ContainsKey(cc)) {
+                            GetOrCreateChunk(cc);
+                            newChunkThisFrame++;
+                            if (newChunkThisFrame >= maxNewPerFrame) return;
+                        }
+                    }
                 }
             }
         }
@@ -125,8 +165,14 @@ public sealed class GameWorld : IDisposable {
         return (v.Flags & VoxelFlags.Solid) != 0;
     }
 
-    /// <summary>Есть ли в ячейке вообще какой-либо блок (для прицела/ломания).</summary>
+    /// <summary>Есть ли в ячейке вообще какой-либо блок.</summary>
     public bool IsBlockAt(Vec3i w) => GetVoxel(w).TypeId != 0;
+
+    /// <summary>Является ли блок таргетируемым прицелом (жидкости пропускаются).</summary>
+    public bool IsTargetableBlock(Vec3i w) {
+        ushort type = GetVoxel(w).TypeId;
+        return type != 0 && type != GameData.BWater.Id && type != GameData.BLava.Id;
+    }
 
     public bool IsOpaqueAt(Vec3i w) {
         var v = GetVoxel(w);
@@ -240,6 +286,27 @@ public sealed class GameWorld : IDisposable {
         SetVoxelInternal(w, VoxelData.Air);
         CheckGravityBlocksAbove(w);
 
+        // Разрушение растений и факелов, росших на этом блоке (трава не висит в воздухе)
+        var above = w + new Vec3i(0, 1, 0);
+        var aboveVox = GetVoxel(above);
+        if (aboveVox.TypeId == GameData.BTallGrass.Id || aboveVox.TypeId == GameData.BWheatCrop.Id || aboveVox.TypeId == GameData.BTorch.Id) {
+            if (aboveVox.TypeId == GameData.BWheatCrop.Id) {
+                if (aboveVox.SubGridLayerMask >= 3) {
+                    SpawnPickup(GameData.WheatItem.Id, 1, above);
+                    SpawnPickup(GameData.WheatSeedsItem.Id, 1, above);
+                } else {
+                    SpawnPickup(GameData.WheatSeedsItem.Id, 1, above);
+                }
+            } else if (aboveVox.TypeId == GameData.BTallGrass.Id) {
+                if (_random.NextDouble() < 0.25) {
+                    SpawnPickup(GameData.WheatSeedsItem.Id, 1, above);
+                }
+            } else if (aboveVox.TypeId == GameData.BTorch.Id) {
+                SpawnPickup(GameData.TorchItem.Id, 1, above);
+            }
+            RemoveBlock(above);
+        }
+
         // Связанное удаление парной части кровати
         if (curVox.TypeId == GameData.BBed.Id || curVox.TypeId == GameData.BBedHead.Id) {
             Vec3i[] cardDirs = { new(1, 0, 0), new(-1, 0, 0), new(0, 0, 1), new(0, 0, -1) };
@@ -272,6 +339,20 @@ public sealed class GameWorld : IDisposable {
                 newInv.InsertAt(8, new ItemEntry(GameData.NewItem(GameData.GoldIngotItem), rng.Next(1, 3)));
             if (rng.NextDouble() < 0.10)
                 newInv.InsertAt(13, new ItemEntry(GameData.NewItem(GameData.DiamondItem), 1));
+        } else if (pos.Y > 20) {
+            // Сундук в деревенском доме: еда, семена, яблоки, инструменты, доски, слитки
+            var rng = new Random(Seed ^ (pos.X * 73856093 ^ pos.Y * 19349663 ^ pos.Z * 83492791));
+            newInv.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.BreadItem), rng.Next(2, 6)));
+            newInv.InsertAt(1, new ItemEntry(GameData.NewItem(GameData.WheatSeedsItem), rng.Next(3, 9)));
+            newInv.InsertAt(2, new ItemEntry(GameData.NewItem(GameData.AppleItem), rng.Next(1, 4)));
+            newInv.InsertAt(3, new ItemEntry(GameData.NewItem(GameData.PlankItem), rng.Next(4, 13)));
+            newInv.InsertAt(4, new ItemEntry(GameData.NewItem(GameData.TorchItem), rng.Next(3, 8)));
+            if (rng.NextDouble() < 0.60)
+                newInv.InsertAt(5, new ItemEntry(GameData.NewItem(GameData.IronIngotItem), rng.Next(1, 4)));
+            if (rng.NextDouble() < 0.30)
+                newInv.InsertAt(8, new ItemEntry(GameData.NewItem(GameData.GoldIngotItem), rng.Next(1, 3)));
+            if (rng.NextDouble() < 0.12)
+                newInv.InsertAt(12, new ItemEntry(GameData.NewItem(GameData.DiamondItem), 1));
         }
         Chests[pos] = newInv;
         return newInv;
@@ -531,7 +612,7 @@ public sealed class GameWorld : IDisposable {
 
         while (true) {
             var cell = new Vec3i(x, y, z);
-            if (!first && IsBlockAt(cell)) {
+            if (!first && IsTargetableBlock(cell)) {
                 hit = cell;
                 prevCell = last;
                 normal = new Vec3i(x - last.X, y - last.Y, z - last.Z);
@@ -716,11 +797,11 @@ public sealed class GameWorld : IDisposable {
     }
 
     private void SpawnInitialChunkAnimals(GameChunk gc) {
-        // Редкий спавн животных (8% шанс на чанк, максимум 8-10 на мир)
-        if (_random.NextDouble() > 0.08) return;
-        if (Animals.Count >= 10) return;
+        // Сбалансированный спавн животных (18% шанс на чанк, максимум 16 на мир)
+        if (_random.NextDouble() > 0.18) return;
+        if (Animals.Count >= 16) return;
         var animalType = (AnimalType)_random.Next(0, 3); // Pig, Cow, Sheep
-        int count = _random.Next(1, 3); // 1..2 особи
+        int count = _random.Next(2, 5); // 2..4 особи в стаде
         int baseLx = _random.Next(4, Chunk.SizeX - 4);
         int baseLz = _random.Next(4, Chunk.SizeZ - 4);
 

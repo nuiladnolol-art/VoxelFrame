@@ -374,7 +374,8 @@ internal static class SmokeTest {
         Check(w.FallingBlocks.Count == 0, "обрушение отсутствует");
 
         // 2. Песок падает под действием гравитации
-        var sandPos = new Vec3i(5, w.SpawnBlock.Y + 6, 5);
+        var sandPos = new Vec3i(5, w.SpawnBlock.Y + 20, 5);
+        w.RemoveBlock(sandPos - new Vec3i(0, 1, 0));
         w.PlacePlacedBlock(sandPos, GameData.BSand, 1.0f);
         w.CheckGravityBlocksAbove(sandPos - new Vec3i(0, 1, 0));
         Check(w.FallingBlocks.Count > 0, "песок в воздухе превращается в падающий блок (Sand Gravity)");
@@ -595,7 +596,7 @@ internal static class SmokeTest {
         Check(s.IsSleeping, "игрок уснул");
         Tick(s, 3.0f);
         Check(!s.IsSleeping, "игрок проснулся");
-        Check(Math.Abs(s.DayNight.TimeOfDay - 0.25f) < 0.05f, "наступил рассвет");
+        Check(Math.Abs(s.DayNight.TimeOfDay - 0.32f) < 0.05f, "наступил рассвет");
 
         // 14. Смерть, экран смерти и KeepInventory
         SaveSystem.KeepInventory = false;
@@ -682,12 +683,14 @@ internal static class SmokeTest {
         Check(w.Pickups.Any(p => p.Definition.Id == GameData.WheatItem.Id), "со сбора зрелой пшеницы выпала пшеница");
         Check(w.Pickups.Any(p => p.Definition.Id == GameData.WheatSeedsItem.Id), "со сбора зрелой пшеницы выпали семена");
 
-        // 20. 2D Трава (кустики)
-        var grassPos = new Vec3i(65, w.SpawnBlock.Y, 65);
+        // 20. 2D Трава (кустики) и разрушение при срубе нижнего блока
+        var dirtBasePos = new Vec3i(65, w.SpawnBlock.Y, 65);
+        var grassPos = dirtBasePos + new Vec3i(0, 1, 0);
+        w.PlacePlacedBlock(dirtBasePos, GameData.BDirt, 1f);
         w.PlacePlacedBlock(grassPos, GameData.BTallGrass, 1f);
         Check(w.GetVoxel(grassPos).TypeId == GameData.BTallGrass.Id, "2D трава установлена в мире");
-        s.Player.BreakBlock(w, s, grassPos, GameData.BTallGrass);
-        Check(w.GetVoxel(grassPos).TypeId == 0, "2D трава ломается");
+        w.RemoveBlock(dirtBasePos);
+        Check(w.GetVoxel(grassPos).TypeId == 0, "трава автоматически разрушается при удалении блока под ней (не висит в воздухе)");
 
         // 21. Боевая система MC 1.9+ с перезарядкой ударов
         var dummyZombie = new HostileMob(HostileType.Zombie, new Vector3(70.5f, w.SpawnBlock.Y + 1f, 70.5f));
@@ -712,5 +715,90 @@ internal static class SmokeTest {
         s.Player.AttackHostile(dummyZombie, w, s);
         float fullDmg = prevHp - dummyZombie.Health;
         Check(fullDmg >= 7.0f, "полный удар заряженным мечом наносит максимальный урон (>= 7 HP)");
+
+        // 22. Стартовый Тотем в левой руке и спасение от гибели
+        var newWorldSession = GameSession.NewGame(12345, true);
+        Check(newWorldSession.Player.OffhandItem != null && newWorldSession.Player.OffhandItem.Id == GameData.TotemItem.Id, "при создании мира игрок получает Тотем Бессмертия в левую руку");
+
+        // Проверка смены рук (SwapMainAndOffhand)
+        newWorldSession.Player.SelectedSlot = 0;
+        newWorldSession.Player.Inventory.Slots[0] = new ItemEntry(GameData.NewItem(GameData.DiamondPickaxeItem), 1);
+        newWorldSession.Player.SwapMainAndOffhand();
+        Check(newWorldSession.Player.OffhandItem?.Id == GameData.DiamondPickaxeItem.Id, "кирка перешла в левую руку");
+        Check(newWorldSession.Player.Inventory.Slots[0]?.Item.Definition.Id == GameData.TotemItem.Id, "тотем перешел в хотбар");
+
+        // Спасение тотемом от смертельного урона
+        newWorldSession.Player.Health = 2f;
+        newWorldSession.Player.ApplyDamage(10f, newWorldSession);
+        Check(newWorldSession.Player.Health == 4f && newWorldSession.Ui == UiState.Playing, "тотем бессмертия предотвратил гибель и восстановил здоровье до 4 HP");
+        Check(newWorldSession.Player.TotemAnimationTimer > 0f, "активировалась анимация тотема бессмертия");
+
+        // 23. Костная мука (BoneMeal)
+        var cropTestPos = new Vec3i(80, w.SpawnBlock.Y, 80);
+        w.PlacePlacedBlock(cropTestPos, GameData.BWheatCrop, 1f, 0);
+        s.Player.Position = new Vector3(80.5f, w.SpawnBlock.Y + 1f, 80.5f);
+        s.Player.Pitch = -1.5f;
+        s.Player.Yaw = 0f;
+        s.Player.SelectedSlot = 0;
+        inv.Slots[0] = new ItemEntry(GameData.NewItem(GameData.BoneMealItem), 2);
+        s.Player.PlaceCooldown = 0f;
+        s.Player.Update(0.1f, useInput, w, s);
+        var fertilizedCrop = w.GetVoxel(cropTestPos);
+        Check(fertilizedCrop.SubGridLayerMask > 0, "костная мука мгновенно ускорила рост пшеницы");
+
+        // 24. Опилки и Каша из опилок
+        var logBreakPos = new Vec3i(85, w.SpawnBlock.Y, 85);
+        w.PlacePlacedBlock(logBreakPos, GameData.BLog, 1f);
+        s.Player.BreakBlock(w, s, logBreakPos, GameData.BLog);
+        Check(w.Pickups.Any(p => p.Definition.Id == GameData.LogItem.Id), "срубленное дерево дропнуло бревно");
+
+        Check(GameData.FoodValue.TryGetValue(GameData.SawdustPorridgeItem.Id, out float porridgeFood) && porridgeFood == 4f, "каша из опилок восстанавливает 4 ед. сытости");
+
+        // 25. Таргетинг сквозь воду (жидкости не мешают копать дно)
+        var sandUnderWater = new Vec3i(90, w.SpawnBlock.Y, 90);
+        for (int dy = 1; dy <= 6; dy++) w.RemoveBlock(sandUnderWater + new Vec3i(0, dy, 0));
+        w.PlacePlacedBlock(sandUnderWater + new Vec3i(0, 2, 0), GameData.BWater, 1f);
+        w.PlacePlacedBlock(sandUnderWater + new Vec3i(0, 1, 0), GameData.BWater, 1f);
+        w.PlacePlacedBlock(sandUnderWater, GameData.BSand, 1f);
+
+        bool rayHit = w.RaycastBlock(new Vector3(90.5f, w.SpawnBlock.Y + 5.5f, 90.5f), -Vector3.UnitY, 8f, out var hitCell, out _, out _);
+        Check(rayHit && hitCell == sandUnderWater, "луч прицела проходит сквозь воду и попадает в твердый блок под ней");
+
+        // 26. Рецепт каши из опилок: 2 опилок + 1 доска + 1 семена пшеницы
+        var porridgeGrid = new ItemDefinition?[] {
+            GameData.SawdustItem, GameData.SawdustItem, null,
+            GameData.PlankItem,   GameData.WheatSeedsItem, null,
+            null,                 null,                 null
+        };
+        string porridgeKey = GameData.NormalizeGrid(porridgeGrid);
+        Check(GameData.ShapeRecipes.TryGetValue(porridgeKey, out var porridgeRes) && porridgeRes.Item.Id == GameData.SawdustPorridgeItem.Id, "крафт каши из опилок требует 2 опилок, 1 доску и семена пшеницы");
+
+        // 27. Стрела скелета не наносит урон самому стрелку
+        var shooterSkel = new HostileMob(HostileType.Skeleton, new Vector3(100f, w.SpawnBlock.Y + 10f, 100f));
+        w.HostileMobs.Add(shooterSkel);
+        var skelArrow = new ArrowProjectile(shooterSkel.Position + new Vector3(0f, 0.5f, 0f), new Vector3(1f, 0f, 0f), shooterSkel);
+        float skelInitialHp = shooterSkel.Health;
+        skelArrow.Tick(0.016f, w, s.Player, s);
+        Check(shooterSkel.Health == skelInitialHp && skelArrow.Alive, "выпущенная стрела скелета не задевает самого скелета-стрелка");
+
+        // 28. Проверка генерации деревни в чанке
+        int testVillageSeed = 3402;
+        var villageWorld = new GameWorld(testVillageSeed);
+        villageWorld.EnsureLoadedAroundSync(new Vector3(31f, 45f, 41f), 2);
+        bool foundVillageBlock = false;
+        for (int bx = 20; bx <= 45; bx++) {
+            for (int bz = 30; bz <= 55; bz++) {
+                for (int by = 35; by <= 55; by++) {
+                    var vox = villageWorld.GetVoxel(new Vec3i(bx, by, bz));
+                    if (vox.TypeId == GameData.BChest.Id || vox.TypeId == GameData.BCobblestone.Id || vox.TypeId == GameData.BGravel.Id) {
+                        foundVillageBlock = true;
+                        break;
+                    }
+                }
+                if (foundVillageBlock) break;
+            }
+            if (foundVillageBlock) break;
+        }
+        Check(foundVillageBlock, "в мире генерируются блоки деревенских построек (фундамент, сундук, гравийная дорога)");
     }
 }

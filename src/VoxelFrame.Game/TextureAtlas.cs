@@ -33,7 +33,7 @@ public static class TextureAtlas {
                      TRottenFlesh = 72, TWheat = 73, TWheatSeeds = 74,
                      TFarmland = 75, TWheatCrop0 = 76, TWheatCrop1 = 77, TWheatCrop2 = 78, TWheatCrop3 = 79,
                      THoeWood = 80, THoeStone = 81, THoeIron = 82, THoeDiamond = 83,
-                     TTallGrass = 84;
+                     TTallGrass = 84, TBoneMeal = 85, TSawdust = 86, TSawdustPorridge = 87, TTotem = 88;
 
     public record struct BlockFaceTiles(byte PosX, byte NegX, byte PosY, byte NegY, byte PosZ, byte NegZ);
 
@@ -149,6 +149,10 @@ public static class TextureAtlas {
         [TWheat] = "items/wheat.png",
         [TWheatSeeds] = "items/seeds.png",
         [TTallGrass] = "blocks/tallgrass.png",
+        [TBoneMeal] = "items/bonemeal.png",
+        [TSawdust] = "items/sawdust.png",
+        [TSawdustPorridge] = "items/sawdust_porridge.png",
+        [TTotem] = "items/totem.png",
     };
 
     public static Texture2D Atlas => _atlas;
@@ -539,16 +543,85 @@ public static class TextureAtlas {
                             b = Math.Clamp(b - 25, 0, 255);
                         }
                     } else if (tile == TWorkbench) {
-                        // Дубовые доски с крестом на топе
-                        int d = rng.Next(-10, 11);
-                        r = Math.Clamp(142 + d, 0, 255);
-                        g = Math.Clamp(108 + d, 0, 255);
-                        b = Math.Clamp(62 + d, 0, 255);
-                        if (px == 7 || px == 8 || py == 7 || py == 8) {
-                            r = Math.Clamp(r - 35, 0, 255);
-                            g = Math.Clamp(g - 26, 0, 255);
-                            b = Math.Clamp(b - 14, 0, 255);
+                        // Топ верстака: Четкая резная 3x3 сетка крафта на дубовых досках
+                        int d = rng.Next(-8, 9);
+                        r = Math.Clamp(150 + d, 0, 255);
+                        g = Math.Clamp(115 + d, 0, 255);
+                        b = Math.Clamp(68 + d, 0, 255);
+                        // Внешняя рамка верстака
+                        bool isBorder = px == 0 || px == 15 || py == 0 || py == 15;
+                        // Сетка 3x3: деления на координатах 5 и 10
+                        bool isGridLine = px == 5 || px == 10 || py == 5 || py == 10;
+                        if (isBorder || isGridLine) {
+                            r = Math.Clamp(r - 55, 0, 255);
+                            g = Math.Clamp(g - 45, 0, 255);
+                            b = Math.Clamp(b - 30, 0, 255);
+                        } else {
+                            // Внутренние ячейки сетки крафта: небольшое затенение сверху/слева ячеек для 3D рельефа
+                            bool isInnerSlotBorder = (px % 5 == 1) || (py % 5 == 1);
+                            if (isInnerSlotBorder) {
+                                r = Math.Clamp(r - 25, 0, 255);
+                                g = Math.Clamp(g - 20, 0, 255);
+                                b = Math.Clamp(b - 12, 0, 255);
+                            }
                         }
+                    } else if (tile == TBoneMeal) {
+                        // Костная мука: белая пыль / мешочек
+                        bool inBag = (px >= 4 && px <= 11 && py >= 5 && py <= 13) || (px >= 6 && px <= 9 && py >= 3 && py <= 4);
+                        if (inBag) {
+                            int d = rng.Next(-15, 16);
+                            r = Math.Clamp(235 + d, 0, 255);
+                            g = Math.Clamp(235 + d, 0, 255);
+                            b = Math.Clamp(225 + d, 0, 255);
+                            if (py == 5 || py == 13 || px == 4 || px == 11) {
+                                r = 180; g = 180; b = 170;
+                            }
+                            a = 255;
+                        } else { a = 0; }
+                    } else if (tile == TSawdust) {
+                        // Опилки: кучка деревянных стружек
+                        bool inPile = (py >= 8 && py <= 13 && px >= 3 && px <= 12 && (13 - py) * 2 >= Math.Abs(px - 7.5f));
+                        if (inPile) {
+                            int d = rng.Next(-20, 21);
+                            r = Math.Clamp(190 + d, 0, 255);
+                            g = Math.Clamp(145 + d, 0, 255);
+                            b = Math.Clamp(75 + d, 0, 255);
+                            a = 255;
+                        } else { a = 0; }
+                    } else if (tile == TSawdustPorridge) {
+                        // Каша из опилок: деревянная миска с золотистой сытной кашей и ложкой
+                        bool inBowl = (py >= 9 && py <= 14 && px >= 2 && px <= 13 && py - 9 >= Math.Abs(px - 7.5f) * 0.7f);
+                        bool inFood = (py >= 6 && py <= 9 && px >= 3 && px <= 12);
+                        bool inSpoon = (px == 11 && py >= 3 && py <= 8) || (px == 10 && py == 7);
+                        if (inSpoon) {
+                            r = 160; g = 110; b = 60; a = 255;
+                        } else if (inFood) {
+                            int d = rng.Next(-15, 16);
+                            r = Math.Clamp(210 + d, 0, 255);
+                            g = Math.Clamp(170 + d, 0, 255);
+                            b = Math.Clamp(95 + d, 0, 255);
+                            a = 255;
+                        } else if (inBowl) {
+                            r = 120; g = 80; b = 40; a = 255;
+                        } else { a = 0; }
+                    } else if (tile == TTotem) {
+                        // Тотем бессмертия: золотой человечек с зелеными глазами
+                        bool isHead = px >= 5 && px <= 10 && py >= 2 && py <= 6;
+                        bool isWings = (px >= 2 && px <= 13 && py >= 6 && py <= 9);
+                        bool isBody = px >= 5 && px <= 10 && py >= 7 && py <= 14;
+                        bool isEyes = (px == 6 || px == 9) && py == 4;
+                        if (isEyes) {
+                            r = 40; g = 230; b = 80; a = 255;
+                        } else if (isHead || isWings || isBody) {
+                            int d = rng.Next(-15, 16);
+                            r = Math.Clamp(240 + d, 0, 255);
+                            g = Math.Clamp(195 + d, 0, 255);
+                            b = Math.Clamp(40 + d, 0, 255);
+                            if (px == 5 || px == 10 || py == 2 || py == 14) {
+                                r = 180; g = 140; b = 25;
+                            }
+                            a = 255;
+                        } else { a = 0; }
                     } else if (tile == TFurnace) {
                         // Камень с тёмным жерлом
                         int d = rng.Next(-16, 17);

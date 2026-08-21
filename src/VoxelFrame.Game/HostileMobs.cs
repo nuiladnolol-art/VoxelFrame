@@ -176,7 +176,7 @@ public sealed class HostileMob {
                     float toDist = toTarget.Length();
                     var arrowDir = Vector3.Normalize(toTarget);
                     var arrowVel = arrowDir * 18f + new Vector3(0f, MathF.Min(2.5f, toDist * 0.12f), 0f);
-                    world.Arrows.Add(new ArrowProjectile(eyePos + arrowDir * 0.5f, arrowVel));
+                    world.Arrows.Add(new ArrowProjectile(eyePos + arrowDir * 0.6f, arrowVel, this));
                 }
             }
         } else {
@@ -281,10 +281,12 @@ public sealed class ArrowProjectile {
     public Vector3 Velocity;
     public bool Alive = true;
     public float LifeTime = 6.0f;
+    public HostileMob? Shooter;
 
-    public ArrowProjectile(Vector3 position, Vector3 velocity) {
+    public ArrowProjectile(Vector3 position, Vector3 velocity, HostileMob? shooter = null) {
         Position = position;
         Velocity = velocity;
+        Shooter = shooter;
     }
 
     public void Tick(float dt, GameWorld world, Player player, GameSession session) {
@@ -302,6 +304,18 @@ public sealed class ArrowProjectile {
             player.ApplyDamage(3f, session, Position);
             session.AddMessage("В вас попала стрела скелета! -3 HP");
             return;
+        }
+
+        // Попадание в других мобов (Зомби, Пауки, другие Скелеты, но не самого стрелка)
+        foreach (var mob in world.HostileMobs) {
+            if (!mob.Alive || mob == Shooter) continue;
+            var toMob = (mob.Position + new Vector3(0f, 0.5f, 0f)) - Position;
+            if (toMob.Length() < 0.75f) {
+                Alive = false;
+                mob.TakeDamage(4f, world, session);
+                SoundSystem.PlayArrowHit();
+                return;
+            }
         }
 
         // Попадание в твёрдый блок

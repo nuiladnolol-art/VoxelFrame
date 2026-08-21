@@ -38,6 +38,8 @@ public static class SoundSystem {
     private static Sound _splashSound;
     private static Sound _popSound;
     private static Sound _chestSound;
+    private static Sound _totemSound;
+    private static Sound _fertilizeSound;
 
     public static void Initialize() {
         if (_audioReady) return;
@@ -71,6 +73,28 @@ public static class SoundSystem {
                 _splashSound = LoadProceduralSound(CreateSplashWav(44100 / 4, 0.50f));
                 _popSound = LoadProceduralSound(CreateToneWav(44100 / 16, 550f, 850f, 0.30f));
                 _chestSound = LoadProceduralSound(CreateToneWav(44100 / 7, 360f, 480f, 0.35f));
+                _fertilizeSound = LoadProceduralSound(CreateToneWav(44100 / 6, 600f, 1200f, 0.40f));
+
+                // Звук тотема (MP3 / WAV файл, обрезанный ровно до 12.0 секунд)
+                string? totemPath = FindSoundFile("totem.mp3") 
+                                 ?? FindSoundFile("alive.mp3") 
+                                 ?? FindSoundFile("totem.wav");
+
+                if (totemPath != null && File.Exists(totemPath)) {
+                    var wave = Raylib.LoadWave(totemPath);
+                    if (wave.SampleCount > 0) {
+                        int maxFrames = (int)(12 * wave.SampleRate);
+                        if (wave.SampleCount > maxFrames) {
+                            Raylib.WaveCrop(ref wave, 0, maxFrames);
+                        }
+                        _totemSound = Raylib.LoadSoundFromWave(wave);
+                        Raylib.UnloadWave(wave);
+                    } else {
+                        _totemSound = Raylib.LoadSound(totemPath);
+                    }
+                } else {
+                    _totemSound = LoadProceduralSound(CreateToneWav(44100 * 2, 580f, 880f, 0.70f));
+                }
 
                 _audioReady = true;
             }
@@ -79,9 +103,23 @@ public static class SoundSystem {
         }
     }
 
+    private static string? FindSoundFile(string fileName) {
+        string[] probeStarts = { Directory.GetCurrentDirectory(), AppDomain.CurrentDomain.BaseDirectory };
+        foreach (var start in probeStarts) {
+            var dir = new DirectoryInfo(start);
+            while (dir != null) {
+                string candidate = Path.Combine(dir.FullName, "assets", "sounds", fileName);
+                if (File.Exists(candidate)) return candidate;
+                dir = dir.Parent;
+            }
+        }
+        return null;
+    }
+
     private static void Play(Sound s, float pitch = 1.0f) {
         if (!_audioReady || SaveSystem.SoundVolume <= 0) return;
         Raylib.SetMasterVolume(SaveSystem.SoundVolume / 100f);
+        Raylib.SetSoundVolume(s, 1.0f);
         Raylib.SetSoundPitch(s, pitch);
         Raylib.PlaySound(s);
     }
@@ -132,6 +170,11 @@ public static class SoundSystem {
     public static void PlaySplash() => Play(_splashSound);
     public static void PlayPop() => Play(_popSound, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);
     public static void PlayChest() => Play(_chestSound);
+    public static void PlayTotem() => Play(_totemSound, 1.0f);
+    public static void StopTotem() {
+        if (_audioReady) Raylib.StopSound(_totemSound);
+    }
+    public static void PlayFertilize() => Play(_fertilizeSound, 1.0f);
 
     private static unsafe Sound LoadProceduralSound(byte[] wavBytes) {
         fixed (byte* ptr = wavBytes)
@@ -238,6 +281,68 @@ public static class SoundSystem {
         bw.Write(bitsPerSample);
         bw.Write("data"u8);
         bw.Write(subchunk2Size);
+    }
+
+    /// <summary>
+    /// Конвертирует WAV в формате IEEE Float 32-bit в стандартный PCM 16-bit,
+    /// который корректно поддерживается Raylib.
+    /// </summary>
+    private static byte[]? ConvertFloat32ToPcm16Wav(byte[] input, ushort channels, uint sampleRate) {
+        try {
+            // Найти data chunk
+            int dataOffset = -1, dataSize = -1;
+            int pos = 12;
+            while (pos + 8 <= input.Length) {
+                string chunkId = System.Text.Encoding.ASCII.GetString(input, pos, 4);
+                int chunkSize = System.BitConverter.ToInt32(input, pos + 4);
+                if (chunkId == "data") {
+                    dataOffset = pos + 8;
+                    dataSize = chunkSize;
+                    break;
+                }
+                pos += 8 + chunkSize;
+            }
+            if (dataOffset < 0 || dataSize <= 0) return null;
+
+            int numSamples = dataSize / (channels * 4); // Float32 = 4 bytes per sample per channel
+            // Downmix to mono если 2 канала, иначе оставляем как есть
+            int outChannels = 1;
+            int outSampleCount = numSamples;
+
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms);
+            short bitsOut = 16;
+            int byteRate = (int)(sampleRate * outChannels * bitsOut / 8);
+            int blockAlign = outChannels * bitsOut / 8;
+            int subchunk2Size = outSampleCount * blockAlign;
+            bw.Write("RIFF"u8);
+            bw.Write(36 + subchunk2Size);
+            bw.Write("WAVE"u8);
+            bw.Write("fmt "u8);
+            bw.Write(16);
+            bw.Write((short)1); // PCM
+            bw.Write((short)outChannels);
+            bw.Write((int)sampleRate);
+            bw.Write(byteRate);
+            bw.Write((short)blockAlign);
+            bw.Write(bitsOut);
+            bw.Write("data"u8);
+            bw.Write(subchunk2Size);
+
+            for (int i = 0; i < numSamples; i++) {
+                float sample = 0f;
+                for (int c = 0; c < channels; c++) {
+                    float ch = System.BitConverter.ToSingle(input, dataOffset + (i * channels + c) * 4);
+                    sample += ch;
+                }
+                sample /= channels; // Смешиваем каналы в моно
+                short pcm = (short)Math.Clamp((int)(sample * 32767f), -32768, 32767);
+                bw.Write(pcm);
+            }
+            return ms.ToArray();
+        } catch {
+            return null;
+        }
     }
 
     public static void Shutdown() {

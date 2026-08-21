@@ -14,4 +14,10 @@
     <ProjectReference Include="..\VoxelFrame.Core\VoxelFrame.Core.csproj" />
     <PackageReference Include="Raylib-cs" Version="7.0.0" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\assets\**\*">
+      <Link>assets\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>

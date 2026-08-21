@@ -229,7 +229,7 @@ public static class Screens {
             if (MenuError.Length > 0)
                 Fonts.DrawCentered(MenuError, w / 2f, h * 0.68f, 18f, new Color(255, 120, 120, 255));
 
-            Fonts.Draw("VoxelFrame Alpha 0.7.5", 10f, h - 25f, 14f, new Color(200, 200, 200, 180));
+            Fonts.Draw("VoxelFrame Alpha 0.8.0", 10f, h - 25f, 14f, new Color(200, 200, 200, 180));
             Fonts.Draw("SenStol Studio", w - 180f, h - 25f, 14f, new Color(200, 200, 200, 180));
         }
 
@@ -578,6 +578,22 @@ public static class Screens {
         for (int col = 0; col < cols; col++)
             DrawSlot(session, inv, gridX + col * (slot + gap), hotbarY, col, col == session.Player.SelectedSlot);
 
+        // Слот второй руки (слева/справа от хотбара в окне инвентаря)
+        float offhandX = px + gridW + 30f;
+        float offhandY = hotbarY;
+        var offhandRec = new Rectangle(offhandX, offhandY, slot, slot);
+        bool offhandHover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), offhandRec);
+        Raylib.DrawRectangleRounded(offhandRec, 0.12f, 6, offhandHover ? SlotHover : new Color(45, 45, 60, 220));
+        Raylib.DrawRectangleRoundedLinesEx(offhandRec, 0.12f, 6, 1.5f, new Color(80, 110, 150, 255));
+        Fonts.Draw("2-я рука [F]", offhandX, offhandY - 16f, 12f, new Color(170, 190, 225, 220));
+
+        if (session.Player.OffhandItem != null && session.Player.OffhandCount > 0) {
+            Hud.DrawItemIcon(session.Player.OffhandItem, offhandRec, 0.75f);
+            if (session.Player.OffhandCount > 1) {
+                Fonts.DrawShadowed($"×{session.Player.OffhandCount}", offhandX + 3f, offhandY + slot - 18f, 14f, Color.White);
+            }
+        }
+
         // Панель крафта справа.
         DrawCraftPanel(session, px + gridW + 30f, py + 76f, panelW - gridW - 46f, panelH - 90f);
 
@@ -724,6 +740,57 @@ public static class Screens {
                         slotHit = true;
                         break;
                     }
+                }
+
+                // Клик по слоту второй руки
+                var offhandRec = new Rectangle(px + gridW + 30f, hotbarY, slot, slot);
+                if (Raylib.CheckCollisionPointRec(mouse, offhandRec)) {
+                    slotHit = true;
+                    if (right) {
+                        if (Held.HasValue && Held.Value.Quantity > 0) {
+                            var held = Held.Value;
+                            if (session.Player.OffhandItem == null || session.Player.OffhandCount == 0) {
+                                session.Player.OffhandItem = held.Item.Definition;
+                                session.Player.OffhandCount = 1;
+                                Held = held.Quantity > 1 ? held with { Quantity = held.Quantity - 1 } : null;
+                            } else if (session.Player.OffhandItem.Id == held.Item.Definition.Id && session.Player.OffhandCount < 64) {
+                                session.Player.OffhandCount++;
+                                Held = held.Quantity > 1 ? held with { Quantity = held.Quantity - 1 } : null;
+                            }
+                        } else if (session.Player.OffhandItem != null && session.Player.OffhandCount > 0) {
+                            int take = (session.Player.OffhandCount + 1) / 2;
+                            Held = new ItemEntry(GameData.NewItem(session.Player.OffhandItem), take);
+                            session.Player.OffhandCount -= take;
+                            if (session.Player.OffhandCount <= 0) session.Player.OffhandItem = null;
+                        }
+                    } else {
+                        // Left click swap
+                        if (!Held.HasValue || Held.Value.Quantity <= 0) {
+                            if (session.Player.OffhandItem != null && session.Player.OffhandCount > 0) {
+                                Held = new ItemEntry(GameData.NewItem(session.Player.OffhandItem), session.Player.OffhandCount);
+                                session.Player.OffhandItem = null;
+                                session.Player.OffhandCount = 0;
+                            }
+                        } else {
+                            var held = Held.Value;
+                            if (session.Player.OffhandItem == null || session.Player.OffhandCount == 0) {
+                                session.Player.OffhandItem = held.Item.Definition;
+                                session.Player.OffhandCount = held.Quantity;
+                                Held = null;
+                            } else if (session.Player.OffhandItem.Id == held.Item.Definition.Id) {
+                                int add = Math.Min(64 - session.Player.OffhandCount, held.Quantity);
+                                session.Player.OffhandCount += add;
+                                Held = held.Quantity > add ? held with { Quantity = held.Quantity - add } : null;
+                            } else {
+                                var tmpItem = session.Player.OffhandItem;
+                                int tmpCount = session.Player.OffhandCount;
+                                session.Player.OffhandItem = held.Item.Definition;
+                                session.Player.OffhandCount = held.Quantity;
+                                Held = new ItemEntry(GameData.NewItem(tmpItem), tmpCount);
+                            }
+                        }
+                    }
+                    SoundSystem.PlayPop();
                 }
             }
 
@@ -949,17 +1016,17 @@ public static class Screens {
 
     // ── Личный 2×2 крафт в инвентаре ─────────────────────────────────────────
     private static void DrawCraftPanel(GameSession session, float panelX, float panelY, float panelW, float panelH) {
-        const int slotSz = 48, gap = 4;
+        const int slotSz = 44, gap = 4;
         var mouse = Raylib.GetMousePosition();
         bool leftClick = Raylib.IsMouseButtonPressed(MouseButton.Left);
         bool rightClick = Raylib.IsMouseButtonPressed(MouseButton.Right);
 
         // Заголовок
-        Fonts.Draw("Крафт", panelX + 8f, panelY + 6f, 16f, new Color(255, 220, 120, 255));
+        Fonts.Draw("Крафт 2×2", panelX + 8f, panelY + 4f, 15f, new Color(255, 220, 120, 255));
 
         // 2×2 сетка ингредиентов
-        float gridX = panelX + 12f;
-        float gridY = panelY + 30f;
+        float gridX = panelX + 8f;
+        float gridY = panelY + 24f;
         for (int r = 0; r < 2; r++) {
             for (int c = 0; c < 2; c++) {
                 int idx = r * 2 + c;
@@ -970,12 +1037,12 @@ public static class Screens {
         }
 
         // Стрелка
-        float arrowX = gridX + 2 * (slotSz + gap) + 8f;
+        float arrowX = gridX + 2 * (slotSz + gap) + 6f;
         float arrowMidY = gridY + (slotSz + gap) / 2f + slotSz / 2f - 8f;
-        Fonts.Draw("→", arrowX, arrowMidY, 24f, new Color(200, 200, 200, 255));
+        Fonts.Draw("→", arrowX, arrowMidY, 22f, new Color(200, 200, 200, 255));
 
         // Слот результата
-        float resultX = arrowX + 30f;
+        float resultX = arrowX + 26f;
         float resultY = gridY + (slotSz + gap) / 2f - slotSz / 2f + 2f;
 
         // Вычисляем результат 2×2 → expand to 3×3
@@ -1018,9 +1085,209 @@ public static class Screens {
             }
         }
 
-        // Подсказка
-        float hintY = gridY + 2 * (slotSz + gap) + 8f;
-        Fonts.Draw("Разложи предметы по сетке крафта", panelX + 8f, hintY, 11f, new Color(150, 155, 165, 255));
+        // Книга рецептов в инвентаре (нижняя половина панели крафта)
+        float bookY = gridY + 2 * (slotSz + gap) + 6f;
+        DrawRecipeBookSection(session, panelX + 4f, bookY, panelW - 8f, panelH - (bookY - panelY) - 4f, PersonalGrid, false);
+    }
+
+    // ── Книга рецептов ───────────────────────────────────────────────────────
+
+    public record struct RecipeBookEntry(
+        string Name,
+        ItemDefinition Output,
+        int Count,
+        (ItemDefinition Item, int Count)[] Ingredients,
+        ItemDefinition?[] Shape,
+        bool Needs3x3);
+
+    private static int _recipeScroll = 0;
+
+    private static readonly RecipeBookEntry[] AllRecipes = new RecipeBookEntry[] {
+        // Базовые
+        new("Доски (4 шт)", GameData.PlankItem, 4, new[] { (GameData.LogItem, 1) }, new ItemDefinition?[] { GameData.LogItem, null, null, null }, false),
+        new("Палки (4 шт)", GameData.StickItem, 4, new[] { (GameData.PlankItem, 2) }, new ItemDefinition?[] { GameData.PlankItem, null, GameData.PlankItem, null }, false),
+        new("Верстак", GameData.WorkbenchItem, 1, new[] { (GameData.PlankItem, 4) }, new ItemDefinition?[] { GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, GameData.PlankItem }, false),
+        new("Факелы (4 шт)", GameData.TorchItem, 4, new[] { (GameData.CoalItem, 1), (GameData.StickItem, 1) }, new ItemDefinition?[] { GameData.CoalItem, null, GameData.StickItem, null }, false),
+        new("Сундук", GameData.ChestItem, 1, new[] { (GameData.PlankItem, 8) }, new ItemDefinition?[] { GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, null, GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, GameData.PlankItem }, true),
+        new("Печка", GameData.FurnaceItem, 1, new[] { (GameData.CobblestoneItem, 8) }, new ItemDefinition?[] { GameData.CobblestoneItem, GameData.CobblestoneItem, GameData.CobblestoneItem, GameData.CobblestoneItem, null, GameData.CobblestoneItem, GameData.CobblestoneItem, GameData.CobblestoneItem, GameData.CobblestoneItem }, true),
+        new("Кровать", GameData.BedItem, 1, new[] { (GameData.WhiteWoolItem, 3), (GameData.PlankItem, 3) }, new ItemDefinition?[] { GameData.WhiteWoolItem, GameData.WhiteWoolItem, GameData.WhiteWoolItem, GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, null, null, null }, true),
+
+        // Пища и выживание
+        new("Хлеб", GameData.BreadItem, 1, new[] { (GameData.WheatItem, 3) }, new ItemDefinition?[] { GameData.WheatItem, GameData.WheatItem, GameData.WheatItem, null, null, null, null, null, null }, true),
+        new("Костная мука (3 шт)", GameData.BoneMealItem, 3, new[] { (GameData.BoneItem, 1) }, new ItemDefinition?[] { GameData.BoneItem, null, null, null }, false),
+        new("Опилки (4 шт)", GameData.SawdustItem, 4, new[] { (GameData.LogItem, 1) }, new ItemDefinition?[] { GameData.LogItem, null, null, null }, false),
+        new("Каша из опилок", GameData.SawdustPorridgeItem, 1, new[] { (GameData.SawdustItem, 2), (GameData.PlankItem, 1), (GameData.WheatSeedsItem, 1) }, new ItemDefinition?[] { GameData.SawdustItem, GameData.SawdustItem, GameData.PlankItem, GameData.WheatSeedsItem }, false),
+        new("Тотем бессмертия", GameData.TotemItem, 1, new[] { (GameData.BoneItem, 7), (GameData.GoldIngotItem, 1) }, new ItemDefinition?[] { GameData.BoneItem, GameData.GoldIngotItem, GameData.BoneItem, GameData.BoneItem, GameData.BoneItem, GameData.BoneItem, null, GameData.BoneItem, null }, true),
+
+        // Инструменты: Кирки
+        new("Деревянная кирка", GameData.WoodPickaxeItem, 1, new[] { (GameData.PlankItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Каменная кирка", GameData.StonePickaxeItem, 1, new[] { (GameData.CobblestoneItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.CobblestoneItem, GameData.CobblestoneItem, GameData.CobblestoneItem, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Железная кирка", GameData.IronPickaxeItem, 1, new[] { (GameData.IronIngotItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.IronIngotItem, GameData.IronIngotItem, GameData.IronIngotItem, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Алмазная кирка", GameData.DiamondPickaxeItem, 1, new[] { (GameData.DiamondItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.DiamondItem, GameData.DiamondItem, GameData.DiamondItem, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+
+        // Топоры
+        new("Деревянный топор", GameData.WoodAxeItem, 1, new[] { (GameData.PlankItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.PlankItem, GameData.PlankItem, null, GameData.PlankItem, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Каменный топор", GameData.StoneAxeItem, 1, new[] { (GameData.CobblestoneItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.CobblestoneItem, GameData.CobblestoneItem, null, GameData.CobblestoneItem, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Железный топор", GameData.IronAxeItem, 1, new[] { (GameData.IronIngotItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.IronIngotItem, GameData.IronIngotItem, null, GameData.IronIngotItem, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Алмазный топор", GameData.DiamondAxeItem, 1, new[] { (GameData.DiamondItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.DiamondItem, GameData.DiamondItem, null, GameData.DiamondItem, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+
+        // Мечи
+        new("Деревянный меч", GameData.WoodSwordItem, 1, new[] { (GameData.PlankItem, 2), (GameData.StickItem, 1) }, new ItemDefinition?[] { null, GameData.PlankItem, null, null, GameData.PlankItem, null, null, GameData.StickItem, null }, true),
+        new("Каменный меч", GameData.StoneSwordItem, 1, new[] { (GameData.CobblestoneItem, 2), (GameData.StickItem, 1) }, new ItemDefinition?[] { null, GameData.CobblestoneItem, null, null, GameData.CobblestoneItem, null, null, GameData.StickItem, null }, true),
+        new("Железный меч", GameData.IronSwordItem, 1, new[] { (GameData.IronIngotItem, 2), (GameData.StickItem, 1) }, new ItemDefinition?[] { null, GameData.IronIngotItem, null, null, GameData.IronIngotItem, null, null, GameData.StickItem, null }, true),
+        new("Алмазный меч", GameData.DiamondSwordItem, 1, new[] { (GameData.DiamondItem, 2), (GameData.StickItem, 1) }, new ItemDefinition?[] { null, GameData.DiamondItem, null, null, GameData.DiamondItem, null, null, GameData.StickItem, null }, true),
+
+        // Лопаты
+        new("Деревянная лопата", GameData.WoodShovelItem, 1, new[] { (GameData.PlankItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.PlankItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Каменная лопата", GameData.StoneShovelItem, 1, new[] { (GameData.CobblestoneItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.CobblestoneItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Железная лопата", GameData.IronShovelItem, 1, new[] { (GameData.IronIngotItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.IronIngotItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Алмазная лопата", GameData.DiamondShovelItem, 1, new[] { (GameData.DiamondItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.DiamondItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+
+        // Мотыги
+        new("Деревянная мотыга", GameData.WoodHoeItem, 1, new[] { (GameData.PlankItem, 2), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.PlankItem, GameData.PlankItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Каменная мотыга", GameData.StoneHoeItem, 1, new[] { (GameData.CobblestoneItem, 2), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.CobblestoneItem, GameData.CobblestoneItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Железная мотыга", GameData.IronHoeItem, 1, new[] { (GameData.IronIngotItem, 2), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.IronIngotItem, GameData.IronIngotItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Алмазная мотыга", GameData.DiamondHoeItem, 1, new[] { (GameData.DiamondItem, 2), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.DiamondItem, GameData.DiamondItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+    };
+
+    private static void DrawRecipeBookSection(GameSession session, float rx, float ry, float rw, float rh, ItemEntry?[] targetGrid, bool is3x3) {
+        var mouse = Raylib.GetMousePosition();
+        bool leftClick = Raylib.IsMouseButtonPressed(MouseButton.Left);
+        var inv = session.Player.Inventory;
+
+        var bookRect = new Rectangle(rx, ry, rw, rh);
+        Raylib.DrawRectangleRounded(bookRect, 0.08f, 6, new Color(20, 26, 32, 230));
+        Raylib.DrawRectangleRoundedLinesEx(bookRect, 0.08f, 6, 1.5f, new Color(40, 140, 60, 220));
+
+        Fonts.Draw("📖 Книга рецептов", rx + 8f, ry + 6f, 15f, new Color(100, 230, 120, 255));
+
+        // Скролл колесом мыши
+        if (Raylib.CheckCollisionPointRec(mouse, bookRect)) {
+            int wheel = (int)Raylib.GetMouseWheelMove();
+            if (wheel != 0) {
+                _recipeScroll = Math.Clamp(_recipeScroll - wheel, 0, Math.Max(0, AllRecipes.Length - 3));
+            }
+        }
+
+        float itemH = 42f;
+        float itemY = ry + 28f;
+        int maxVisible = (int)((rh - 32f) / itemH);
+
+        for (int i = _recipeScroll; i < Math.Min(AllRecipes.Length, _recipeScroll + maxVisible); i++) {
+            var r = AllRecipes[i];
+            bool canCraft = true;
+            foreach (var (reqItem, reqCount) in r.Ingredients) {
+                if (inv.CountOf(reqItem) < reqCount) {
+                    canCraft = false;
+                    break;
+                }
+            }
+            if (r.Needs3x3 && !is3x3) canCraft = false;
+
+            var itemRec = new Rectangle(rx + 5f, itemY, rw - 10f, itemH - 3f);
+            bool hov = Raylib.CheckCollisionPointRec(mouse, itemRec);
+
+            Color bgCol = hov ? (canCraft ? new Color(40, 80, 50, 240) : new Color(60, 40, 40, 220))
+                            : (canCraft ? new Color(30, 55, 38, 200) : new Color(30, 32, 38, 160));
+            Raylib.DrawRectangleRounded(itemRec, 0.15f, 4, bgCol);
+            Raylib.DrawRectangleRoundedLinesEx(itemRec, 0.15f, 4, 1f, canCraft ? new Color(80, 180, 90, 200) : new Color(60, 65, 75, 180));
+
+            // Иконка
+            Hud.DrawItemIcon(r.Output, new Rectangle(itemRec.X + 3f, itemRec.Y + 3f, 32f, 32f), 0.95f);
+            if (r.Count > 1) {
+                Fonts.DrawShadowed($"×{r.Count}", itemRec.X + 18f, itemRec.Y + 18f, 11f, Color.White);
+            }
+
+            // Название
+            Color nameCol = canCraft ? Color.White : new Color(160, 165, 175, 200);
+            Fonts.Draw(r.Name, itemRec.X + 38f, itemRec.Y + 4f, 13f, nameCol);
+
+            // Стоимость или тег верстака
+            string costText = r.Needs3x3 && !is3x3 ? "[Верстак 3×3]" : string.Join(" + ", r.Ingredients.Select(ing => $"{ing.Count}×{ing.Item.Name[..Math.Min(5, ing.Item.Name.Length)]}"));
+            Color costCol = canCraft ? new Color(160, 230, 170, 220) : new Color(200, 120, 120, 200);
+            Fonts.Draw(costText, itemRec.X + 38f, itemRec.Y + 22f, 11f, costCol);
+
+            if (hov && leftClick) {
+                if (r.Needs3x3 && !is3x3) {
+                    session.AddMessage("Этот предмет можно скрафтить только на верстаке 3×3!");
+                } else if (!canCraft) {
+                    session.AddMessage($"Не хватает ингредиентов для создания: {r.Name}");
+                } else {
+                    AutoFillRecipe(session, r, targetGrid, is3x3);
+                }
+            }
+
+            itemY += itemH;
+        }
+    }
+
+    private static void AutoFillRecipe(GameSession session, RecipeBookEntry recipe, ItemEntry?[] grid, bool is3x3) {
+        var inv = session.Player.Inventory;
+
+        // Проверяем наличие ингредиентов
+        foreach (var (reqItem, reqCount) in recipe.Ingredients) {
+            if (inv.CountOf(reqItem) < reqCount) {
+                session.AddMessage($"Не хватает: {reqItem.Name} ({inv.CountOf(reqItem)}/{reqCount})");
+                return;
+            }
+        }
+
+        // Возвращаем текущие предметы из сетки в инвентарь
+        for (int i = 0; i < grid.Length; i++) {
+            if (grid[i].HasValue && grid[i]!.Value.Quantity > 0) {
+                inv.TryInsert(grid[i]!.Value.Item, grid[i]!.Value.Quantity);
+                grid[i] = null;
+            }
+        }
+
+        // Определяем размер сетки цели
+        int gridSize = is3x3 ? 3 : 2;
+
+        // Shape рецепта — всегда 9 элементов (3x3) или 4 (2x2) в зависимости от Needs3x3
+        // Нормализуем шаблон в minBB и раскладываем в целевую сетку
+        var shape = recipe.Shape;
+        int shapeW = recipe.Needs3x3 ? 3 : 2;
+        int shapeH = recipe.Needs3x3 ? 3 : 2;
+
+        // Найдём bounding box непустых ячеек в shape
+        int minR = shapeH, maxR = -1, minC = shapeW, maxC = -1;
+        for (int r = 0; r < shapeH; r++) {
+            for (int c = 0; c < shapeW; c++) {
+                if (r * shapeW + c < shape.Length && shape[r * shapeW + c] != null) {
+                    if (r < minR) minR = r;
+                    if (r > maxR) maxR = r;
+                    if (c < minC) minC = c;
+                    if (c > maxC) maxC = c;
+                }
+            }
+        }
+
+        if (maxR < 0) return; // пустой шаблон
+
+        int bbH = maxR - minR + 1;
+        int bbW = maxC - minC + 1;
+
+        // Выровнять по верхнему левому углу целевой сетки
+        bool placed = false;
+        for (int r = 0; r < bbH && r < gridSize; r++) {
+            for (int c = 0; c < bbW && c < gridSize; c++) {
+                int shapeIdx = (minR + r) * shapeW + (minC + c);
+                if (shapeIdx >= shape.Length) continue;
+                var needed = shape[shapeIdx];
+                if (needed != null) {
+                    int gridIdx = r * gridSize + c;
+                    if (gridIdx < grid.Length && inv.TryRemove(needed, 1)) {
+                        grid[gridIdx] = new ItemEntry(GameData.NewItem(needed), 1);
+                        placed = true;
+                    }
+                }
+            }
+        }
+
+        if (placed) {
+            SoundSystem.PlayPop();
+            session.AddMessage($"Выложен рецепт: {recipe.Name}");
+        }
     }
 
     // ── 3×3 экран верстака ───────────────────────────────────────────────────
@@ -1102,6 +1369,12 @@ public static class Screens {
                 }
             }
         }
+
+        // Книга рецептов верстака (справа от 3×3 сетки)
+        float bookX = resultX + slotSz + 14f;
+        float bookW = px + panelW - bookX - 14f;
+        float bookH = 3 * (slotSz + gap) + 12f;
+        DrawRecipeBookSection(session, bookX, gridY - 6f, bookW, bookH, WorkbenchGrid, true);
 
         // Инвентарь снизу
         float invY = gridY + 3 * (slotSz + gap) + 20f;

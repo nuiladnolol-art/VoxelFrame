@@ -58,10 +58,24 @@ public static class Hud {
         Fonts.DrawShadowed($"FPS: {Raylib.GetFPS()}", w - 210f, 32f, 18f, Color.White);
         Fonts.DrawShadowed($"Биом: {biomeName}", w - 210f, 54f, 18f, new Color(200, 230, 255, 255));
 
-        // Хотбар.
+        // Хотбар и Вторая рука (Off-hand).
         var inv = player.Inventory;
         int hotbarW = 9 * SlotSize + 8 * SlotGap;
         int x0 = w / 2 - hotbarW / 2, y0 = h - SlotSize - 10;
+
+        // Слот второй руки (слева от хотбара, как в Minecraft Java Edition)
+        var offhandRect = new Rectangle(x0 - SlotSize - 14, y0, SlotSize, SlotSize);
+        Raylib.DrawRectangleRounded(offhandRect, 0.15f, 6, new Color(45, 45, 60, 200));
+        Raylib.DrawRectangleRoundedLinesEx(offhandRect, 0.15f, 6, 1.5f, new Color(80, 90, 115, 255));
+        Fonts.Draw("F", offhandRect.X + 4f, offhandRect.Y + 3f, 11f, new Color(170, 190, 225, 180));
+
+        if (player.OffhandItem != null && player.OffhandCount > 0) {
+            DrawItemIcon(player.OffhandItem, offhandRect, 0.7f);
+            if (player.OffhandCount > 1) {
+                Fonts.DrawShadowed($"×{player.OffhandCount}", offhandRect.X + 3f, offhandRect.Y + offhandRect.Height - 20f, 15f, Color.White);
+            }
+        }
+
         for (int i = 0; i < 9; i++) {
             var rect = new Rectangle(x0 + i * (SlotSize + SlotGap), y0, SlotSize, SlotSize);
             bool selected = i == player.SelectedSlot;
@@ -92,15 +106,26 @@ public static class Hud {
             }
         }
 
-        // Название предмета при переключении слота хотбара (пару секунд).
+        // Название предмета при переключении слота хотбара (над индикаторами здоровья и сытости).
         if (player.SlotToastTimer > 0f && player.SlotToastText.Length > 0) {
             float fade = Math.Clamp(player.SlotToastTimer / 0.4f, 0f, 1f);
-            float tw = Fonts.Measure(player.SlotToastText, 24f);
-            Fonts.DrawShadowed(player.SlotToastText, w / 2f - tw / 2f, y0 - 34f, 24f,
+            float toastY = h - 116f;
+            float tw = Fonts.Measure(player.SlotToastText, 28f);
+            Fonts.DrawShadowed(player.SlotToastText, w / 2f - tw / 2f, toastY, 28f,
                 new Color((byte)255, (byte)255, (byte)255, (byte)(255 * fade)));
         }
 
-        // Предмет в руке (правый нижний угол, классический Minecraft-вид от первого лица)
+        // Предмет во второй руке (левый нижний угол, вид от первого лица)
+        if (player.OffhandItem != null && player.OffhandCount > 0) {
+            float offhandSize = 110f;
+            float bob = player.BobOffset * 50f;
+            float leftHandX = 35f;
+            float leftHandY = h - offhandSize - 10f + bob;
+            var leftRect = new Rectangle(leftHandX, leftHandY, offhandSize, offhandSize);
+            DrawItemIconRotated(player.OffhandItem, leftRect, 1f, -0.35f);
+        }
+
+        // Предмет в правой руке (правый нижний угол, классический Minecraft-вид от первого лица)
         if (player.SelectedEntry is { } held) {
             float handSize = 140f;
             float bob = player.BobOffset * 70f;
@@ -151,9 +176,27 @@ public static class Hud {
                 Color.White);
         }
 
+        // Анимация активации Тотема Бессмертия (парящий тотем по центру + золотая вспышка)
+        if (player.TotemAnimationTimer > 0f) {
+            float t = 1.0f - (player.TotemAnimationTimer / 2.5f);
+            float alpha = MathF.Sin(t * MathF.PI);
+            byte flashA = (byte)(160 * Math.Clamp(alpha, 0f, 1f));
+            Raylib.DrawRectangle(0, 0, w, h, new Color((byte)255, (byte)215, (byte)0, flashA));
+
+            float totemScale = 1.0f + 0.3f * MathF.Sin(t * MathF.PI);
+            float totemSize = 220f * totemScale;
+            float totemY = h / 2f - totemSize / 2f - MathF.Sin(t * MathF.PI) * 40f;
+            var totemRect = new Rectangle(w / 2f - totemSize / 2f, totemY, totemSize, totemSize);
+            DrawItemIconByTile((byte)TextureAtlas.TTotem, totemRect);
+
+            string tmsg = "ТОТЕМ БЕССМЕРТИЯ АКТИВИРОВАН!";
+            float mw = Fonts.Measure(tmsg, 32f);
+            Fonts.DrawShadowed(tmsg, w / 2f - mw / 2f, h / 2f + 100f, 32f, new Color((byte)255, (byte)240, (byte)120, (byte)(255 * alpha)));
+        }
+
         // Анимация сна (затемнение и плавный переход к утру)
         if (session.IsSleeping) {
-            float alphaFactor = MathF.Sin(MathF.Min(1f, session.SleepProgress / 2.5f) * MathF.PI);
+            float alphaFactor = MathF.Sin(MathF.Min(1f, session.SleepProgress / 2.0f) * MathF.PI);
             byte overlayAlpha = (byte)(235 * Math.Clamp(alphaFactor * 1.5f, 0f, 1f));
             Raylib.DrawRectangle(0, 0, w, h, new Color((byte)5, (byte)5, (byte)15, overlayAlpha));
             string sleepText = "Сон... Пропуск ночи";

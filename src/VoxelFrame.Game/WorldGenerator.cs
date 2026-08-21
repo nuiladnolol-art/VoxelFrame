@@ -99,34 +99,35 @@ public sealed class WorldGenerator {
         return (int)MathF.Round(h);
     }
 
-    /// <summary>Определяет биом по координатам точки в мире.</summary>
+    /// <summary>Определяет биом по координатам точки в мире (температура/влажность).</summary>
     public BiomeType GetBiome(int wx, int wy, int wz) {
         if (wy >= 15 && wy <= 22 && IsInMineshaft(wx, wy, wz)) {
             return BiomeType.Mineshaft;
         }
 
         int surface = SurfaceHeight(wx, wz);
-        float r = MathF.Abs(_river.Get(wx * 0.004f, wz * 0.004f));
-        if (r < 0.090f && surface <= SeaLevel + 2) {
+        float r = MathF.Abs(_river.Get(wx * 0.0035f, wz * 0.0035f));
+        if (r < 0.075f && surface <= SeaLevel + 2) {
             return BiomeType.River;
         }
-        if (surface <= SeaLevel) {
-            return surface <= SeaLevel - 4 ? BiomeType.Ocean : BiomeType.Beach;
+        if (surface <= SeaLevel - 4) {
+            return BiomeType.Ocean;
         }
         if (surface <= SeaLevel + 2) {
             return BiomeType.Beach;
         }
 
-        float desertN = _beach.Get(wx * 0.006f + 500f, wz * 0.006f + 500f);
-        if (desertN > 0.40f) {
-            return BiomeType.Desert;
-        }
+        // Климатическая модель: Температура и Влажность
+        float temp = _beach.Get(wx * 0.0022f + 1200f, wz * 0.0022f + 1200f);
+        float humid = _forestNoise.Get(wx * 0.0028f + 2500f, wz * 0.0028f + 2500f);
 
-        float f = _forestNoise.Get(wx * 0.012f, wz * 0.012f);
-        if (f > 0.18f) {
-            return BiomeType.Forest;
+        if (temp > 0.70f && humid < 0.38f) {
+            return BiomeType.Desert; // Жаркий и сухой биом пустыни (~15% суши)
         }
-        return BiomeType.Plains;
+        if (humid > 0.50f) {
+            return BiomeType.Forest; // Влажный лесистый биом (~35% суши)
+        }
+        return BiomeType.Plains; // Умеренные просторные равнины (~50% суши)
     }
 
     public static string GetBiomeName(BiomeType biome) => biome switch {
@@ -224,6 +225,10 @@ public sealed class WorldGenerator {
 
         // Растительность (2D трава)
         PlaceFoliage(chunk, ox, oz);
+
+        // Редкие деревни с сундуками
+        if (chunk.Origin.Y == 1 || chunk.Origin.Y == 2) // только наземные чанки
+            PlaceVillages(chunk, ox, oz);
     }
 
     private void PlaceFoliage(Chunk chunk, int ox, int oz) {
@@ -246,9 +251,9 @@ public sealed class WorldGenerator {
                         bool isForest = biome == BiomeType.Forest;
                         bool isPlains = biome == BiomeType.Plains;
                         if (isForest || isPlains) {
-                            // Высокая плотность 2D-травы на полях и в лесах (Minecraft-стиль)
-                            float chance = isPlains ? 0.70f : 0.55f;
-                            if (fNoise < chance) {
+                            // Оптимизированная естественная плотность 2D-травы (-60% от исходного, кластерами)
+                            float chance = isPlains ? 0.22f : 0.12f;
+                            if (fNoise < chance && ((wx * 19 + wz * 37) % 4 == 0)) {
                                 var vx = MakeVoxel(GameData.BTallGrass.Id);
                                 chunk.SetVoxel(idx, in vx);
                             }
@@ -282,24 +287,24 @@ public sealed class WorldGenerator {
                     if (cur == 0 || cur == GameData.BBedrock.Id) continue;
 
                     // 1. Cheese Caves (Умеренные объемные залы и гроты)
-                    float cheese = _caveCheese.Fractal(wx * 0.018f, wy * 0.025f + 100f, wz * 0.018f, 2, 0.5f);
-                    bool isCheese = cheese > 0.62f && wy < surface - 4;
+                    float cheese = _caveCheese.Fractal(wx * 0.016f, wy * 0.022f + 100f, wz * 0.016f, 2, 0.5f);
+                    bool isCheese = cheese > 0.56f && wy < surface - 3;
 
                     // 2. Spaghetti Caves (Атмосферные извилистые туннели)
-                    float sp1 = _caveSpaghetti1.Get(wx * 0.028f + wy * 0.018f, wz * 0.028f);
-                    float sp2 = _caveSpaghetti2.Get(wx * 0.028f, wz * 0.028f + wy * 0.018f + 500f);
-                    bool isSpaghetti = (sp1 * sp1 + sp2 * sp2) < 0.015f && wy < surface - 3;
+                    float sp1 = _caveSpaghetti1.Get(wx * 0.024f + wy * 0.015f, wz * 0.024f);
+                    float sp2 = _caveSpaghetti2.Get(wx * 0.024f, wz * 0.024f + wy * 0.015f + 500f);
+                    bool isSpaghetti = (sp1 * sp1 + sp2 * sp2) < 0.022f && wy < surface - 2;
 
                     // 3. Noodle Caves (Узкие разломы и трещины в породе)
-                    float noodle = _caveNoodle.Get(wx * 0.016f + 2000f, wz * 0.016f + wy * 0.035f);
-                    bool isNoodle = MathF.Abs(noodle) < 0.020f && wy > 6 && wy < surface - 3;
+                    float noodle = _caveNoodle.Get(wx * 0.015f + 2000f, wz * 0.015f + wy * 0.030f);
+                    bool isNoodle = MathF.Abs(noodle) < 0.025f && wy > 6 && wy < surface - 2;
 
                     // Выходы пещер и разломов на поверхность (редкие)
-                    bool surfaceBreach = wy >= surface - 3 && (isSpaghetti || isNoodle) && cheese > 0.52f;
+                    bool surfaceBreach = wy >= surface - 3 && (isSpaghetti || isNoodle) && cheese > 0.48f;
 
                     if (isCheese || isSpaghetti || isNoodle || surfaceBreach) {
                         ushort replaceWith;
-                        if (wy <= 8) {
+                        if (wy <= 10) {
                             replaceWith = GameData.BLava.Id; // Подземные озера лавы
                         } else if (wy <= SeaLevel && cur == GameData.BWater.Id) {
                             replaceWith = GameData.BWater.Id;
@@ -388,17 +393,17 @@ public sealed class WorldGenerator {
                     if (chunk.Get(idx).TypeId != GameData.BStone.Id) continue;
 
                     // Уголь (Coal) — компактные жилы (4-12 блоков) на высотах Y=5..75
-                    float coalN = _oreNoise.Fractal(wx * 0.22f, wy * 0.22f, wz * 0.22f, 2, 0.5f);
-                    if (coalN > 0.82f) {
+                    float coalN = _oreNoise.Fractal(wx * 0.20f, wy * 0.20f, wz * 0.20f, 2, 0.5f);
+                    if (coalN > 0.74f) {
                         var v = MakeVoxel(GameData.BCoalOre.Id);
                         chunk.SetVoxel(idx, in v);
                         continue;
                     }
 
-                    // Железо (Iron) — жилы на высотах Y=5..48
-                    if (wy <= 48) {
-                        float ironN = _ironNoise.Fractal(wx * 0.24f, wy * 0.24f + 300f, wz * 0.24f, 2, 0.5f);
-                        if (ironN > 0.83f) {
+                    // Железо (Iron) — жилы на высотах Y=5..54
+                    if (wy <= 54) {
+                        float ironN = _ironNoise.Fractal(wx * 0.22f, wy * 0.22f + 300f, wz * 0.22f, 2, 0.5f);
+                        if (ironN > 0.76f) {
                             var v = MakeVoxel(GameData.BIronOre.Id);
                             chunk.SetVoxel(idx, in v);
                             continue;
@@ -498,7 +503,142 @@ public sealed class WorldGenerator {
         }
     }
 
-    private void SetLocal(Chunk chunk, int x, int y, int z, ushort type) {
+    /// <summary>
+    /// Генерирует процедурные деревни с домиками и сундуками с лутом.
+    /// Деревни появляются на равнинах и в лесах вне пустынь и водоёмов.
+    /// </summary>
+    private void PlaceVillages(Chunk chunk, int ox, int oz) {
+        // Размер сектора деревни: 16×16 чанков = 512×512 блоков
+        const int villageSectorChunks = 16;
+        const int villageSectorBlocks = villageSectorChunks * Chunk.SizeX;
+
+        int chunkX = ox / Chunk.SizeX;
+        int chunkZ = oz / Chunk.SizeZ;
+
+        // Определяем сектор деревни для этого чанка
+        int sectorX = (int)MathF.Floor((float)chunkX / villageSectorChunks);
+        int sectorZ = (int)MathF.Floor((float)chunkZ / villageSectorChunks);
+
+        // Генерируем позицию деревни в секторе через шум
+        var rng = new Random(_seed ^ (sectorX * 73856093) ^ (sectorZ * 19349663));
+        float villageSeed = _mineshaftNoise.Get(sectorX * 31.73f + 123.456f, sectorZ * 31.73f + 654.321f);
+        if (villageSeed < 0.50f) return; // ~50% секторов получают деревни
+
+        // Центр деревни в мировых координатах
+        int villageWX = sectorX * villageSectorBlocks + rng.Next(24, villageSectorBlocks - 24);
+        int villageWZ = sectorZ * villageSectorBlocks + rng.Next(24, villageSectorBlocks - 24);
+
+        // Проверяем, задевает ли этот чанк зону деревни (60 блоков радиус)
+        const int villageRadius = 60;
+        int chunkMinX = ox, chunkMaxX = ox + Chunk.SizeX - 1;
+        int chunkMinZ = oz, chunkMaxZ = oz + Chunk.SizeZ - 1;
+        if (villageWX + villageRadius < chunkMinX || villageWX - villageRadius > chunkMaxX) return;
+        if (villageWZ + villageRadius < chunkMinZ || villageWZ - villageRadius > chunkMaxZ) return;
+
+        // Биом центра деревни должен быть равнина или лес
+        int centerSurface = SurfaceHeight(villageWX, villageWZ);
+        if (centerSurface < SeaLevel + 3) return; // не в воде/пляже
+        var centerBiome = GetBiome(villageWX, BaseHeight, villageWZ);
+        if (centerBiome == BiomeType.Desert || centerBiome == BiomeType.Ocean ||
+            centerBiome == BiomeType.Beach || centerBiome == BiomeType.River) return;
+
+        // Генерируем 3-5 домиков вокруг центра
+        int houseCount = rng.Next(3, 6);
+        for (int h = 0; h < houseCount; h++) {
+            float angle = (float)h / houseCount * MathF.Tau + (float)rng.NextDouble() * 0.4f;
+            float dist = rng.Next(8, 26);
+            int houseX = villageWX + (int)(MathF.Cos(angle) * dist);
+            int houseZ = villageWZ + (int)(MathF.Sin(angle) * dist);
+            PlaceVillageHouse(chunk, ox, oz, houseX, houseZ, h, rng);
+        }
+
+        // Дорога-гравий между домами (по центру)
+        PlaceVillageRoad(chunk, ox, oz, villageWX, villageWZ, rng);
+    }
+
+    private void PlaceVillageHouse(Chunk chunk, int ox, int oz, int houseWX, int houseWZ, int houseIdx, Random rng) {
+        int surface = SurfaceHeight(houseWX, houseWZ);
+        if (surface < SeaLevel + 2) return;
+
+        const int W = 7, D = 6, H = 4; // ширина, глубина, высота
+
+        for (int dz = 0; dz < D; dz++) {
+            for (int dx = 0; dx < W; dx++) {
+                int wx = houseWX + dx - W / 2;
+                int wz = houseWZ + dz - D / 2;
+                int wy = surface;
+
+                // Фундамент из булыжника и заполнение под домом
+                for (int under = 0; under <= 3; under++) {
+                    SetVillageBlock(chunk, ox, oz, wx, wy - under, wz, GameData.BCobblestone.Id);
+                }
+
+                // Пол внутри дома
+                SetVillageBlock(chunk, ox, oz, wx, wy, wz, GameData.BPlanks.Id);
+
+                // Стены из досок (только периметр)
+                bool isEdge = dx == 0 || dx == W - 1 || dz == 0 || dz == D - 1;
+                // Дверной проём: центр ближней стены (dz==0, dx==W/2)
+                bool isDoor = dz == 0 && (dx == W / 2);
+
+                for (int y = 1; y <= H - 1; y++) {
+                    if (isEdge) {
+                        if (!(isDoor && y <= 2)) {
+                            SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, GameData.BPlanks.Id);
+                        } else {
+                            SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, 0); // дверной проём
+                        }
+                    } else {
+                        // Очистка внутреннего пространства воздухом
+                        SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, 0);
+                    }
+                }
+
+                // Крыша из бревен (верхний ряд сплошной)
+                SetVillageBlock(chunk, ox, oz, wx, wy + H, wz, GameData.BLog.Id);
+            }
+        }
+
+        // Сундук внутри домика
+        int chestX = houseWX + 1;
+        int chestZ = houseWZ + 1;
+        SetVillageBlock(chunk, ox, oz, chestX, surface + 1, chestZ, GameData.BChest.Id);
+
+        // Факел внутри дома для уюта и света
+        SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 2, houseWZ + 1, GameData.BTorch.Id);
+
+        // Факел у входа снаружи
+        SetVillageBlock(chunk, ox, oz, houseWX + 1, surface + 2, houseWZ - D / 2, GameData.BTorch.Id);
+    }
+
+    private void PlaceVillageRoad(Chunk chunk, int ox, int oz, int cx, int cz, Random rng) {
+        // Простая крестообразная дорога из гравия 3 блока шириной
+        for (int i = -24; i <= 24; i++) {
+            for (int w = -1; w <= 1; w++) {
+                // Горизонтальная ветка
+                SetVillageRoadBlock(chunk, ox, oz, cx + i, cz + w);
+                // Вертикальная ветка
+                SetVillageRoadBlock(chunk, ox, oz, cx + w, cz + i);
+            }
+        }
+    }
+
+    private void SetVillageRoadBlock(Chunk chunk, int ox, int oz, int wx, int wz) {
+        int surface = SurfaceHeight(wx, wz);
+        if (surface < SeaLevel + 2) return;
+        SetVillageBlock(chunk, ox, oz, wx, surface, wz, GameData.BGravel.Id);
+    }
+
+    private void SetVillageBlock(Chunk chunk, int ox, int oz, int wx, int wy, int wz, ushort blockId) {
+        int lx = wx - ox, lz = wz - oz;
+        if (lx < 0 || lx >= Chunk.SizeX || lz < 0 || lz >= Chunk.SizeZ) return;
+        int ly = wy - chunk.Origin.Y * Chunk.SizeY;
+        if (ly < 0 || ly >= Chunk.SizeY) return;
+        var v = MakeVoxel(blockId);
+        chunk.SetVoxel(Chunk.Index(lx, ly, lz), in v);
+    }
+
+    private static void SetLocal(Chunk chunk, int x, int y, int z, ushort type) {
         if (x < 0 || x >= Chunk.SizeX || y < 0 || y >= Chunk.SizeY || z < 0 || z >= Chunk.SizeZ) return;
         var vx = MakeVoxel(type); chunk.SetVoxel(Chunk.Index(x, y, z), in vx);
     }

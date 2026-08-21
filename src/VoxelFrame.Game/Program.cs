@@ -201,11 +201,10 @@ internal static class Program {
                     Screens.SettingsOpenedFromGame = true;
                     pauseDebounce = 0.25f;
                 } else if (pauseAction == PauseAction.SaveAndExit) {
+                    SoundSystem.StopTotem();
                     session.SaveTo(SaveSystem.SavePath);
                     session.Ui = UiState.Playing;
                     session = null;
-                    // Не вызываем Dispose() — это вызывает зависание OpenGL.
-                    // Рендерер будет освобождён при закрытии окна или сборке мусора.
                     renderer = null;
                 }
                 continue;
@@ -256,6 +255,7 @@ internal static class Program {
                     if (deathAction == Screens.DeathAction.Respawn) {
                         session.RespawnPlayer();
                     } else if (deathAction == Screens.DeathAction.MainMenu) {
+                        SoundSystem.StopTotem();
                         session.SaveTo(SaveSystem.SavePath);
                         session.Ui = UiState.Playing;
                         session = null;
@@ -445,7 +445,10 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.WoodHoeItem.Id, TextureAtlas.THoeWood);
         TextureAtlas.SetItemTile(GameData.StoneHoeItem.Id, TextureAtlas.THoeStone);
         TextureAtlas.SetItemTile(GameData.IronHoeItem.Id, TextureAtlas.THoeIron);
-        TextureAtlas.SetItemTile(GameData.DiamondHoeItem.Id, TextureAtlas.THoeDiamond);
+        TextureAtlas.SetItemTile(GameData.BoneMealItem.Id, TextureAtlas.TBoneMeal);
+        TextureAtlas.SetItemTile(GameData.SawdustItem.Id, TextureAtlas.TSawdust);
+        TextureAtlas.SetItemTile(GameData.SawdustPorridgeItem.Id, TextureAtlas.TSawdustPorridge);
+        TextureAtlas.SetItemTile(GameData.TotemItem.Id, TextureAtlas.TTotem);
         TextureAtlas.SetBlockTiles(GameData.BFarmland.Id, TextureAtlas.TFarmland, TextureAtlas.TDirt, TextureAtlas.TDirt);
         TextureAtlas.SetBlockTiles(GameData.BTallGrass.Id, TextureAtlas.TTallGrass, TextureAtlas.TTallGrass, TextureAtlas.TTallGrass);
     }

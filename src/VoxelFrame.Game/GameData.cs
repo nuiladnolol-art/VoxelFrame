@@ -161,6 +161,10 @@ public static class GameData {
     public static readonly ItemDefinition DiamondHoeItem = Item(63, "Алмазная мотыга", DiamondM, 0.03);
     public static readonly ItemDefinition WheatItem = Item(64, "Пшеница", LeavesM, 0.01);
     public static readonly ItemDefinition WheatSeedsItem = Item(65, "Семена пшеницы", LeavesM, 0.001);
+    public static readonly ItemDefinition BoneMealItem = Item(66, "Костная мука", BoneM, 0.001);
+    public static readonly ItemDefinition SawdustItem = Item(67, "Древесные опилки", Oak, 0.001);
+    public static readonly ItemDefinition SawdustPorridgeItem = Item(68, "Каша из опилок", Oak, 0.05);
+    public static readonly ItemDefinition TotemItem = Item(69, "Тотем бессмертия", GoldM, 0.02);
 
     // ── Блоки ─────────────────────────────────────────────────────────────────
     public static readonly BlockType BGrass = Block(1, "Трава", DirtM, drop: DirtItem);
@@ -231,6 +235,7 @@ public static class GameData {
         { RawBeefItem.Id, 4f },      // Сырая говядина: +4 HP
         { CookedBeefItem.Id, 8f },   // Жареный стейк: +8 HP
         { RottenFleshItem.Id, 2f },  // Гнилая плоть: +2 HP
+        { SawdustPorridgeItem.Id, 4f }, // Каша из опилок: +4 HP
     };
 
     // ── Реестр предметов + менеджер материи (консервация) ────────────────────
@@ -636,6 +641,26 @@ public static class GameData {
 
         // Кровать: 3 шерсти в верхнем ряду + 3 доски во втором ряду
         AddShapeRecipe(new ItemDefinition?[] { WhiteWoolItem,WhiteWoolItem,WhiteWoolItem, PlankItem,PlankItem,PlankItem, null,null,null }, BedItem, 1);
+
+        // Сундук: 8 досок по периметру 3×3 (центр пустой)
+        AddShapeRecipe(new ItemDefinition?[] { PlankItem,PlankItem,PlankItem, PlankItem,null,PlankItem, PlankItem,PlankItem,PlankItem }, ChestItem, 1);
+
+        // Костная мука: 1 кость -> 3 костной муки
+        AddShapeRecipe(new ItemDefinition?[] { BoneItem,null,null, null,null,null, null,null,null }, BoneMealItem, 3);
+
+        // Опилки: 2 доски -> 4 опилок, или 1 доска + 1 палка -> 2 опилок
+        AddShapeRecipe(new ItemDefinition?[] { PlankItem,PlankItem,null, null,null,null, null,null,null }, SawdustItem, 4);
+        AddShapeRecipe(new ItemDefinition?[] { PlankItem,null,null, StickItem,null,null, null,null,null }, SawdustItem, 2);
+
+        // Каша из опилок: 2 опилки + 1 доска + 1 семена пшеницы
+        AddShapeRecipe(new ItemDefinition?[] { SawdustItem,SawdustItem,null, PlankItem,WheatSeedsItem,null, null,null,null }, SawdustPorridgeItem, 1);
+
+        // Тотем бессмертия: фигурка из костей с золотым слитком в центре
+        AddShapeRecipe(new ItemDefinition?[] {
+            BoneItem, GoldIngotItem, BoneItem,
+            BoneItem, BoneItem,      BoneItem,
+            null,     BoneItem,      null
+        }, TotemItem, 1);
     }
 
     private static void InitSmeltingRecipes() {

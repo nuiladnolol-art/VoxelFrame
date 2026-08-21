@@ -70,6 +70,10 @@ public sealed class GameSession {
 
     public void RespawnPlayer() {
         Player.Health = Player.MaxHealth;
+        Player.Hunger = Player.MaxHunger;
+        Player.Saturation = 5f;
+        Player.Exhaustion = 0f;
+        Player.StarveTimer = 0f;
         Player.Velocity = Vector3.Zero;
         Player.HighestYInAir = 0f;
         Player.FireTicks = 0f;
@@ -86,11 +90,14 @@ public sealed class GameSession {
         var session = new GameSession(headless) {
             World = new GameWorld(seed),
             DayNight = new DayNightCycle(),
-            Player = new Player(),
+            Player = new Player {
+                OffhandItem = GameData.TotemItem,
+                OffhandCount = 1,
+            },
         };
         // Спавн: площадка 3×3 на поверхности у (0,0).
         int target = session.World.Generator.SurfaceHeight(0, 0);
-        session.World.EnsureLoadedAround(new Vector3(0.5f, target + 1.9f, 0.5f));
+        session.World.EnsureLoadedAroundSync(new Vector3(0.5f, target + 1.9f, 0.5f), 4);
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 int sh = session.World.Generator.SurfaceHeight(dx, dz);
@@ -131,9 +138,12 @@ public sealed class GameSession {
 
         if (IsSleeping) {
             SleepProgress += dt;
-            DayNight.TimeOfDay = (DayNight.TimeOfDay + dt * 0.22f) % 1.0f;
-            if (SleepProgress >= 2.5f) {
-                DayNight.TimeOfDay = 0.25f; // Утро!
+            // Во время пика затемнения (1.0 секунда сна) переводим время на раннее утро 7:40 (TimeOfDay = 0.32f)
+            if (SleepProgress >= 1.0f && DayNight.TimeOfDay != 0.32f) {
+                DayNight.TimeOfDay = 0.32f;
+            }
+            if (SleepProgress >= 2.0f) {
+                DayNight.TimeOfDay = 0.32f;
                 IsSleeping = false;
                 Player.Health = MathF.Min(Player.MaxHealth, Player.Health + 4f);
                 AddMessage("Вы проснулись. Точка возрождения установлена.");
@@ -173,10 +183,7 @@ public sealed class GameSession {
             }
         }
 
-        if (Vector3.DistanceSquared(_lastChunkLoadPos, Player.Position) > 16.0f) {
-            _lastChunkLoadPos = Player.Position;
-            World.EnsureLoadedAround(Player.Position);
-        }
+        World.EnsureLoadedAround(Player.Position);
 
         World.Tick(dt, Player);
         World.TickPickups(dt, Player);

@@ -162,7 +162,7 @@ public sealed class WorldRenderer : IDisposable {
             unsafe { Raylib.SetShaderValue(_material.Shader, _sunAngleLoc, &angle, ShaderUniformDataType.Float); }
         }
 
-        bool holdingTorch = _session.Player.SelectedEntry?.Item.Definition.Id == GameData.TorchItem.Id;
+        bool holdingTorch = _session.Player.SelectedEntry?.Item.Definition.Id == GameData.TorchItem.Id || _session.Player.OffhandItem?.Id == GameData.TorchItem.Id;
         Vector3 lightPos = _session.Player.Eye;
         float lightRadius = holdingTorch ? 12.5f : 0f;
         if (_playerLightPosLoc != -1) {
@@ -291,9 +291,24 @@ public sealed class WorldRenderer : IDisposable {
 
     public void DrawDecorations(float dt) {
         unsafe {
+            var camPos = _session.Camera.Position;
+            var camFwd = _session.Player.Forward;
+            const float maxDistSq = 48f * 48f; // Высокая производительность: отсечение удаленной растительности
+
             foreach (var pos in _world.DecorPositions) {
-                var v = _world.GetVoxel(pos);
                 var p = new Vector3(pos.X + 0.5f, pos.Y + 0.5f, pos.Z + 0.5f);
+                float distSq = Vector3.DistanceSquared(p, camPos);
+                if (distSq > maxDistSq) continue;
+
+                // Отсечение объектов позади камеры
+                if (distSq > 16f) {
+                    var dir = p - camPos;
+                    if (Vector3.Dot(dir, camFwd) < -0.2f) continue;
+                }
+
+                var v = _world.GetVoxel(pos);
+                if (v.TypeId == 0) continue;
+
                 var light = GetLightFactor(p);
 
                 if (v.TypeId == GameData.BTorch.Id) {
@@ -331,7 +346,10 @@ public sealed class WorldRenderer : IDisposable {
                 }
             }
             foreach (var pos in _world.Fire.Burning.Keys) {
-                DrawFlame(new Vector3(pos.X + 0.5f, pos.Y + 0.85f, pos.Z + 0.5f), 0.5f, dt);
+                var fp = new Vector3(pos.X + 0.5f, pos.Y + 0.85f, pos.Z + 0.5f);
+                if (Vector3.DistanceSquared(fp, camPos) <= maxDistSq) {
+                    DrawFlame(fp, 0.5f, dt);
+                }
             }
         }
         if (_session.HasTarget) {
@@ -362,7 +380,7 @@ public sealed class WorldRenderer : IDisposable {
         float skyFactor = _session.DayNight.SkyFactor;
 
         // Динамический свет факела в руке игрока
-        bool holdingTorch = _session.Player.SelectedEntry?.Item.Definition.Id == GameData.TorchItem.Id;
+        bool holdingTorch = _session.Player.SelectedEntry?.Item.Definition.Id == GameData.TorchItem.Id || _session.Player.OffhandItem?.Id == GameData.TorchItem.Id;
         if (holdingTorch) {
             float d = Vector3.Distance(pos, _session.Player.Eye);
             if (d < 12.5f) {
