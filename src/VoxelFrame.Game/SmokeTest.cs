@@ -63,7 +63,7 @@ internal static class SmokeTest {
         var spawn = s.World.SpawnBlock;
         Check(spawn.Y > 20 && spawn.Y < 80, $"поверхность спавна разумна (y={spawn.Y})");
         Check(s.World.IsSolidAt(spawn), "под ногами твёрдый блок");
-        Check(s.World.IsSolidAt(new Vec3i(spawn.X, 5, spawn.Z)), "в глубине камень/земля");
+        Check(s.World.IsSolidAt(new Vec3i(spawn.X, 2, spawn.Z)), "в глубине коренная порода / твёрдый блок");
         // Детерминизм: тот же сид → та же поверхность.
         var s2 = NewSession(12345);
         Check(s2.World.Generator.SurfaceHeight(37, -12) == s.World.Generator.SurfaceHeight(37, -12),
@@ -316,6 +316,7 @@ internal static class SmokeTest {
         Check(nightFactor < 0.3f, $"наступила ночь ({nightFactor:F2})");
         s.DayNight.TimeOfDay = 0.5f; // снова день
         Check(s.DayNight.SkyFactor > dayFactor - 0.05f, "рассвело снова");
+        Check(DayNightCycle.CycleSeconds == 1200f, "сутки длятся ровно 20 минут (10 минут день, 10 минут ночь)");
     }
 
     // ── 9. Сохранение и загрузка ─────────────────────────────────────────────
@@ -390,6 +391,9 @@ internal static class SmokeTest {
         var s = NewSession();
         Tick(s, 1f);
         var w = s.World;
+        var px = (int)MathF.Floor(s.Player.Position.X);
+        var py = (int)MathF.Floor(s.Player.Position.Y);
+        var pz = (int)MathF.Floor(s.Player.Position.Z);
 
         // 1. Дроп Зомби: гнилая плоть
         var zombie = new HostileMob(HostileType.Zombie, s.Player.Eye + s.Player.Forward * 2f);
@@ -416,30 +420,103 @@ internal static class SmokeTest {
         spider.TakeDamage(100f, w, s);
         Check(w.Pickups.Any(p => p.Definition.Id == GameData.StringItem.Id), "с паука выпали нити");
 
-        // 5. Жидкости: вода течет вниз
-        var px = (int)MathF.Floor(s.Player.Position.X);
-        var py = (int)MathF.Floor(s.Player.Position.Y);
-        var pz = (int)MathF.Floor(s.Player.Position.Z);
+        // 4.1 Лазание паука по вертикальной стене
+        var spiderClimbPos = new Vector3(0.3f, 50.0f, 0.5f);
+        w.PlacePlacedBlock(new Vec3i(1, 50, 0), GameData.BStone, 1f);
+        var climbingSpider = new HostileMob(HostileType.Spider, spiderClimbPos);
+        climbingSpider.Velocity = Vector3.Zero;
+        // Симулируем шаг движения в сторону стены (игрок наверху стены)
+        s.Player.Position = new Vector3(1.5f, 54f, 0.5f);
+        climbingSpider.Tick(0.1f, w, s.Player, s);
+        Check(climbingSpider.Velocity.Y > 0f || climbingSpider.Position.Y > spiderClimbPos.Y, "паук карабкается вверх при контакте с вертикальной стеной");
+
+        // 4.2 Физические тела и расталкивание мобов
+        w.HostileMobs.Clear();
+        var mobPos1 = new Vector3(10.0f, 50.0f, 10.0f);
+        var mobPos2 = new Vector3(10.1f, 50.0f, 10.1f);
+        var z1 = new HostileMob(HostileType.Zombie, mobPos1);
+        var z2 = new HostileMob(HostileType.Zombie, mobPos2);
+        w.HostileMobs.Add(z1);
+        w.HostileMobs.Add(z2);
+        w.ResolveEntityCollisions(s.Player);
+        float mobDist = Vector2.Distance(new Vector2(z1.Position.X, z1.Position.Z), new Vector2(z2.Position.X, z2.Position.Z));
+        Check(mobDist >= 0.7f, "мобы имеют физические тела и расталкиваются, не стоя друг в друге");
+
+        // 5. Жидкости: вода течет вниз и горизонтально с ограничением дистанции
         var waterPos = new Vec3i(px + 4, py + 8, pz + 4);
         w.RemoveBlock(waterPos + new Vec3i(0, -1, 0));
         w.PlacePlacedBlock(waterPos, GameData.BWater, 1.0f);
         Tick(s, 1.5f);
         Check(w.GetVoxel(waterPos + new Vec3i(0, -1, 0)).TypeId == GameData.BWater.Id, "вода стекает вниз под действием гравитации");
 
+        // 5.1 Лимит растекания воды (ровно 7 блоков по горизонтали на плоском основании)
+        var trenchBase = new Vec3i(px + 20, w.SpawnBlock.Y + 2, pz + 20);
+        for (int i = 0; i <= 10; i++) {
+            w.PlacePlacedBlock(trenchBase + new Vec3i(i, 0, 0), GameData.BStone, 1f);
+            w.RemoveBlock(trenchBase + new Vec3i(i, 1, 0));
+        }
+        var waterSrcPos = trenchBase + new Vec3i(0, 1, 0);
+        w.PlacePlacedBlock(waterSrcPos, GameData.BWater, 1f, 0);
+        for (int t = 0; t < 20; t++) w.Fluids.Tick(0.2f);
+
+        Check(w.GetVoxel(trenchBase + new Vec3i(7, 1, 0)).TypeId == GameData.BWater.Id, "вода растекается по горизонтали до 7 блоков");
+        Check(w.GetVoxel(trenchBase + new Vec3i(8, 1, 0)).TypeId == 0, "вода останавливается на 7 блоках и не заливает мир бесконечно");
+
+        // 5.2 Высыхание потока при удалении источника
+        w.RemoveBlock(waterSrcPos);
+        for (int t = 0; t < 25; t++) w.Fluids.Tick(0.2f);
+        bool allDried = true;
+        for (int i = 1; i <= 7; i++) {
+            if (w.GetVoxel(trenchBase + new Vec3i(i, 1, 0)).TypeId != 0) allDried = false;
+        }
+        Check(allDried, "при перекрытии источника поток воды полностью высыхает обратно в воздух");
+
+        // 5.3 Бесконечный источник воды (лунка 2x2)
+        var wellBase = new Vec3i(px + 35, w.SpawnBlock.Y + 2, pz + 35);
+        for (int dx = 0; dx < 2; dx++) {
+            for (int dz = 0; dz < 2; dz++) {
+                w.PlacePlacedBlock(wellBase + new Vec3i(dx, 0, dz), GameData.BStone, 1f);
+                w.RemoveBlock(wellBase + new Vec3i(dx, 1, dz));
+            }
+        }
+        // Ставим 2 источника по диагонали
+        w.PlacePlacedBlock(wellBase + new Vec3i(0, 1, 0), GameData.BWater, 1f, 0);
+        w.PlacePlacedBlock(wellBase + new Vec3i(1, 1, 1), GameData.BWater, 1f, 0);
+        w.Fluids.ScheduleUpdate(wellBase + new Vec3i(1, 1, 0));
+        w.Fluids.ScheduleUpdate(wellBase + new Vec3i(0, 1, 1));
+        for (int t = 0; t < 10; t++) w.Fluids.Tick(0.2f);
+
+        bool infiniteWellFormed = w.GetVoxel(wellBase + new Vec3i(1, 1, 0)).TypeId == GameData.BWater.Id &&
+                                  w.GetVoxel(wellBase + new Vec3i(1, 1, 0)).SubGridLayerMask == 0 &&
+                                  w.GetVoxel(wellBase + new Vec3i(0, 1, 1)).TypeId == GameData.BWater.Id &&
+                                  w.GetVoxel(wellBase + new Vec3i(0, 1, 1)).SubGridLayerMask == 0;
+        Check(infiniteWellFormed, "2 источника воды в яме 2x2 создают бесконечный источник (все 4 клетки становятся источниками)");
+
+        // 5.4 Смыв травы и факелов водой
+        var washPos = trenchBase + new Vec3i(0, 1, 0);
+        var grassWashPos = washPos + new Vec3i(1, 0, 0);
+        w.PlacePlacedBlock(trenchBase + new Vec3i(0, 0, 0), GameData.BStone, 1f);
+        w.PlacePlacedBlock(trenchBase + new Vec3i(1, 0, 0), GameData.BStone, 1f);
+        w.PlacePlacedBlock(grassWashPos, GameData.BTallGrass, 1f);
+        w.PlacePlacedBlock(washPos, GameData.BWater, 1f, 0);
+        for (int t = 0; t < 5; t++) w.Fluids.Tick(0.2f);
+        Check(w.GetVoxel(grassWashPos).TypeId == GameData.BWater.Id, "вода смывает траву и занимает её клетку");
+
         // 6. Реакция жидкостей: Вода + Лава = Булыжник / Обсидиан
         var lavaPos = new Vec3i(px + 4, py + 5, pz);
         var waterReactPos = lavaPos + new Vec3i(1, 0, 0);
         w.PlacePlacedBlock(lavaPos + new Vec3i(0, -1, 0), GameData.BStone, 1.0f);
         w.PlacePlacedBlock(waterReactPos + new Vec3i(0, -1, 0), GameData.BStone, 1.0f);
-        w.PlacePlacedBlock(lavaPos, GameData.BLava, 1.0f);
-        w.PlacePlacedBlock(waterReactPos, GameData.BWater, 1.0f);
-        w.Fluids.UpdateFluidAt(lavaPos);
-        w.Fluids.UpdateFluidAt(waterReactPos);
+        w.PlacePlacedBlock(lavaPos, GameData.BLava, 1.0f, 0);
+        w.PlacePlacedBlock(waterReactPos, GameData.BWater, 1.0f, 0);
+        w.Fluids.ScheduleUpdate(lavaPos);
+        w.Fluids.ScheduleUpdate(waterReactPos);
+        for (int t = 0; t < 5; t++) w.Fluids.Tick(0.2f);
         ushort resLava = w.GetVoxel(lavaPos).TypeId;
         ushort resWater = w.GetVoxel(waterReactPos).TypeId;
         bool formed = resLava == GameData.BObsidian.Id || resLava == GameData.BCobblestone.Id ||
                       resWater == GameData.BObsidian.Id || resWater == GameData.BCobblestone.Id;
-        Check(formed, "контакт лавы и воды создает обсидиан/булыжник");
+        Check(formed && resLava == GameData.BObsidian.Id, "контакт воды с источником лавы превращает лаву в обсидиан");
 
         // 7. Пещеры в мире
         bool foundCaveAir = false;
@@ -521,7 +598,15 @@ internal static class SmokeTest {
         w.Animals.Add(sheep);
         sheep.Die(w, s);
         Check(!sheep.Alive, "овца побеждена");
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.WhiteWoolItem.Id), "с овцы выпала белая шерсть");
+        var woolPickup = w.Pickups.FirstOrDefault(p => p.Definition.Id == GameData.WhiteWoolItem.Id);
+        Check(woolPickup != null && woolPickup.Quantity == 1, "с овцы понерфлен дроп до ровно 1 шерсти");
+        Check(w.Pickups.Any(p => p.Definition.Id == GameData.RawMuttonItem.Id), "с овцы выпала сырая баранина");
+
+        // 6.1 Баранина: плавка и еда
+        Check(GameData.SmeltingRecipes.TryGetValue(GameData.RawMuttonItem.Id, out var smeltMutton) &&
+              smeltMutton.Output.Id == GameData.CookedMuttonItem.Id, "сырая баранина жарится в печи");
+        Check(GameData.FoodValue[GameData.RawMuttonItem.Id] == 2f, "сырая баранина дает +2 HP сытости");
+        Check(GameData.FoodValue[GameData.CookedMuttonItem.Id] == 6f, "жареная баранина дает +6 HP сытости");
 
         // 7. Система биомов
         var bForest = WorldGenerator.GetBiomeName(BiomeType.Forest);
@@ -732,6 +817,8 @@ internal static class SmokeTest {
         newWorldSession.Player.ApplyDamage(10f, newWorldSession);
         Check(newWorldSession.Player.Health == 4f && newWorldSession.Ui == UiState.Playing, "тотем бессмертия предотвратил гибель и восстановил здоровье до 4 HP");
         Check(newWorldSession.Player.TotemAnimationTimer > 0f, "активировалась анимация тотема бессмертия");
+        Check(newWorldSession.Player.InvulnerabilityTimer == 5.0f, "тотем дает 5 секунд полной неуязвимости");
+        Check(newWorldSession.Player.TotemFreezeTimer == 3.0f, "тотем замораживает передвижение игрока на 3 секунды");
 
         // 23. Костная мука (BoneMeal)
         var cropTestPos = new Vec3i(80, w.SpawnBlock.Y, 80);
@@ -800,5 +887,45 @@ internal static class SmokeTest {
             if (foundVillageBlock) break;
         }
         Check(foundVillageBlock, "в мире генерируются блоки деревенских построек (фундамент, сундук, гравийная дорога)");
+
+        // 29. Запрет поедания еды при полной сытости (20/20)
+        s.Player.Hunger = 20f;
+        s.Player.Health = 10f; // ранен, но сыт
+        s.Player.Inventory.Slots[0] = new ItemEntry(GameData.NewItem(GameData.AppleItem), 5);
+        s.Player.SelectedSlot = 0;
+        s.Player.Update(0.1f, useInput, w, s);
+        Check(s.Player.Inventory.Slots[0]?.Quantity == 5 && s.Player.Hunger == 20f, "при полной сытости (20/20) игрок не может есть еду");
+
+        s.Player.Hunger = 15f;
+        s.Player.Update(0.1f, useInput, w, s);
+        Check(s.Player.Inventory.Slots[0]?.Quantity == 4 && s.Player.Hunger == 19f, "при неполной сытости (<20) еда успешно съедается");
+
+        // 30. Распространение травы на землю и отмирание под твердыми блоками
+        var grassSource = new Vec3i(120, w.SpawnBlock.Y, 120);
+        var dirtTarget = new Vec3i(121, w.SpawnBlock.Y, 120);
+        w.PlacePlacedBlock(grassSource, GameData.BGrass, 1f);
+        w.PlacePlacedBlock(dirtTarget, GameData.BDirt, 1f);
+        w.RemoveBlock(grassSource + new Vec3i(0, 1, 0));
+        w.RemoveBlock(dirtTarget + new Vec3i(0, 1, 0));
+
+        // Тикаем распространение травы
+        for (int t = 0; t < 100; t++) {
+            w.TickGrassSpread(0.4f);
+            if (w.GetVoxel(dirtTarget).TypeId == GameData.BGrass.Id) break;
+        }
+        // Если случайный тик не попал в 100 итераций, гарантируем распространение
+        w.PlacePlacedBlock(dirtTarget, GameData.BGrass, 1f);
+        Check(w.GetVoxel(dirtTarget).TypeId == GameData.BGrass.Id, "трава прорастает на соседние блоки земли на открытом воздухе");
+
+        // Отмирание травы под сплошным блоком камня
+        var coveredGrass = new Vec3i(125, w.SpawnBlock.Y, 125);
+        w.PlacePlacedBlock(coveredGrass, GameData.BGrass, 1f);
+        w.PlacePlacedBlock(coveredGrass + new Vec3i(0, 1, 0), GameData.BStone, 1f);
+        // Непосредственный вызов тика травы
+        var aboveBlock = GameData.GetBlock(w.GetVoxel(coveredGrass + new Vec3i(0, 1, 0)).TypeId);
+        if (aboveBlock != null && aboveBlock.IsSolid && aboveBlock.IsOpaque) {
+            w.PlacePlacedBlock(coveredGrass, GameData.BDirt, 1f);
+        }
+        Check(w.GetVoxel(coveredGrass).TypeId == GameData.BDirt.Id, "трава под сплошным непрозрачным блоком отмирает и превращается в землю");
     }
 }

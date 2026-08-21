@@ -6,6 +6,8 @@ using VoxelFrame.Core.World;
 namespace VoxelFrame.Game;
 
 public enum UiState { Playing, Inventory, Crafting, Paused, Workbench, Furnace, Chest, Loading, Death }
+public enum Dimension { Overworld, Nether }
+public enum WeatherType { Clear, Rain, Thunder }
 
 /// <summary>
 /// Игровая сессия: мир + игрок + время суток + UI-состояние + сообщения.
@@ -20,6 +22,16 @@ public sealed class GameSession {
     public Camera3D Camera;
     public UiState Ui;
     public bool Headless;
+
+    public Dimension Dimension => World.Dimension;
+    public WeatherType Weather = WeatherType.Clear;
+    public float WeatherTimer = 300f;
+    public float ThunderTimer = 0f;
+    public float AmbientSoundTimer = 25f;
+    public float MusicTimer = 180f;
+
+    public GameWorld? NetherWorld;
+    public GameWorld? OverworldWorld;
 
     public Vec3i TargetBlock;
     public Vec3i PlaceCell;
@@ -128,6 +140,30 @@ public sealed class GameSession {
 
     // ── Тик ──────────────────────────────────────────────────────────────────
 
+    public void SwitchDimension(Dimension targetDim) {
+        if (World.Dimension == targetDim) return;
+        if (targetDim == Dimension.Nether) {
+            OverworldWorld = World;
+            if (NetherWorld == null) {
+                NetherWorld = new GameWorld(World.Seed ^ 0x1337BEEF) { Dimension = Dimension.Nether };
+            }
+            World = NetherWorld;
+            var newPos = new Vector3(Player.Position.X / 8f, 50f, Player.Position.Z / 8f);
+            World.EnsureLoadedAroundSync(newPos, 2);
+            Player.Position = newPos;
+            Player.Velocity = Vector3.Zero;
+            AddMessage("Вы вошли в Нижний мир (Nether)!");
+        } else {
+            NetherWorld = World;
+            World = OverworldWorld ?? new GameWorld(World.Seed) { Dimension = Dimension.Overworld };
+            var newPos = new Vector3(Player.Position.X * 8f, 65f, Player.Position.Z * 8f);
+            World.EnsureLoadedAroundSync(newPos, 2);
+            Player.Position = newPos;
+            Player.Velocity = Vector3.Zero;
+            AddMessage("Вы вернулись в Обычный мир!");
+        }
+    }
+
     public void Tick(float dt, in PlayerInput input) {
         TotalPlaySeconds += dt;
         for (int i = 0; i < _messages.Count; i++)
@@ -135,6 +171,42 @@ public sealed class GameSession {
         _messages.RemoveAll(m => m.Age > 6f);
 
         if (Ui == UiState.Paused || Ui == UiState.Death) return;
+
+        // Погодный цикл (дождь, гроза, ясная погода)
+        if (World.Dimension == Dimension.Overworld) {
+            WeatherTimer -= dt;
+            if (WeatherTimer <= 0f) {
+                Weather = Weather == WeatherType.Clear
+                    ? (Random.Shared.NextDouble() < 0.35 ? WeatherType.Thunder : WeatherType.Rain)
+                    : WeatherType.Clear;
+                WeatherTimer = Weather == WeatherType.Clear ? 300f + Random.Shared.Next(300) : 180f + Random.Shared.Next(120);
+                AddMessage(Weather == WeatherType.Thunder ? "Началась гроза!" : Weather == WeatherType.Rain ? "Пошел дождь..." : "Небо прояснилось.");
+            }
+
+            if (Weather == WeatherType.Thunder) {
+                ThunderTimer -= dt;
+                if (ThunderTimer <= 0f) {
+                    SoundSystem.PlayThunder();
+                    ThunderTimer = 14f + Random.Shared.NextSingle() * 22f;
+                }
+            }
+
+            // Пещерный эмбиент в глубоких пещерах
+            AmbientSoundTimer -= dt;
+            if (AmbientSoundTimer <= 0f) {
+                if (Player.Position.Y < 38f) {
+                    SoundSystem.PlayCaveAmbiance();
+                }
+                AmbientSoundTimer = 35f + Random.Shared.NextSingle() * 40f;
+            }
+
+            // Фоновая музыка на рассвете и закате
+            MusicTimer -= dt;
+            if (MusicTimer <= 0f) {
+                SoundSystem.PlayBackgroundMusic();
+                MusicTimer = 300f + Random.Shared.NextSingle() * 240f;
+            }
+        }
 
         if (IsSleeping) {
             SleepProgress += dt;

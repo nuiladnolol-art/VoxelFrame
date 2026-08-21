@@ -1,12 +1,12 @@
 namespace VoxelFrame.Game;
 
 /// <summary>
-/// Цикл дня и ночи. Сутки — 8 минут. Фактор неба: 1.0 днём, 0.08 ночью,
-/// плавные переходы на рассвете и закате.
+/// Цикл дня и ночи. Сутки — 20 минут: 10 минут день, 10 минут ночь (как в Minecraft).
+/// Фактор неба: 1.0 днём, 0.08 ночью, плавные переходы на рассвете и закате.
 /// </summary>
 public sealed class DayNightCycle {
-    public const float CycleSeconds = 480f;     // полные сутки
-    public const float StartTime = 0.35f;       // старт ~8:24 утра
+    public const float CycleSeconds = 1200f;    // полные сутки: 10 мин день + 10 мин ночь
+    public const float StartTime = 0.25f;       // старт на рассвете (6:00 утра)
 
     /// <summary>Время суток 0..1 (0 = полночь, 0.25 = 6:00, 0.5 = полдень, 0.75 = 18:00).</summary>
     public float TimeOfDay;

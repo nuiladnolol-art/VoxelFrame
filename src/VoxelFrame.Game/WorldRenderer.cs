@@ -46,6 +46,12 @@ public sealed class WorldRenderer : IDisposable {
         uniform float sunAngle;
         uniform vec3 playerLightPos;
         uniform float playerLightRadius;
+        uniform vec3 creeperLightPos;
+        uniform float creeperLightRadius;
+        uniform vec3 cameraPos;
+        uniform vec3 fogColor;
+        uniform float fogStart;
+        uniform float fogEnd;
         out vec4 finalColor;
         void main() {
             vec4 texelColor = texture(texture0, fragTexCoord);
@@ -64,6 +70,15 @@ public sealed class WorldRenderer : IDisposable {
                 }
             }
 
+            // Динамический свет от раздувающегося белого крипера
+            if (creeperLightRadius > 0.1) {
+                float d = distance(fragWorldPos, creeperLightPos);
+                if (d < creeperLightRadius) {
+                    float creepLight = clamp(1.0 - (d / creeperLightRadius), 0.0, 1.0);
+                    block = max(block, creepLight * 1.0);
+                }
+            }
+
             // Нелинейная кривая освещенности Minecraft (Alpha / Modern)
             float sunCurve = pow(sun * max(skyFactor, 0.04), 1.35);
             float blockCurve = pow(block, 1.25);
@@ -76,7 +91,14 @@ public sealed class WorldRenderer : IDisposable {
             vec3 totalLight = (sunLight + torchLight + ambient) * faceDir;
             totalLight = clamp(totalLight, 0.08, 1.0);
 
-            finalColor = texelColor * colDiffuse * vec4(totalLight, 1.0);
+            vec4 lightedColor = texelColor * colDiffuse * vec4(totalLight, 1.0);
+
+            // Плавный дистанционный туман горизонта (убирает рябь, контурные линии и резкую границу мира)
+            float dist = distance(fragWorldPos, cameraPos);
+            float fogFactor = clamp((dist - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
+            fogFactor = pow(fogFactor, 1.35);
+
+            finalColor = vec4(mix(lightedColor.rgb, fogColor, fogFactor), lightedColor.a);
         }
         """;
 
@@ -84,6 +106,12 @@ public sealed class WorldRenderer : IDisposable {
     private int _sunAngleLoc = -1;
     private int _playerLightPosLoc = -1;
     private int _playerLightRadiusLoc = -1;
+    private int _creeperLightPosLoc = -1;
+    private int _creeperLightRadiusLoc = -1;
+    private int _cameraPosLoc = -1;
+    private int _fogColorLoc = -1;
+    private int _fogStartLoc = -1;
+    private int _fogEndLoc = -1;
     private static readonly Vector3[] StarPositions = GenerateStarField(160);
 
     public struct VoxelParticle {
@@ -125,6 +153,12 @@ public sealed class WorldRenderer : IDisposable {
             _sunAngleLoc = Raylib.GetShaderLocation(shader, "sunAngle");
             _playerLightPosLoc = Raylib.GetShaderLocation(shader, "playerLightPos");
             _playerLightRadiusLoc = Raylib.GetShaderLocation(shader, "playerLightRadius");
+            _creeperLightPosLoc = Raylib.GetShaderLocation(shader, "creeperLightPos");
+            _creeperLightRadiusLoc = Raylib.GetShaderLocation(shader, "creeperLightRadius");
+            _cameraPosLoc = Raylib.GetShaderLocation(shader, "cameraPos");
+            _fogColorLoc = Raylib.GetShaderLocation(shader, "fogColor");
+            _fogStartLoc = Raylib.GetShaderLocation(shader, "fogStart");
+            _fogEndLoc = Raylib.GetShaderLocation(shader, "fogEnd");
         }
         _materialReady = true;
 
@@ -172,6 +206,48 @@ public sealed class WorldRenderer : IDisposable {
             unsafe { Raylib.SetShaderValue(_material.Shader, _playerLightRadiusLoc, &lightRadius, ShaderUniformDataType.Float); }
         }
 
+        // Динамический свет раздувающегося белого крипера перед взрывом
+        Vector3 creeperLightPos = Vector3.Zero;
+        float creeperLightRadius = 0f;
+        foreach (var h in _world.HostileMobs) {
+            if (h.Type == HostileType.Creeper && h.FuseTimer > 0f && h.Alive) {
+                float rad = 6.0f + (h.FuseTimer / 1.3f) * 6.5f; // Свечение от 6 до 12.5 блоков
+                if (rad > creeperLightRadius) {
+                    creeperLightRadius = rad;
+                    creeperLightPos = h.Position + new Vector3(0f, 0.5f, 0f);
+                }
+            }
+        }
+
+        if (_creeperLightPosLoc != -1) {
+            unsafe { Raylib.SetShaderValue(_material.Shader, _creeperLightPosLoc, &creeperLightPos, ShaderUniformDataType.Vec3); }
+        }
+        if (_creeperLightRadiusLoc != -1) {
+            unsafe { Raylib.SetShaderValue(_material.Shader, _creeperLightRadiusLoc, &creeperLightRadius, ShaderUniformDataType.Float); }
+        }
+
+        if (_cameraPosLoc != -1) {
+            var camPos = _session.Camera.Position;
+            unsafe { Raylib.SetShaderValue(_material.Shader, _cameraPosLoc, &camPos, ShaderUniformDataType.Vec3); }
+        }
+        if (_fogColorLoc != -1) {
+            float f = _session.DayNight.SkyFactor;
+            if (_session.Weather != WeatherType.Clear) f *= 0.45f;
+            Color fogC = (_world.Dimension == Dimension.Nether)
+                ? new Color(45, 10, 10, 255)
+                : LerpColor(C(16, 18, 40, 255), C(178, 208, 244, 255), f);
+            var fogVec = new Vector3(fogC.R / 255f, fogC.G / 255f, fogC.B / 255f);
+            unsafe { Raylib.SetShaderValue(_material.Shader, _fogColorLoc, &fogVec, ShaderUniformDataType.Vec3); }
+        }
+        if (_fogStartLoc != -1) {
+            float fogStart = (_world.Dimension == Dimension.Nether) ? 20.0f : 45.0f;
+            unsafe { Raylib.SetShaderValue(_material.Shader, _fogStartLoc, &fogStart, ShaderUniformDataType.Float); }
+        }
+        if (_fogEndLoc != -1) {
+            float fogEnd = (_world.Dimension == Dimension.Nether) ? 68.0f : 84.0f;
+            unsafe { Raylib.SetShaderValue(_material.Shader, _fogEndLoc, &fogEnd, ShaderUniformDataType.Float); }
+        }
+
         unsafe {
             Rlgl.EnableBackfaceCulling();
             foreach (var gc in _world.Chunks) {
@@ -182,11 +258,18 @@ public sealed class WorldRenderer : IDisposable {
         }
     }
 
-    // ── Небо ─────────────────────────────────────────────────────────────────
+    // ── Небо и Погода ────────────────────────────────────────────────────────
 
     /// <summary>Фоновый градиент неба (2D купол).</summary>
     public void DrawSky() {
+        if (_world.Dimension == Dimension.Nether) {
+            Raylib.ClearBackground(new Color(45, 10, 10, 255));
+            return;
+        }
         float f = _session.DayNight.SkyFactor;
+        if (_session.Weather != WeatherType.Clear) {
+            f *= 0.45f; // Пасмурное грозовое небо
+        }
         int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
 
         var top = LerpColor(C(8, 10, 26, 255), C(92, 150, 240, 255), f);
@@ -196,7 +279,10 @@ public sealed class WorldRenderer : IDisposable {
 
     /// <summary>3D Небесные светила (Солнце, Луна, звёзды в мировом пространстве).</summary>
     public void Draw3DSky(Camera3D camera) {
+        if (_world.Dimension == Dimension.Nether) return;
+
         float f = _session.DayNight.SkyFactor;
+        if (_session.Weather != WeatherType.Clear) f *= 0.45f;
         float u = _session.DayNight.TimeOfDay;
         float sunAngle = 2f * MathF.PI * (u - 0.25f);
 
@@ -275,6 +361,34 @@ public sealed class WorldRenderer : IDisposable {
                         Raylib.DrawCube(cPos, step, 0.8f, step, cloudColor);
                     }
                 }
+            }
+        }
+    }
+
+    /// <summary>Осадки (дождь, снегопад, гроза с молниями).</summary>
+    public void DrawWeather(Camera3D camera) {
+        if (_session.Weather == WeatherType.Clear || _world.Dimension != Dimension.Overworld) return;
+
+        var pPos = _session.Player.Position;
+        int px = (int)MathF.Floor(pPos.X), py = (int)MathF.Floor(pPos.Y), pz = (int)MathF.Floor(pPos.Z);
+        bool isSnow = py >= 85; // Снег на горных вершинах
+        float time = (float)Raylib.GetTime();
+
+        var rainColor = new Color(130, 160, 240, 160);
+        var snowColor = new Color(245, 245, 255, 200);
+
+        int count = 64;
+        for (int i = 0; i < count; i++) {
+            float offX = ((i * 17 + (int)(time * 12f)) % 32) - 16;
+            float offZ = ((i * 23 + (int)(time * 15f)) % 32) - 16;
+            float fall = (time * (isSnow ? 5f : 24f) + i * 1.5f) % 20f;
+            float offY = 14f - fall;
+
+            var dropPos = camera.Position + new Vector3(offX, offY, offZ);
+            if (isSnow) {
+                Raylib.DrawCube(dropPos, 0.18f, 0.18f, 0.18f, snowColor);
+            } else {
+                Raylib.DrawLine3D(dropPos, dropPos - new Vector3(0.1f, 0.9f, 0.1f), rainColor);
             }
         }
     }

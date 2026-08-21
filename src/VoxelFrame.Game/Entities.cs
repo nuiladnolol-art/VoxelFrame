@@ -8,9 +8,10 @@ namespace VoxelFrame.Game;
 /// <summary>ААBB-коллизия с твёрдыми блоками: движение по осям по отдельности.</summary>
 public static class Collision {
     public static bool IntersectsSolid(GameWorld world, Vector3 min, Vector3 max) {
-        int x0 = (int)MathF.Floor(min.X), x1 = (int)MathF.Floor(max.X);
-        int y0 = (int)MathF.Floor(min.Y), y1 = (int)MathF.Floor(max.Y);
-        int z0 = (int)MathF.Floor(min.Z), z1 = (int)MathF.Floor(max.Z);
+        const float eps = 0.001f;
+        int x0 = (int)MathF.Floor(min.X + eps), x1 = (int)MathF.Floor(max.X - eps);
+        int y0 = (int)MathF.Floor(min.Y + eps), y1 = (int)MathF.Floor(max.Y - eps);
+        int z0 = (int)MathF.Floor(min.Z + eps), z1 = (int)MathF.Floor(max.Z - eps);
         for (int x = x0; x <= x1; x++)
             for (int y = y0; y <= y1; y++)
                 for (int z = z0; z <= z1; z++)
@@ -173,23 +174,34 @@ public sealed class Animal {
         };
     }
 
-    public void Die(GameWorld world, GameSession session) {
-        Alive = false;
-        var pos = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z));
-        switch (Type) {
-            case AnimalType.Pig:
-                world.SpawnPickup(GameData.RawPorkItem.Id, _random.Next(1, 4), pos);
-                break;
-            case AnimalType.Cow:
-                world.SpawnPickup(GameData.RawBeefItem.Id, _random.Next(1, 4), pos);
-                if (_random.NextDouble() < 0.60) {
-                    world.SpawnPickup(GameData.LeatherItem.Id, _random.Next(1, 3), pos);
-                }
-                break;
-            case AnimalType.Sheep:
-                world.SpawnPickup(GameData.WhiteWoolItem.Id, _random.Next(1, 4), pos);
-                break;
+    public void TakeDamage(float damage, GameWorld world, GameSession? session = null) {
+        if (!Alive) return;
+        Health -= damage;
+        HurtTime = 0.4f;
+        FleeTimer = 3.0f;
+        if (Health <= 0f) {
+            Alive = false;
+            var pos = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z));
+            switch (Type) {
+                case AnimalType.Pig:
+                    world.SpawnPickup(GameData.RawPorkItem.Id, _random.Next(1, 4), pos);
+                    break;
+                case AnimalType.Cow:
+                    world.SpawnPickup(GameData.RawBeefItem.Id, _random.Next(1, 4), pos);
+                    if (_random.NextDouble() < 0.60) {
+                        world.SpawnPickup(GameData.LeatherItem.Id, _random.Next(1, 3), pos);
+                    }
+                    break;
+                case AnimalType.Sheep:
+                    world.SpawnPickup(GameData.WhiteWoolItem.Id, 1, pos);
+                    world.SpawnPickup(GameData.RawMuttonItem.Id, _random.Next(1, 3), pos);
+                    break;
+            }
         }
+    }
+
+    public void Die(GameWorld world, GameSession session) {
+        TakeDamage(999f, world, session);
     }
 
     public void Tick(float dt, GameWorld world, Player? player = null) {

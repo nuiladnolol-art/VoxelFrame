@@ -61,10 +61,28 @@ public sealed class Player {
     public float HurtTimer { get; set; }
     public float HurtDirection { get; set; } = 1f;
     public float InvulnerabilityTimer { get; set; }
+    public float TotemFreezeTimer { get; set; }
+    public float BowCharge { get; set; }
+    public bool IsBlocking { get; set; }
+    public float PortalTimer { get; set; }
 
     public void ApplyDamage(float amount, GameSession session, Vector3? attackerPos = null) {
         if (amount <= 0f) return;
         if (InvulnerabilityTimer > 0f) return;
+
+        // Блокирование урона щитом
+        bool hasShield = (OffhandItem != null && OffhandItem.Id == GameData.ShieldItem.Id) || (SelectedItem != null && SelectedItem.Id == GameData.ShieldItem.Id);
+        if (hasShield && IsBlocking && attackerPos.HasValue) {
+            var diff = attackerPos.Value - Position;
+            var toAttacker = diff.LengthSquared() > 0.001f ? Vector3.Normalize(diff) : Forward;
+            float dot = Vector3.Dot(new Vector3(Forward.X, 0f, Forward.Z), new Vector3(toAttacker.X, 0f, toAttacker.Z));
+            if (dot > 0.15f) {
+                SoundSystem.PlayShieldBlock();
+                ScreenShake = MathF.Min(0.2f, ScreenShake + 0.1f);
+                session.AddMessage("Удар заблокирован щитом!");
+                return;
+            }
+        }
 
         // Проверка тотема бессмертия при смертельном уроне
         if (Health - amount <= 0f) {
@@ -85,7 +103,8 @@ public sealed class Player {
             if (hasTotem) {
                 Health = 4.0f; // 2 сердца спасения
                 Hunger = MathF.Max(Hunger, 12f);
-                InvulnerabilityTimer = 2.0f;
+                InvulnerabilityTimer = 5.0f; // 5 секунд полной неуязвимости
+                TotemFreezeTimer = 3.0f;     // 3 секунды заморозки передвижения
                 TotemAnimationTimer = 2.5f;
                 ScreenShake = 0.5f;
                 HurtTimer = 0.6f;
@@ -180,17 +199,28 @@ public sealed class Player {
         SlotToastTimer = MathF.Max(0f, SlotToastTimer - dt);
         ScreenShake = MathF.Max(0f, ScreenShake - dt * 3.5f);
         if (TotemAnimationTimer > 0f) TotemAnimationTimer = MathF.Max(0f, TotemAnimationTimer - dt);
+        
+        bool isFrozen = TotemFreezeTimer > 0f;
+        if (isFrozen) {
+            TotemFreezeTimer = MathF.Max(0f, TotemFreezeTimer - dt);
+        }
+
+        float inMoveX = isFrozen ? 0f : input.MoveX;
+        float inMoveZ = isFrozen ? 0f : input.MoveZ;
+        bool inJump = !isFrozen && input.Jump;
+        bool inSprint = !isFrozen && input.Sprint;
+        bool inCrouch = !isFrozen && input.Crouch;
 
         // Движение (каноничная ходьба, спринт, приседание, плавание).
         float targetEyeHeight = EyeHeight;
         float speed = WalkSpeed;
         bool canSprint = Hunger > 6f;
-        if (input.Crouch) {
+        if (inCrouch) {
             targetEyeHeight = 0.35f;
             speed = WalkSpeed * 0.35f;
             IsSprinting = false;
             SprintFovProgress = MathF.Max(0f, SprintFovProgress - dt * 5f);
-        } else if (input.Sprint && canSprint && input.MoveZ > 0.1f) {
+        } else if (inSprint && canSprint && inMoveZ > 0.1f) {
             IsSprinting = true;
             speed = WalkSpeed * 1.35f;
             SprintFovProgress = MathF.Min(1f, SprintFovProgress + dt * 4f);
@@ -215,7 +245,7 @@ public sealed class Player {
         var forwardH = new Vector3(Forward.X, 0f, Forward.Z);
         if (forwardH.LengthSquared() > 0.001f) forwardH = Vector3.Normalize(forwardH);
         var right = Vector3.Cross(forwardH, Vector3.UnitY);
-        var wish = right * input.MoveX + forwardH * input.MoveZ;
+        var wish = right * inMoveX + forwardH * inMoveZ;
         if (wish.LengthSquared() > 1f) wish = Vector3.Normalize(wish);
 
         bool wasOnGround = OnGround;
@@ -226,7 +256,7 @@ public sealed class Player {
             Velocity.X = wish.X * speed;
             Velocity.Z = wish.Z * speed;
             Velocity.Y -= 6f * dt; // уменьшенная гравитация в воде
-            if (input.Jump) {
+            if (inJump) {
                 bool nearSurface = eyeVoxel.TypeId != GameData.BWater.Id;
                 // Импульс 1.15x позволяет свободно выпрыгивать на берег высотой 1 блок
                 Velocity.Y = nearSurface ? JumpSpeed * 1.15f : 4.8f;
@@ -242,7 +272,7 @@ public sealed class Player {
             Velocity.X = wish.X * speed;
             Velocity.Z = wish.Z * speed;
             Velocity.Y -= 4f * dt;
-            if (input.Jump) {
+            if (inJump) {
                 Velocity.Y = 3.2f;
             }
             Velocity.X *= MathF.Exp(-4f * dt);
@@ -252,12 +282,12 @@ public sealed class Player {
         } else {
             Velocity.X = wish.X * speed;
             Velocity.Z = wish.Z * speed;
-            if (input.Jump && OnGround) {
+            if (inJump && OnGround) {
                 Velocity.Y = JumpSpeed;
                 Exhaustion += IsSprinting ? 0.2f : 0.05f;
             }
             Velocity.Y -= Gravity * dt;
-            OnGround = Collision.Move(world, ref Position, HalfExtents, ref Velocity, dt, input.Crouch && OnGround);
+            OnGround = Collision.Move(world, ref Position, HalfExtents, ref Velocity, dt, inCrouch && OnGround);
         }
 
         if (OnGround && Velocity.Y < 0f) Velocity.Y = 0f;
@@ -272,7 +302,9 @@ public sealed class Player {
             StepSoundTimer -= dt * (IsSprinting ? 1.5f : 1.0f);
             if (StepSoundTimer <= 0f) {
                 StepSoundTimer = 0.38f;
-                SoundSystem.PlayStep(feetBlock.TypeId);
+                var groundBlock = world.GetVoxel(new Vec3i(feetCell.X, feetCell.Y - 1, feetCell.Z));
+                ushort stepBlockId = groundBlock.TypeId != 0 ? groundBlock.TypeId : feetBlock.TypeId;
+                SoundSystem.PlayStep(stepBlockId);
                 if (IsSprinting) world.SpawnDust(Position - new Vector3(0f, HalfExtents.Y, 0f), 2);
             }
         } else {
@@ -452,7 +484,7 @@ public sealed class Player {
                     wantUse = false;
                 } else if (targetVox.TypeId == GameData.BBed.Id || targetVox.TypeId == GameData.BBedHead.Id) {
                     float tod = session.DayNight.TimeOfDay;
-                    bool isNight = tod > 0.75f || tod < 0.22f;
+                    bool isNight = tod > 0.75f || tod < 0.25f;
 
                     bool hostileNearby = false;
                     foreach (var m in world.HostileMobs) {
@@ -546,14 +578,37 @@ public sealed class Player {
                             }
                         }
                     }
+                } else if (item.Id == GameData.BowItem.Id) {
+                    wantUse = false;
+                } else if (item.Id == GameData.ShieldItem.Id) {
+                    wantUse = false;
+                } else if (item.Id == GameData.FlintAndSteelItem.Id) {
+                    wantUse = false;
+                    if (session.HasTarget) {
+                        var targetVox = world.GetVoxel(session.TargetBlock);
+                        if (targetVox.TypeId == GameData.BTNT.Id) {
+                            world.RemoveBlock(session.TargetBlock);
+                            GameWorld.CreateExplosion(new Vector3(session.TargetBlock.X + 0.5f, session.TargetBlock.Y + 0.5f, session.TargetBlock.Z + 0.5f), 4.2f, 26f, session);
+                        } else {
+                            if (TryIgniteNetherPortal(world, session.TargetBlock, placeCell)) {
+                                SoundSystem.PlayPlace();
+                                session.AddMessage("Портал в Нижний мир активирован!");
+                            }
+                        }
+                    }
                 }
 
                 if (wantUse) {
                     if (GameData.FoodValue.TryGetValue(item.Id, out float foodVal)) {
-                        if (input.UsePressed && (Hunger < MaxHunger || Health < MaxHealth)) {
+                        if (input.UsePressed && Hunger < MaxHunger) {
                             if (TryConsumeSelected(item, 1)) {
                                 Hunger = MathF.Min(MaxHunger, Hunger + foodVal);
                                 Saturation = MathF.Min(Hunger, Saturation + foodVal * 0.6f);
+                                if (item.Id == GameData.GoldenAppleItem.Id) {
+                                    Health = MathF.Min(MaxHealth, Health + 10f);
+                                    InvulnerabilityTimer = 5.0f;
+                                    session.AddMessage("Золотое яблоко: +10 HP и 5с неуязвимости!");
+                                }
                                 SoundSystem.PlayEat();
                             }
                         }
@@ -568,7 +623,104 @@ public sealed class Player {
             }
         }
 
+        // Логика стрельбы из лука (натягивание тетивы ПКМ и выстрел при отпускании)
+        bool hasBowInHand = SelectedItem != null && SelectedItem.Id == GameData.BowItem.Id;
+        if (hasBowInHand) {
+            if (input.UseHeld) {
+                BowCharge = MathF.Min(1.0f, BowCharge + dt * 1.25f);
+            } else if (BowCharge > 0.12f) {
+                // Выстрел
+                bool hasArrow = (OffhandItem != null && OffhandItem.Id == GameData.ArrowItem.Id && OffhandCount > 0) ||
+                                Inventory.CountOf(GameData.ArrowItem) > 0;
+                if (hasArrow) {
+                    if (OffhandItem != null && OffhandItem.Id == GameData.ArrowItem.Id && OffhandCount > 0) {
+                        OffhandCount--;
+                        if (OffhandCount <= 0) OffhandItem = null;
+                    } else {
+                        Inventory.TryRemove(GameData.ArrowItem, 1);
+                    }
+                    float charge = Math.Clamp(BowCharge, 0.2f, 1.0f);
+                    float arrowSpeed = 14f + charge * 24f;
+                    float dmg = 3f + charge * 8f;
+                    world.Arrows.Add(new ArrowProjectile(Eye + Forward * 0.4f, Forward * arrowSpeed, null) { FromPlayer = true, Damage = dmg });
+                    SoundSystem.PlayBowShoot();
+                } else {
+                    session.AddMessage("Нет стрел!");
+                }
+                BowCharge = 0f;
+            } else {
+                BowCharge = 0f;
+            }
+        } else {
+            BowCharge = 0f;
+        }
+
+        // Логика блокирования щитом
+        bool hasShieldEquipped = (OffhandItem != null && OffhandItem.Id == GameData.ShieldItem.Id) ||
+                                (SelectedItem != null && SelectedItem.Id == GameData.ShieldItem.Id);
+        IsBlocking = hasShieldEquipped && input.UseHeld && !hasBowInHand;
+
+        // Логика нахождения внутри Портала в Нижний мир
+        if (feetBlock.TypeId == GameData.BNetherPortal.Id || eyeVoxel.TypeId == GameData.BNetherPortal.Id) {
+            if (PortalTimer >= 0f) {
+                PortalTimer += dt;
+                if (PortalTimer >= 1.5f) {
+                    session.SwitchDimension(session.World.Dimension == Dimension.Overworld ? Dimension.Nether : Dimension.Overworld);
+                    PortalTimer = -2.0f; // Задержка перед повторным входом
+                }
+            } else {
+                PortalTimer += dt;
+            }
+        } else {
+            PortalTimer = MathF.Max(0f, PortalTimer - dt * 2f);
+        }
+
         TickVitals(dt, session);
+    }
+
+    public static bool TryIgniteNetherPortal(GameWorld world, Vec3i targetBlock, Vec3i placeCell) {
+        for (int axis = 0; axis < 2; axis++) {
+            for (int dx = -2; dx <= 0; dx++) {
+                for (int dy = -3; dy <= 0; dy++) {
+                    int minX = axis == 0 ? placeCell.X + dx : placeCell.X;
+                    int minZ = axis == 1 ? placeCell.Z + dx : placeCell.Z;
+                    int minY = placeCell.Y + dy;
+
+                    bool validFrame = true;
+                    for (int step = 0; step < 4; step++) {
+                        int fx = axis == 0 ? minX + step : minX;
+                        int fz = axis == 1 ? minZ + step : minZ;
+                        if (world.GetVoxel(new Vec3i(fx, minY, fz)).TypeId != GameData.BObsidian.Id ||
+                            world.GetVoxel(new Vec3i(fx, minY + 4, fz)).TypeId != GameData.BObsidian.Id) {
+                            validFrame = false; break;
+                        }
+                    }
+                    if (!validFrame) continue;
+
+                    for (int y = 1; y <= 3; y++) {
+                        int lx = axis == 0 ? minX : minX;
+                        int lz = axis == 1 ? minZ : minZ;
+                        int rx = axis == 0 ? minX + 3 : minX;
+                        int rz = axis == 1 ? minZ + 3 : minZ;
+                        if (world.GetVoxel(new Vec3i(lx, minY + y, lz)).TypeId != GameData.BObsidian.Id ||
+                            world.GetVoxel(new Vec3i(rx, minY + y, rz)).TypeId != GameData.BObsidian.Id) {
+                            validFrame = false; break;
+                        }
+                    }
+                    if (!validFrame) continue;
+
+                    for (int innerStep = 1; innerStep <= 2; innerStep++) {
+                        for (int y = 1; y <= 3; y++) {
+                            int ix = axis == 0 ? minX + innerStep : minX;
+                            int iz = axis == 1 ? minZ + innerStep : minZ;
+                            world.PlacePlacedBlock(new Vec3i(ix, minY + y, iz), GameData.BNetherPortal, 1f);
+                        }
+                    }
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private void TickVitals(float dt, GameSession session) {
@@ -668,7 +820,11 @@ public sealed class Player {
                     world.SpawnPickup(GameData.WheatSeedsItem.Id, 1, pos);
                 }
             } else if (block.DropItemId != 0 && GameData.Items.TryGetValue(block.DropItemId, out var drop)) {
-                world.SpawnPickup(drop.Id, dropCount, pos);
+                if (block.Id == GameData.BGravel.Id && DropRng.NextDouble() < 0.10) {
+                    world.SpawnPickup(GameData.FlintItem.Id, 1, pos);
+                } else {
+                    world.SpawnPickup(drop.Id, dropCount, pos);
+                }
                 if (block.Id == GameData.BLog.Id && DropRng.NextDouble() < 0.35) {
                     world.SpawnPickup(GameData.SawdustItem.Id, 1, pos);
                 }

@@ -85,7 +85,7 @@ namespace VoxelFrame.Game;
                     var tiles = TextureAtlas.BlockTiles(v.TypeId);
                     for (int f = 0; f < 6; f++) {
                         var (dx, dy, dz, nx, ny, nz) = Faces[f];
-                        ushort neighborType = GetTypeIdAtOffset(neighbors, lx, ly, lz, dx, dy, dz);
+                        ushort neighborType = GetTypeIdAtOffset(neighbors, gc, lx, ly, lz, dx, dy, dz);
                         
                         bool visible;
                         if (isFluid) {
@@ -99,8 +99,8 @@ namespace VoxelFrame.Game;
                         } else if (v.TypeId == GameData.BGlass.Id) {
                             visible = neighborType != GameData.BGlass.Id && !IsOpaqueAtOffset(neighbors, lx, ly, lz, dx, dy, dz);
                         } else {
-                            // Твердый блок показывает грань если рядом воздух, стекло, листва или вода
-                            visible = neighborType == 0 || !GameData.GetBlock(neighborType).IsOpaque || neighborType == GameData.BWater.Id || neighborType == GameData.BLava.Id;
+                            // Твердый блок показывает грань если рядом воздух, стекло, листва или полупрозрачная вода
+                            visible = neighborType == 0 || !GameData.GetBlock(neighborType).IsOpaque || neighborType == GameData.BWater.Id;
                         }
                         if (!visible) continue;
 
@@ -122,12 +122,16 @@ namespace VoxelFrame.Game;
                         byte shadeDir = (byte)(255f * faceDir);
 
                         foreach (var (fx, fy, fz, fu, fv) in FaceVerts[f]) {
-                            float ao = (SaveSystem.FancyGraphics && !isFluid) ? GetVertexAO(neighbors, lx, ly, lz, f, fx, fy, fz) : 1.0f;
+                            float ao = (SaveSystem.FancyGraphics && !isFluid) ? GetVertexAO(neighbors, gc, lx, ly, lz, f, fx, fy, fz) : 1.0f;
                             byte shadeSun = (byte)(255f * sun * ao);
                             byte shadeBlock = (byte)(255f * blockL * ao);
 
                             float actualFy = fy;
-                            if (isWater && f == 2 && fy > 0.5f) actualFy = 0.90f; // Верхний уровень воды чуть ниже целого блока
+                            if (isWater && f == 2 && fy > 0.5f) {
+                                byte lvl = v.SubGridLayerMask;
+                                if (lvl == 0 || lvl == FluidEngine.FallingLevel) actualFy = 0.90f;
+                                else actualFy = MathF.Max(0.35f, 0.90f - lvl * 0.08f);
+                            }
 
                             verts.Add(worldOffsetX + lx + fx);
                             verts.Add(worldOffsetY + ly + actualFy);
@@ -214,7 +218,7 @@ namespace VoxelFrame.Game;
         }
     }
 
-    private static ushort GetTypeIdAtOffset(GameChunk?[,,] neighbors, int lx, int ly, int lz, int ox, int oy, int oz) {
+    private static ushort GetTypeIdAtOffset(GameChunk?[,,] neighbors, GameChunk gc, int lx, int ly, int lz, int ox, int oy, int oz) {
         int nlx = lx + ox;
         int nly = ly + oy;
         int nlz = lz + oz;
@@ -230,11 +234,15 @@ namespace VoxelFrame.Game;
         else if (nlz >= 32) { cdz = 1; nlz -= 32; }
 
         var nChunk = neighbors[cdx + 1, cdy + 1, cdz + 1];
-        if (nChunk == null) return 0;
+        if (nChunk == null) {
+            int wy = (gc.Coord.Y + cdy) * 32 + nly;
+            int surf = gc.Surface[gc.SurfaceIndex(lx, lz)];
+            return wy < surf ? GameData.BStone.Id : (ushort)0;
+        }
         return nChunk.Chunk.Get(nlx, nly, nlz).TypeId;
     }
 
-    private static bool IsSolidAtOffset(GameChunk?[,,] neighbors, int lx, int ly, int lz, int ox, int oy, int oz) {
+    private static bool IsSolidAtOffset(GameChunk?[,,] neighbors, GameChunk gc, int lx, int ly, int lz, int ox, int oy, int oz) {
         int nlx = lx + ox;
         int nly = ly + oy;
         int nlz = lz + oz;
@@ -250,7 +258,11 @@ namespace VoxelFrame.Game;
         else if (nlz >= 32) { cdz = 1; nlz -= 32; }
 
         var nChunk = neighbors[cdx + 1, cdy + 1, cdz + 1];
-        if (nChunk == null) return false;
+        if (nChunk == null) {
+            int wy = (gc.Coord.Y + cdy) * 32 + nly;
+            int surf = gc.Surface[gc.SurfaceIndex(lx, lz)];
+            return wy < surf;
+        }
         return (nChunk.Chunk.Get(nlx, nly, nlz).Flags & VoxelFlags.Solid) != 0;
     }
 
@@ -275,7 +287,7 @@ namespace VoxelFrame.Game;
         return typeId != 0 && GameData.GetBlock(typeId).IsOpaque;
     }
 
-    private static float GetVertexAO(GameChunk?[,,] neighbors, int lx, int ly, int lz, int f, int fx, int fy, int fz) {
+    private static float GetVertexAO(GameChunk?[,,] neighbors, GameChunk gc, int lx, int ly, int lz, int f, int fx, int fy, int fz) {
         var (dx, dy, dz, nx, ny, nz) = Faces[f];
 
         int offA = 0, offB = 0;
@@ -299,9 +311,9 @@ namespace VoxelFrame.Game;
             tbyY = 1;
         }
 
-        bool side1 = IsSolidAtOffset(neighbors, lx, ly, lz, dx + offA * taxX, dy + offA * taxY, dz + offA * taxZ);
-        bool side2 = IsSolidAtOffset(neighbors, lx, ly, lz, dx + offB * tbxX, dy + offB * tbyY, dz + offB * tbzZ);
-        bool corner = IsSolidAtOffset(neighbors, lx, ly, lz, dx + offA * taxX + offB * tbxX, dy + offA * taxY + offB * tbyY, dz + offA * taxZ + offB * tbzZ);
+        bool side1 = IsSolidAtOffset(neighbors, gc, lx, ly, lz, dx + offA * taxX, dy + offA * taxY, dz + offA * taxZ);
+        bool side2 = IsSolidAtOffset(neighbors, gc, lx, ly, lz, dx + offB * tbxX, dy + offB * tbyY, dz + offB * tbzZ);
+        bool corner = IsSolidAtOffset(neighbors, gc, lx, ly, lz, dx + offA * taxX + offB * tbxX, dy + offA * taxY + offB * tbyY, dz + offA * taxZ + offB * tbzZ);
 
         int ao = 0;
         if (side1 && side2) {

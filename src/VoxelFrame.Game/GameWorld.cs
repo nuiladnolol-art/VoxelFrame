@@ -38,6 +38,7 @@ public sealed class GameWorld : IDisposable {
     private float _animalSpawnTimer = 3f;
     private float _hostileSpawnTimer = 5f;
     private float _cropTimer = 1.0f;
+    private float _grassSpreadTimer = 0.4f;
 
     public GameWorld(int seed) {
         Seed = seed;
@@ -47,6 +48,8 @@ public sealed class GameWorld : IDisposable {
         Fire = new FireSystem(this);
         Fluids = new FluidEngine(this);
     }
+
+    public Dimension Dimension { get; set; } = Dimension.Overworld;
 
     public PhysicsGridCoordinator Physics => _physics;
     public IReadOnlyCollection<GameChunk> Chunks => _chunks.Values;
@@ -59,12 +62,18 @@ public sealed class GameWorld : IDisposable {
         if (_chunks.TryGetValue(cc, out var gc)) return gc;
         var core = _grid.GetOrCreateChunk(cc);
         bool isNew = core.Version == 0;
-        if (isNew) Generator.GenerateChunk(core);   // новый чанк — генерация
+        if (isNew) {
+            if (Dimension == Dimension.Nether) {
+                Generator.GenerateNetherChunk(core, cc.X * Chunk.SizeX, cc.Y * Chunk.SizeY, cc.Z * Chunk.SizeZ);
+            } else {
+                Generator.GenerateChunk(core);
+            }
+        }
         gc = new GameChunk(cc, core);
         gc.RecomputeAllSurfaces();
         _chunks.Add(cc, gc);
         ScanDecorations(gc);
-        if (isNew && cc.Y == 1) {
+        if (isNew && cc.Y == 1 && Dimension == Dimension.Overworld) {
             SpawnInitialChunkAnimals(gc);
         }
         _lightDirty.Add(gc);
@@ -327,35 +336,78 @@ public sealed class GameWorld : IDisposable {
     public Container GetOrCreateChest(Vec3i pos) {
         if (Chests.TryGetValue(pos, out var inv)) return inv;
         var newInv = new Container(1000000.0, 1000000.0);
-        // Если сундук сгенерирован в шахте, наполняем каноничным шахтным лутом
-        if (pos.Y >= 17 && pos.Y <= 20) {
-            var rng = new Random(Seed ^ (pos.X * 73856093 ^ pos.Y * 19349663 ^ pos.Z * 83492791));
-            newInv.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.IronIngotItem), rng.Next(1, 5)));
-            newInv.InsertAt(1, new ItemEntry(GameData.NewItem(GameData.CoalItem), rng.Next(3, 9)));
-            newInv.InsertAt(2, new ItemEntry(GameData.NewItem(GameData.TorchItem), rng.Next(4, 13)));
-            newInv.InsertAt(3, new ItemEntry(GameData.NewItem(GameData.BreadItem), rng.Next(1, 4)));
-            newInv.InsertAt(4, new ItemEntry(GameData.NewItem(GameData.StringItem), rng.Next(1, 5)));
-            if (rng.NextDouble() < 0.25)
-                newInv.InsertAt(8, new ItemEntry(GameData.NewItem(GameData.GoldIngotItem), rng.Next(1, 3)));
-            if (rng.NextDouble() < 0.10)
-                newInv.InsertAt(13, new ItemEntry(GameData.NewItem(GameData.DiamondItem), 1));
-        } else if (pos.Y > 20) {
-            // Сундук в деревенском доме: еда, семена, яблоки, инструменты, доски, слитки
-            var rng = new Random(Seed ^ (pos.X * 73856093 ^ pos.Y * 19349663 ^ pos.Z * 83492791));
+        var rng = new Random(Seed ^ (pos.X * 73856093 ^ pos.Y * 19349663 ^ pos.Z * 83492791));
+
+        if (Dimension == Dimension.Nether) {
+            // Сундуки в Нижнем мире
+            newInv.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.GoldIngotItem), rng.Next(2, 6)));
+            newInv.InsertAt(1, new ItemEntry(GameData.NewItem(GameData.NetherQuartzItem), rng.Next(4, 12)));
+            newInv.InsertAt(2, new ItemEntry(GameData.NewItem(GameData.BlazeRodItem), rng.Next(1, 3)));
+            newInv.InsertAt(3, new ItemEntry(GameData.NewItem(GameData.FlintAndSteelItem), 1));
+            if (rng.NextDouble() < 0.35) newInv.InsertAt(5, new ItemEntry(GameData.NewItem(GameData.DiamondItem), rng.Next(1, 3)));
+            if (rng.NextDouble() < 0.25) newInv.InsertAt(8, new ItemEntry(GameData.NewItem(GameData.GoldenAppleItem), 1));
+            if (rng.NextDouble() < 0.20) newInv.InsertAt(12, new ItemEntry(GameData.NewItem(GameData.SaddleItem), 1));
+        } else if (pos.Y <= 38 && pos.Y >= 10) {
+            // Сундуки в Данжах (Подземных сокровищницах) и Шахтах
+            newInv.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.IronIngotItem), rng.Next(2, 7)));
+            newInv.InsertAt(1, new ItemEntry(GameData.NewItem(GameData.StringItem), rng.Next(2, 6)));
+            newInv.InsertAt(2, new ItemEntry(GameData.NewItem(GameData.BoneItem), rng.Next(2, 7)));
+            newInv.InsertAt(3, new ItemEntry(GameData.NewItem(GameData.GunpowderItem), rng.Next(1, 5)));
+            newInv.InsertAt(4, new ItemEntry(GameData.NewItem(GameData.BreadItem), rng.Next(1, 4)));
+            if (rng.NextDouble() < 0.40) newInv.InsertAt(6, new ItemEntry(GameData.NewItem(GameData.GoldenAppleItem), 1));
+            if (rng.NextDouble() < 0.35) newInv.InsertAt(7, new ItemEntry(GameData.NewItem(GameData.SaddleItem), 1));
+            if (rng.NextDouble() < 0.30) newInv.InsertAt(8, new ItemEntry(GameData.NewItem(GameData.EnchantedBookItem), 1));
+            if (rng.NextDouble() < 0.25) newInv.InsertAt(9, new ItemEntry(GameData.NewItem(GameData.MusicDiscItem), 1));
+            if (rng.NextDouble() < 0.15) newInv.InsertAt(13, new ItemEntry(GameData.NewItem(GameData.DiamondItem), rng.Next(1, 3)));
+        } else {
+            // Сундуки в Пирамидах / Домах
             newInv.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.BreadItem), rng.Next(2, 6)));
-            newInv.InsertAt(1, new ItemEntry(GameData.NewItem(GameData.WheatSeedsItem), rng.Next(3, 9)));
+            newInv.InsertAt(1, new ItemEntry(GameData.NewItem(GameData.GoldIngotItem), rng.Next(2, 5)));
             newInv.InsertAt(2, new ItemEntry(GameData.NewItem(GameData.AppleItem), rng.Next(1, 4)));
-            newInv.InsertAt(3, new ItemEntry(GameData.NewItem(GameData.PlankItem), rng.Next(4, 13)));
+            newInv.InsertAt(3, new ItemEntry(GameData.NewItem(GameData.IronIngotItem), rng.Next(2, 5)));
             newInv.InsertAt(4, new ItemEntry(GameData.NewItem(GameData.TorchItem), rng.Next(3, 8)));
-            if (rng.NextDouble() < 0.60)
-                newInv.InsertAt(5, new ItemEntry(GameData.NewItem(GameData.IronIngotItem), rng.Next(1, 4)));
-            if (rng.NextDouble() < 0.30)
-                newInv.InsertAt(8, new ItemEntry(GameData.NewItem(GameData.GoldIngotItem), rng.Next(1, 3)));
-            if (rng.NextDouble() < 0.12)
-                newInv.InsertAt(12, new ItemEntry(GameData.NewItem(GameData.DiamondItem), 1));
+            if (rng.NextDouble() < 0.40) newInv.InsertAt(6, new ItemEntry(GameData.NewItem(GameData.GoldenAppleItem), 1));
+            if (rng.NextDouble() < 0.35) newInv.InsertAt(7, new ItemEntry(GameData.NewItem(GameData.SaddleItem), 1));
+            if (rng.NextDouble() < 0.30) newInv.InsertAt(8, new ItemEntry(GameData.NewItem(GameData.EnchantedBookItem), 1));
+            if (rng.NextDouble() < 0.25) newInv.InsertAt(12, new ItemEntry(GameData.NewItem(GameData.DiamondItem), rng.Next(1, 4)));
         }
         Chests[pos] = newInv;
         return newInv;
+    }
+
+    public static void CreateExplosion(Vector3 pos, float radius, float maxDamage, GameSession? session, bool breakBlocks = true) {
+        SoundSystem.PlayExplosion();
+        if (session != null) {
+            float dist = Vector3.Distance(session.Player.Position, pos);
+            if (dist < radius * 1.5f) {
+                float dmg = (1.0f - dist / (radius * 1.5f)) * maxDamage;
+                session.Player.ApplyDamage(dmg, session, pos);
+                session.AddMessage($"Взрыв нанёс урон -{dmg:F0} HP!");
+            }
+        }
+
+        if (session != null && breakBlocks) {
+            var center = new Vec3i((int)MathF.Floor(pos.X), (int)MathF.Floor(pos.Y), (int)MathF.Floor(pos.Z));
+            int r = (int)MathF.Ceiling(radius);
+            var rng = new Random();
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dy = -r; dy <= r; dy++) {
+                    for (int dz = -r; dz <= r; dz++) {
+                        if (dx * dx + dy * dy + dz * dz <= radius * radius) {
+                            var target = center + new Vec3i(dx, dy, dz);
+                            var vox = session.World.GetVoxel(target);
+                            if (vox.TypeId != 0 && vox.TypeId != GameData.BBedrock.Id && vox.TypeId != GameData.BObsidian.Id) {
+                                var b = GameData.GetBlock(vox.TypeId);
+                                session.World.RemoveBlock(target);
+                                if (b.DropItemId != 0 && rng.NextDouble() < 0.35) {
+                                    session.World.SpawnPickup(b.DropItemId, 1, target);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>Поиск безопасной точки возрождения игрока без риска застрять в блоках или упасть в лаву/бездну.</summary>
@@ -682,8 +734,64 @@ public sealed class GameWorld : IDisposable {
         // Рост посевов пшеницы на грядках
         TickCrops(dt);
 
+        // Распространение травы на блоки земли и отмирание под твердыми блоками
+        TickGrassSpread(dt);
+
         // Автономная фоновая плавка печей во всех активных блоках
         foreach (var fn in Furnaces.Values) fn.Tick(dt, this);
+    }
+
+    public void TickGrassSpread(float dt) {
+        _grassSpreadTimer -= dt;
+        if (_grassSpreadTimer > 0f) return;
+        _grassSpreadTimer = 0.35f;
+
+        if (_chunks.Count == 0) return;
+        var chunkList = _chunks.Values.ToList();
+
+        // Берем случайные активные чанки за тик
+        int chunksToTick = Math.Min(chunkList.Count, 8);
+        for (int c = 0; c < chunksToTick; c++) {
+            var chunk = chunkList[_random.Next(chunkList.Count)];
+            for (int r = 0; r < 4; r++) {
+                int lx = _random.Next(Chunk.SizeX);
+                int lz = _random.Next(Chunk.SizeZ);
+                int ly = _random.Next(Chunk.SizeY);
+
+                int wx = chunk.Coord.X * Chunk.SizeX + lx;
+                int wz = chunk.Coord.Z * Chunk.SizeZ + lz;
+                var blockPos = new Vec3i(wx, ly, wz);
+
+                var vox = GetVoxel(blockPos);
+                if (vox.TypeId == GameData.BGrass.Id) {
+                    var abovePos = blockPos + new Vec3i(0, 1, 0);
+                    var aboveVox = GetVoxel(abovePos);
+                    var aboveBlock = GameData.GetBlock(aboveVox.TypeId);
+
+                    // Если блок сверху непрозрачный и твердый — трава погибает и становится землей
+                    if (aboveBlock != null && aboveBlock.IsSolid && aboveBlock.IsOpaque) {
+                        PlacePlacedBlock(blockPos, GameData.BDirt, 1f);
+                        continue;
+                    }
+
+                    // Попытка распространить траву на соседнюю землю (dx: -1..1, dz: -1..1, dy: -3..1)
+                    int targetWx = wx + _random.Next(-1, 2);
+                    int targetWz = wz + _random.Next(-1, 2);
+                    int targetWy = ly + _random.Next(-3, 2);
+                    var targetPos = new Vec3i(targetWx, targetWy, targetWz);
+
+                    if (GetVoxel(targetPos).TypeId == GameData.BDirt.Id) {
+                        var targetAbove = targetPos + new Vec3i(0, 1, 0);
+                        var targetAboveVox = GetVoxel(targetAbove);
+                        var targetAboveBlock = GameData.GetBlock(targetAboveVox.TypeId);
+
+                        if (targetAboveBlock == null || !targetAboveBlock.IsSolid || !targetAboveBlock.IsOpaque) {
+                            PlacePlacedBlock(targetPos, GameData.BGrass, 1f);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     public const float CropGrowthInterval = 25f;
@@ -729,12 +837,120 @@ public sealed class GameWorld : IDisposable {
         foreach (var h in HostileMobs) h.Tick(dt, this, player, session);
         HostileMobs.RemoveAll(h => !h.Alive);
 
+        // Расталкивание мобов, животных и игрока
+        ResolveEntityCollisions(player);
+
         // Обновление летящих стрел скелетов
         for (int i = Arrows.Count - 1; i >= 0; i--) {
             var arr = Arrows[i];
             arr.Tick(dt, this, player, session);
             if (!arr.Alive) Arrows.RemoveAt(i);
         }
+    }
+
+    /// <summary>
+    /// Физическое расталкивание (Push physics / коллизия сущностей):
+    /// Предотвращает прохождение мобов и животных друг сквозь друга.
+    /// </summary>
+    public void ResolveEntityCollisions(Player? player) {
+        // 1. HostileMob vs HostileMob
+        for (int i = 0; i < HostileMobs.Count; i++) {
+            var mobA = HostileMobs[i];
+            if (!mobA.Alive) continue;
+
+            for (int j = i + 1; j < HostileMobs.Count; j++) {
+                var mobB = HostileMobs[j];
+                if (!mobB.Alive) continue;
+
+                PushEntities(ref mobA.Position, ref mobA.Velocity, mobA.HalfSizeX, mobA.HalfSizeY,
+                             ref mobB.Position, ref mobB.Velocity, mobB.HalfSizeX, mobB.HalfSizeY);
+            }
+        }
+
+        // 2. Animal vs Animal
+        for (int i = 0; i < Animals.Count; i++) {
+            var aA = Animals[i];
+            if (!aA.Alive) continue;
+
+            for (int j = i + 1; j < Animals.Count; j++) {
+                var aB = Animals[j];
+                if (!aB.Alive) continue;
+
+                PushEntities(ref aA.Position, ref aA.Velocity, aA.HalfSizeX, aA.HalfSizeY,
+                             ref aB.Position, ref aB.Velocity, aB.HalfSizeX, aB.HalfSizeY);
+            }
+        }
+
+        // 3. HostileMob vs Animal
+        for (int i = 0; i < HostileMobs.Count; i++) {
+            var mob = HostileMobs[i];
+            if (!mob.Alive) continue;
+
+            for (int j = 0; j < Animals.Count; j++) {
+                var anim = Animals[j];
+                if (!anim.Alive) continue;
+
+                PushEntities(ref mob.Position, ref mob.Velocity, mob.HalfSizeX, mob.HalfSizeY,
+                             ref anim.Position, ref anim.Velocity, anim.HalfSizeX, anim.HalfSizeY);
+            }
+        }
+
+        // 4. HostileMob / Animal vs Player
+        if (player != null) {
+            for (int i = 0; i < HostileMobs.Count; i++) {
+                var mob = HostileMobs[i];
+                if (!mob.Alive) continue;
+
+                PushEntities(ref mob.Position, ref mob.Velocity, mob.HalfSizeX, mob.HalfSizeY,
+                             ref player.Position, ref player.Velocity, Player.HalfExtents.X, Player.HalfExtents.Y);
+            }
+
+            for (int i = 0; i < Animals.Count; i++) {
+                var anim = Animals[i];
+                if (!anim.Alive) continue;
+
+                PushEntities(ref anim.Position, ref anim.Velocity, anim.HalfSizeX, anim.HalfSizeY,
+                             ref player.Position, ref player.Velocity, Player.HalfExtents.X, Player.HalfExtents.Y);
+            }
+        }
+    }
+
+    private static void PushEntities(ref Vector3 posA, ref Vector3 velA, float rAX, float rAY,
+                                     ref Vector3 posB, ref Vector3 velB, float rBX, float rBY) {
+        float dy = MathF.Abs(posA.Y - posB.Y);
+        float maxDy = rAY + rBY;
+        if (dy >= maxDy) return;
+
+        float minDist = rAX + rBX;
+        float dx = posA.X - posB.X;
+        float dz = posA.Z - posB.Z;
+        float distSq = dx * dx + dz * dz;
+
+        if (distSq >= minDist * minDist) return;
+
+        float dist;
+        float nx, nz;
+        if (distSq < 0.00001f) {
+            float angle = Random.Shared.NextSingle() * MathF.Tau;
+            nx = MathF.Cos(angle);
+            nz = MathF.Sin(angle);
+            dist = 0.001f;
+        } else {
+            dist = MathF.Sqrt(distSq);
+            nx = dx / dist;
+            nz = dz / dist;
+        }
+
+        float overlap = (minDist - dist) * 0.5f;
+        posA.X += nx * overlap;
+        posA.Z += nz * overlap;
+        posB.X -= nx * overlap;
+        posB.Z -= nz * overlap;
+
+        velA.X += nx * 0.8f;
+        velA.Z += nz * 0.8f;
+        velB.X -= nx * 0.8f;
+        velB.Z -= nz * 0.8f;
     }
 
     private void TrySpawnHostileNearPlayer(Player player, GameSession session) {

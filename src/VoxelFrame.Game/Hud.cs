@@ -1,4 +1,5 @@
 using Raylib_cs;
+using VoxelFrame.Core;
 using VoxelFrame.Core.World;
 
 namespace VoxelFrame.Game;
@@ -7,6 +8,8 @@ namespace VoxelFrame.Game;
 public static class Hud {
     private const int SlotSize = 52;
     private const int SlotGap = 4;
+
+    public static bool ShowDebugInfo = false;
 
     public static void Draw(GameSession session, float dt) {
         int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
@@ -18,6 +21,19 @@ public static class Hud {
         Raylib.DrawRectangle(cx - 1, cy - 8, 3, 17, new Color(0, 0, 0, 160));
         Raylib.DrawRectangle(cx - 7, cy, 15, 1, new Color(255, 255, 255, 240));
         Raylib.DrawRectangle(cx, cy - 7, 1, 15, new Color(255, 255, 255, 240));
+
+        // Подводный полупрозрачный экранный фильтр (Underwater overlay)
+        var eyeVoxel = session.World.GetVoxel(new Vec3i((int)MathF.Floor(player.Eye.X), (int)MathF.Floor(player.Eye.Y), (int)MathF.Floor(player.Eye.Z)));
+        if (eyeVoxel.TypeId == GameData.BWater.Id) {
+            Raylib.DrawRectangle(0, 0, w, h, new Color(12, 65, 175, 100)); // Полупрозрачный водный оттенок
+            Raylib.DrawRectangleGradientV(0, 0, w, 70, new Color(8, 45, 130, 140), new Color(8, 45, 130, 0));
+            Raylib.DrawRectangleGradientV(0, h - 70, w, 70, new Color(8, 45, 130, 0), new Color(8, 45, 130, 140));
+        } else if (eyeVoxel.TypeId == GameData.BLava.Id) {
+            Raylib.DrawRectangle(0, 0, w, h, new Color(220, 50, 10, 195));
+        } else if (eyeVoxel.TypeId == GameData.BNetherPortal.Id) {
+            float portalWave = MathF.Sin((float)session.TotalPlaySeconds * 4.0f) * 0.5f + 0.5f;
+            Raylib.DrawRectangle(0, 0, w, h, new Color((byte)130, (byte)30, (byte)210, (byte)(110 + portalWave * 45)));
+        }
 
         // Красная вспышка/виньетка при получении урона
         if (player.HurtTimer > 0f) {
@@ -47,16 +63,34 @@ public static class Hud {
             msgY += 24f;
         }
 
-        // Время, FPS и текущий биом
+        // Инфо-панель: Координаты, Направление взгляда, Биом, Время, FPS
         int px = (int)MathF.Floor(player.Position.X);
         int py = (int)MathF.Floor(player.Position.Y);
         int pz = (int)MathF.Floor(player.Position.Z);
         var curBiome = session.World.Generator.GetBiome(px, py, pz);
         string biomeName = WorldGenerator.GetBiomeName(curBiome);
 
-        Fonts.DrawShadowed($"День: {session.DayNight.ClockText}", w - 210f, 10f, 18f, Color.White);
-        Fonts.DrawShadowed($"FPS: {Raylib.GetFPS()}", w - 210f, 32f, 18f, Color.White);
-        Fonts.DrawShadowed($"Биом: {biomeName}", w - 210f, 54f, 18f, new Color(200, 230, 255, 255));
+        string facing;
+        if (MathF.Abs(player.Forward.X) > MathF.Abs(player.Forward.Z)) {
+            facing = player.Forward.X > 0 ? "Восток (+X)" : "Запад (-X)";
+        } else {
+            facing = player.Forward.Z > 0 ? "Юг (+Z)" : "Север (-Z)";
+        }
+
+        // Верхний правый угол: компактная инфо-панель координат и мира
+        float rightPanelX = w - 245f;
+        Raylib.DrawRectangleRounded(new Rectangle(rightPanelX - 8, 6, 240, 110), 0.12f, 4, new Color(15, 20, 30, 140));
+        Raylib.DrawRectangleRoundedLinesEx(new Rectangle(rightPanelX - 8, 6, 240, 110), 0.12f, 4, 1.0f, new Color(80, 100, 140, 100));
+
+        Fonts.DrawShadowed($"XYZ: {player.Position.X:F1} / {player.Position.Y:F1} / {player.Position.Z:F1}", rightPanelX, 10f, 16f, new Color(255, 240, 120, 255));
+        Fonts.DrawShadowed($"Блок: {px} {py} {pz}", rightPanelX, 30f, 15f, new Color(220, 225, 235, 255));
+        Fonts.DrawShadowed($"Взгляд: {facing}", rightPanelX, 48f, 15f, new Color(175, 215, 255, 255));
+        Fonts.DrawShadowed($"Биом: {biomeName}", rightPanelX, 66f, 15f, new Color(150, 235, 175, 255));
+        Fonts.DrawShadowed($"День: {session.DayNight.ClockText}  |  FPS: {Raylib.GetFPS()}", rightPanelX, 84f, 15f, Color.White);
+
+        if (ShowDebugInfo) {
+            DrawF3DebugOverlay(session, player, px, py, pz, biomeName, facing, w, h);
+        }
 
         // Хотбар и Вторая рука (Off-hand).
         var inv = player.Inventory;
@@ -117,12 +151,13 @@ public static class Hud {
 
         // Предмет во второй руке (левый нижний угол, вид от первого лица)
         if (player.OffhandItem != null && player.OffhandCount > 0) {
-            float offhandSize = 110f;
+            float offhandSize = player.IsBlocking ? 155f : 110f;
             float bob = player.BobOffset * 50f;
-            float leftHandX = 35f;
-            float leftHandY = h - offhandSize - 10f + bob;
+            float leftHandX = player.IsBlocking ? (w / 2f - offhandSize - 20f) : 35f;
+            float leftHandY = player.IsBlocking ? (h - offhandSize - 60f) : (h - offhandSize - 10f + bob);
+            float offhandRot = player.IsBlocking ? 0.05f : -0.35f;
             var leftRect = new Rectangle(leftHandX, leftHandY, offhandSize, offhandSize);
-            DrawItemIconRotated(player.OffhandItem, leftRect, 1f, -0.35f);
+            DrawItemIconRotated(player.OffhandItem, leftRect, 1f, offhandRot);
         }
 
         // Предмет в правой руке (правый нижний угол, классический Minecraft-вид от первого лица)
@@ -136,13 +171,20 @@ public static class Hud {
                 handY += MathF.Sin(player.EatTimer * 14f) * 8f;
             }
 
-            var handRect = new Rectangle(handX, handY, handSize, handSize);
             float swing = 0f;
-            if (player.BreakProgress > 0f && player.BreakDuration > 0f) {
+            if (held.Item.Definition.Id == GameData.BowItem.Id && player.BowCharge > 0f) {
+                // Натягивание лука к центру экрана с дрожью
+                float pull = player.BowCharge;
+                float shake = pull * (Random.Shared.NextSingle() - 0.5f) * 4f;
+                handX = w / 2f + 10f - pull * 60f + shake;
+                handY = h / 2f + 20f - pull * 30f + shake;
+                swing = -0.2f - pull * 0.4f;
+            } else if (player.BreakProgress > 0f && player.BreakDuration > 0f) {
                 swing = MathF.Sin(player.BreakProgress / player.BreakDuration * MathF.PI) * 0.7f;
             } else if (player.AttackTimer > 0f) {
                 swing = MathF.Sin((1f - player.AttackTimer / Player.AttackCooldown) * MathF.PI) * 0.9f;
             }
+            var handRect = new Rectangle(handX, handY, handSize, handSize);
             DrawItemIconRotated(held.Item.Definition, handRect, 1f, swing);
         }
 
@@ -269,5 +311,49 @@ public static class Hud {
         unsafe {
             Raylib.DrawTexturePro(TextureAtlas.Atlas, src, dest, new System.Numerics.Vector2(size / 2f, size / 2f), rotation, Color.White);
         }
+    }
+
+    /// <summary>Расширенный экран отладки Minecraft F3.</summary>
+    private static void DrawF3DebugOverlay(GameSession session, Player player, int px, int py, int pz, string biomeName, string facing, int w, int h) {
+        // Левая панель F3
+        float y = 10f;
+        void LineL(string text, Color? col = null) {
+            int tw = (int)(text.Length * 9.2f);
+            Raylib.DrawRectangle(8, (int)y - 1, tw + 8, 19, new Color(0, 0, 0, 140));
+            Fonts.Draw(text, 12f, y, 16f, col ?? Color.White);
+            y += 20f;
+        }
+
+        LineL($"VoxelFrame 0.9.0 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
+        LineL($"XYZ: {player.Position.X:F3} / {player.Position.Y:F5} / {player.Position.Z:F3}", new Color(255, 240, 120, 255));
+        LineL($"Block: {px} {py} {pz} [{(px & 15)} {(py & 15)} {(pz & 15)} in sub-chunk]");
+        LineL($"Chunk: {px >> 4} {py >> 4} {pz >> 4} in chunk [{px >> 4}, {pz >> 4}]");
+        LineL($"Facing: {facing} (Yaw: {player.Yaw * 180f / MathF.PI:F1}°, Pitch: {player.Pitch * 180f / MathF.PI:F1}°)", new Color(175, 215, 255, 255));
+        LineL($"Light: {session.World.GetSunLight(new Vec3i(px, py, pz))} (sky {session.DayNight.SkyFactor * 15f:F1})");
+        LineL($"Biome: {biomeName}", new Color(150, 235, 175, 255));
+        LineL($"Time: {session.DayNight.ClockText} (tod {session.DayNight.TimeOfDay:F3})");
+
+        if (session.HasTarget) {
+            var tb = session.TargetBlock;
+            var vox = session.World.GetVoxel(tb);
+            var block = GameData.GetBlock(vox.TypeId);
+            LineL($"Targeted Block: {tb.X}, {tb.Y}, {tb.Z} ({block.Name})", new Color(255, 200, 100, 255));
+        }
+
+        // Правая панель F3
+        float ry = 130f;
+        void LineR(string text, Color? col = null) {
+            int tw = (int)(text.Length * 9.2f);
+            float rx = w - tw - 16f;
+            Raylib.DrawRectangle((int)rx - 4, (int)ry - 1, tw + 8, 19, new Color(0, 0, 0, 140));
+            Fonts.Draw(text, rx, ry, 16f, col ?? Color.White);
+            ry += 20f;
+        }
+
+        LineR($".NET 10.0 (Windows x64)");
+        LineR($"Mem: {GC.GetTotalMemory(false) / (1024 * 1024)} MB");
+        LineR($"Mobs: {session.World.HostileMobs.Count} hostile, {session.World.Animals.Count} passive");
+        LineR($"Pickups: {session.World.Pickups.Count}");
+        LineR($"Display: {w}x{h}");
     }
 }

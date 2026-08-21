@@ -8,7 +8,7 @@ namespace VoxelFrame.Game;
 /// </summary>
 public static class TextureAtlas {
     public const int TilePx = 16;
-    public const int Cols = 8, Rows = 12;
+    public const int Cols = 8, Rows = 16;
     public const int AtlasW = Cols * TilePx, AtlasH = Rows * TilePx;
 
     public const int TGrassTop = 0, TGrassSide = 1, TDirt = 2, TStone = 3,
@@ -33,7 +33,14 @@ public static class TextureAtlas {
                      TRottenFlesh = 72, TWheat = 73, TWheatSeeds = 74,
                      TFarmland = 75, TWheatCrop0 = 76, TWheatCrop1 = 77, TWheatCrop2 = 78, TWheatCrop3 = 79,
                      THoeWood = 80, THoeStone = 81, THoeIron = 82, THoeDiamond = 83,
-                     TTallGrass = 84, TBoneMeal = 85, TSawdust = 86, TSawdustPorridge = 87, TTotem = 88;
+                     TTallGrass = 84, TBoneMeal = 85, TSawdust = 86, TSawdustPorridge = 87, TTotem = 88,
+                     TRawMutton = 89, TCookedMutton = 90,
+                     TBow = 91, TShield = 92, TFlintAndSteel = 93, TGoldenApple = 94, TSaddle = 95,
+                     TEnchantedBook = 96, TMusicDisc = 97, TNetherQuartz = 98, TBlazeRod = 99, TGlowstoneDust = 100,
+                     TTNT = 101, TTNTSide = 102, TTNTTop = 103, TTNTBottom = 104,
+                     TMossyCobble = 105, TMobSpawner = 106, TWeb = 107, TRail = 108, TPressurePlate = 109,
+                     TChiseledSandstone = 110, TNetherrack = 111, TSoulSand = 112, TGlowstone = 113,
+                     TNetherQuartzOre = 114, TNetherBrick = 115, TNetherPortal = 116;
 
     public record struct BlockFaceTiles(byte PosX, byte NegX, byte PosY, byte NegY, byte PosZ, byte NegZ);
 
@@ -153,6 +160,34 @@ public static class TextureAtlas {
         [TSawdust] = "items/sawdust.png",
         [TSawdustPorridge] = "items/sawdust_porridge.png",
         [TTotem] = "items/totem.png",
+        [TRawMutton] = "items/mutton_raw.png",
+        [TCookedMutton] = "items/mutton_cooked.png",
+        [TBow] = "items/bow.png",
+        [TShield] = "items/shield.png",
+        [TFlintAndSteel] = "items/flint_and_steel.png",
+        [TGoldenApple] = "items/apple_golden.png",
+        [TSaddle] = "items/saddle.png",
+        [TEnchantedBook] = "items/book_enchanted.png",
+        [TMusicDisc] = "items/record_13.png",
+        [TNetherQuartz] = "items/quartz.png",
+        [TBlazeRod] = "items/blaze_rod.png",
+        [TGlowstoneDust] = "items/glowstone_dust.png",
+        [TTNT] = "blocks/tnt.png",
+        [TTNTSide] = "blocks/tnt_side.png",
+        [TTNTTop] = "blocks/tnt_top.png",
+        [TTNTBottom] = "blocks/tnt_bottom.png",
+        [TMossyCobble] = "blocks/cobblestone_mossy.png",
+        [TMobSpawner] = "blocks/mob_spawner.png",
+        [TWeb] = "blocks/web.png",
+        [TRail] = "blocks/rail.png",
+        [TPressurePlate] = "blocks/pressure_plate.png",
+        [TChiseledSandstone] = "blocks/sandstone_chiseled.png",
+        [TNetherrack] = "blocks/netherrack.png",
+        [TSoulSand] = "blocks/soul_sand.png",
+        [TGlowstone] = "blocks/glowstone.png",
+        [TNetherQuartzOre] = "blocks/quartz_ore.png",
+        [TNetherBrick] = "blocks/nether_brick.png",
+        [TNetherPortal] = "blocks/portal.png",
     };
 
     public static Texture2D Atlas => _atlas;
@@ -225,6 +260,7 @@ public static class TextureAtlas {
                             for (int py = 0; py < TilePx; py++) {
                                 for (int px = 0; px < TilePx; px++) {
                                     var col = Raylib.GetImageColor(tileImage, px, py);
+                                    if (tile == TWater) col.A = 155;
                                     unsafe {
                                         Raylib.ImageDrawPixel(ref atlasImage, dx + px, dy + py, col);
                                     }
@@ -330,6 +366,34 @@ public static class TextureAtlas {
         palette[THoeIron] = (new Color(220, 220, 220, 255), false);
         palette[THoeDiamond] = (new Color(90, 230, 240, 255), false);
         palette[TTallGrass] = (new Color(90, 175, 45, 255), false);
+        palette[TRawMutton] = (new Color(215, 65, 75, 255), true);
+        palette[TCookedMutton] = (new Color(145, 75, 38, 255), true);
+        palette[TBow] = (new Color(130, 96, 52, 255), false);
+        palette[TShield] = (new Color(160, 120, 70, 255), false);
+        palette[TFlintAndSteel] = (new Color(200, 200, 210, 255), false);
+        palette[TGoldenApple] = (new Color(255, 215, 30, 255), false);
+        palette[TSaddle] = (new Color(140, 80, 40, 255), false);
+        palette[TEnchantedBook] = (new Color(150, 60, 180, 255), false);
+        palette[TMusicDisc] = (new Color(30, 30, 35, 255), false);
+        palette[TNetherQuartz] = (new Color(235, 230, 225, 255), false);
+        palette[TBlazeRod] = (new Color(255, 170, 20, 255), false);
+        palette[TGlowstoneDust] = (new Color(255, 220, 60, 255), false);
+        palette[TTNT] = (new Color(210, 40, 30, 255), true);
+        palette[TTNTSide] = (new Color(210, 40, 30, 255), true);
+        palette[TTNTTop] = (new Color(210, 40, 30, 255), true);
+        palette[TTNTBottom] = (new Color(210, 40, 30, 255), true);
+        palette[TMossyCobble] = (new Color(90, 120, 90, 255), true);
+        palette[TMobSpawner] = (new Color(35, 45, 60, 255), false);
+        palette[TWeb] = (new Color(240, 240, 245, 180), false);
+        palette[TRail] = (new Color(180, 160, 130, 255), false);
+        palette[TPressurePlate] = (new Color(120, 120, 125, 255), true);
+        palette[TChiseledSandstone] = (new Color(215, 205, 150, 255), true);
+        palette[TNetherrack] = (new Color(130, 35, 35, 255), true);
+        palette[TSoulSand] = (new Color(85, 65, 55, 255), true);
+        palette[TGlowstone] = (new Color(245, 205, 95, 255), true);
+        palette[TNetherQuartzOre] = (new Color(135, 45, 45, 255), true);
+        palette[TNetherBrick] = (new Color(55, 25, 30, 255), true);
+        palette[TNetherPortal] = (new Color(120, 30, 210, 200), true);
 
         var rng = new Random(20260812);
         for (int tile = 0; tile < palette.Length; tile++) {
@@ -340,7 +404,7 @@ public static class TextureAtlas {
             for (int py = 0; py < TilePx; py++) {
                 for (int px = 0; px < TilePx; px++) {
                     int r = baseColor.R, g = baseColor.G, b = baseColor.B;
-                    byte a = 255;
+                    byte a = baseColor.A > 0 ? baseColor.A : (byte)255;
                     
                     if (grain) {
                         int d = rng.Next(-28, 29);
@@ -869,6 +933,82 @@ public static class TextureAtlas {
                         } else {
                             a = 0;
                         }
+                    } else if (tile == TRawMutton) {
+                        bool insideChop = (px - 7) * (px - 7) * 1.0f + (py - 7) * (py - 7) * 1.2f <= 18;
+                        bool boneStick = (px >= 10 && px <= 13 && py >= 10 && py <= 13 && Math.Abs(px - py) <= 1);
+                        if (boneStick) {
+                            r = 240; g = 238; b = 225; a = 255;
+                        } else if (insideChop) {
+                            bool fatLine = (px <= 4 || (py <= 4 && px <= 8));
+                            if (fatLine) { r = 245; g = 235; b = 230; a = 255; }
+                            else { r = 205 + (px * 5 + py * 7) % 25; g = 65; b = 75; a = 255; }
+                        } else { a = 0; }
+                    } else if (tile == TCookedMutton) {
+                        bool insideChop = (px - 7) * (px - 7) * 1.0f + (py - 7) * (py - 7) * 1.2f <= 18;
+                        bool boneStick = (px >= 10 && px <= 13 && py >= 10 && py <= 13 && Math.Abs(px - py) <= 1);
+                        if (boneStick) {
+                            r = 235; g = 230; b = 215; a = 255;
+                        } else if (insideChop) {
+                            bool crust = (px <= 4 || py <= 4 || (px + py) % 4 == 0);
+                            if (crust) { r = 90; g = 45; b = 20; a = 255; }
+                            else { r = 145 + (px * 3 + py * 7) % 25; g = 75; b = 38; a = 255; }
+                        } else { a = 0; }
+                    } else if (tile == TBow) {
+                        bool woodBow = (px == 3 && py >= 3 && py <= 12) || (py == 2 && px >= 4 && px <= 9) || (py == 13 && px >= 4 && px <= 9) || (px == 10 && (py == 3 || py == 12));
+                        bool bowString = (px == 11 && py >= 3 && py <= 12);
+                        if (woodBow) { r = 120 + (px * 4) % 20; g = 80; b = 40; a = 255; }
+                        else if (bowString) { r = 240; g = 240; b = 245; a = 255; }
+                        else { a = 0; }
+                    } else if (tile == TShield) {
+                        bool border = px >= 3 && px <= 12 && py >= 2 && py <= 14 && (py <= 9 || Math.Abs(px - 7.5f) * 1.8f <= (14 - py) + 2);
+                        bool metalRim = border && (px == 3 || px == 12 || py == 2 || py == 14 || (py >= 10 && (px <= 4 || px >= 11)));
+                        bool metalBoss = (px >= 7 && px <= 8 && py >= 7 && py <= 8);
+                        if (metalRim || metalBoss) { r = 210; g = 215; b = 225; a = 255; }
+                        else if (border) { r = 150 + (py % 3) * 15; g = 110; b = 65; a = 255; }
+                        else { a = 0; }
+                    } else if (tile == TGoldenApple) {
+                        bool insideApple = (px - 7.5f) * (px - 7.5f) + (py - 8.5f) * (py - 8.5f) <= 24 && py >= 4 && py <= 13;
+                        bool stem = (px == 7 || px == 8) && (py >= 2 && py <= 4);
+                        if (stem) { r = 100; g = 70; b = 30; a = 255; }
+                        else if (insideApple) {
+                            bool highlight = (px >= 5 && px <= 7 && py >= 5 && py <= 7);
+                            r = highlight ? 255 : 235; g = highlight ? 245 : 195; b = highlight ? 120 : 25; a = 255;
+                        } else { a = 0; }
+                    } else if (tile == TTNT || tile == TTNTSide) {
+                        bool whiteBand = py >= 6 && py <= 9;
+                        if (whiteBand) { r = 240; g = 240; b = 240; a = 255; }
+                        else {
+                            bool redGap = (px % 4 == 0);
+                            r = redGap ? 160 : 220; g = 30; b = 25; a = 255;
+                        }
+                    } else if (tile == TMossyCobble) {
+                        bool isMoss = ((px * 13 + py * 7) % 7 < 3) || ((px + py) % 5 == 0 && py > 6);
+                        if (isMoss) { r = 60 + (px * 3) % 25; g = 135 + (py * 5) % 30; b = 45; a = 255; }
+                        else { r = 110 + (px * 4 + py * 7) % 20; g = r; b = r + 5; a = 255; }
+                    } else if (tile == TMobSpawner) {
+                        bool bar = (px <= 1 || px >= 14 || py <= 1 || py >= 14 || px == 5 || px == 10 || py == 5 || py == 10);
+                        if (bar) { r = 40; g = 45; b = 55; a = 255; }
+                        else {
+                            bool flame = (px >= 6 && px <= 9 && py >= 6 && py <= 9);
+                            if (flame) { r = 240; g = 140; b = 30; a = 255; }
+                            else { a = 0; }
+                        }
+                    } else if (tile == TWeb) {
+                        bool strand = (px == py || px + py == 15 || px == 7 || py == 7 || (px % 4 == 0 && py % 4 == 0));
+                        if (strand) { r = 245; g = 245; b = 250; a = 220; }
+                        else { a = 0; }
+                    } else if (tile == TRail) {
+                        bool tie = (py % 4 == 0);
+                        bool ironRail = (px == 3 || px == 12);
+                        if (ironRail) { r = 200; g = 200; b = 210; a = 255; }
+                        else if (tie) { r = 130; g = 95; b = 55; a = 255; }
+                        else { a = 0; }
+                    } else if (tile == TNetherPortal) {
+                        int wave = (int)(MathF.Sin(px * 0.8f + py * 0.6f) * 40f);
+                        r = Math.Clamp(130 + wave, 60, 220);
+                        g = Math.Clamp(30 + wave / 2, 10, 90);
+                        b = Math.Clamp(230 + wave, 140, 255);
+                        a = 210;
                     } else {
                         if (tile == TPlanks && (py == 4 || py == 11)) { r -= 40; g -= 30; b -= 20; }
                         if (tile == TLogSide && py % 5 == 4) { r -= 30; g -= 24; b -= 14; }

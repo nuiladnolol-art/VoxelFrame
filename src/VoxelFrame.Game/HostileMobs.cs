@@ -5,13 +5,13 @@ using VoxelFrame.Core.World;
 
 namespace VoxelFrame.Game;
 
-public enum HostileType { Zombie, Creeper, Skeleton, Spider }
+public enum HostileType { Zombie, Creeper, Skeleton, Spider, ZombiePigman, Blaze }
 
 /// <summary>
-/// Враждебные мобы: Zombie, Creeper, Skeleton, Spider.
-/// - Спавн в темноте ночью или в пещерах.
-/// - Аутентичный дроп (Зомби -> перья, Крипер -> порох, Скелет -> стрелы/кости, Паук -> нить).
-/// - Зомби и скелеты горят на солнце.
+/// Враждебные мобы: Zombie, Creeper, Skeleton, Spider, ZombiePigman, Blaze.
+/// - Спавн в темноте ночью, в пещерах и в Нижнем мире.
+/// - Аутентичный дроп (Зомби -> перья/плоть, Крипер -> порох, Скелет -> стрелы/кости, Паук -> нить, Свинозомби -> золото/плоть, Ифрит -> стержни ифрита).
+/// - Зомби и скелеты горят на солнце; Свинозомби и Ифриты неуязвимы к огню/лаве.
 /// </summary>
 public sealed class HostileMob {
     public const float HalfSize = 0.45f;
@@ -38,6 +38,8 @@ public sealed class HostileMob {
             HostileType.Spider => 16f,
             HostileType.Skeleton => 20f,
             HostileType.Creeper => 20f,
+            HostileType.ZombiePigman => 24f,
+            HostileType.Blaze => 20f,
             _ => 20f
         };
     }
@@ -62,7 +64,7 @@ public sealed class HostileMob {
         // Зомби и Скелеты горят при ярком солнечном свете днём
         var feetPos = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y - HalfSizeY + 0.1f), (int)MathF.Floor(Position.Z));
         var feetVox = world.GetVoxel(feetPos);
-        if (feetVox.TypeId == GameData.BLava.Id) {
+        if (feetVox.TypeId == GameData.BLava.Id && Type != HostileType.ZombiePigman && Type != HostileType.Blaze) {
             Health -= 8f * dt;
             HurtTime = 0.3f;
             if (Health <= 0f) {
@@ -129,39 +131,46 @@ public sealed class HostileMob {
                 } else {
                     speed = 2.2f;
                 }
+            } else if (Type == HostileType.ZombiePigman) {
+                speed = 2.8f; // Быстрый свинозомби
+            } else if (Type == HostileType.Blaze) {
+                speed = 1.5f;
+                Velocity.Y = MathF.Sin((float)session.TotalPlaySeconds * 3.0f) * 1.2f;
             } else {
                 speed = 2.3f;
             }
 
-            // Умный прыжок и обход препятствий
-            int aheadX = (int)MathF.Floor(Position.X + moveDir.X * (HalfSizeX + 0.35f));
-            int aheadZ = (int)MathF.Floor(Position.Z + moveDir.Z * (HalfSizeZ + 0.35f));
-            var aheadFoot = new Vec3i(aheadX, feetPos.Y, aheadZ);
-            var aheadHead = new Vec3i(aheadX, feetPos.Y + 1, aheadZ);
-            var currentHead = feetPos + new Vec3i(0, 1, 0);
+            // Умный прыжок и обход препятствий (для наземных мобов)
+            if (Type != HostileType.Spider && Type != HostileType.Blaze) {
+                int aheadX = (int)MathF.Floor(Position.X + moveDir.X * (HalfSizeX + 0.35f));
+                int aheadZ = (int)MathF.Floor(Position.Z + moveDir.Z * (HalfSizeZ + 0.35f));
+                var aheadFoot = new Vec3i(aheadX, feetPos.Y, aheadZ);
+                var aheadHead = new Vec3i(aheadX, feetPos.Y + 1, aheadZ);
+                var currentHead = feetPos + new Vec3i(0, 1, 0);
 
-            if (world.IsSolidAt(aheadFoot)) {
-                if (!world.IsSolidAt(aheadHead) && !world.IsSolidAt(currentHead) && MathF.Abs(Velocity.Y) < 0.1f) {
-                    Velocity.Y = 8.5f; // Прыжок на 1 блок вверх
-                } else if (world.IsSolidAt(aheadHead)) {
-                    // Стена впереди: проверяем боковые направления для обхода (+45° / -45°)
-                    var leftDir = new Vector3(moveDir.Z, 0f, -moveDir.X);
-                    var rightDir = new Vector3(-moveDir.Z, 0f, moveDir.X);
-                    var leftCell = new Vec3i((int)MathF.Floor(Position.X + leftDir.X * 0.6f), feetPos.Y, (int)MathF.Floor(Position.Z + leftDir.Z * 0.6f));
-                    var rightCell = new Vec3i((int)MathF.Floor(Position.X + rightDir.X * 0.6f), feetPos.Y, (int)MathF.Floor(Position.Z + rightDir.Z * 0.6f));
+                if (world.IsSolidAt(aheadFoot)) {
+                    if (!world.IsSolidAt(aheadHead) && !world.IsSolidAt(currentHead) && MathF.Abs(Velocity.Y) < 0.1f) {
+                        Velocity.Y = 8.5f; // Прыжок на 1 блок вверх
+                    } else if (world.IsSolidAt(aheadHead)) {
+                        // Стена впереди: проверяем боковые направления для обхода (+45° / -45°)
+                        var leftDir = new Vector3(moveDir.Z, 0f, -moveDir.X);
+                        var rightDir = new Vector3(-moveDir.Z, 0f, moveDir.X);
+                        var leftCell = new Vec3i((int)MathF.Floor(Position.X + leftDir.X * 0.6f), feetPos.Y, (int)MathF.Floor(Position.Z + leftDir.Z * 0.6f));
+                        var rightCell = new Vec3i((int)MathF.Floor(Position.X + rightDir.X * 0.6f), feetPos.Y, (int)MathF.Floor(Position.Z + rightDir.Z * 0.6f));
 
-                    if (!world.IsSolidAt(leftCell)) moveDir = Vector3.Normalize(moveDir + leftDir);
-                    else if (!world.IsSolidAt(rightCell)) moveDir = Vector3.Normalize(moveDir + rightDir);
+                        if (!world.IsSolidAt(leftCell)) moveDir = Vector3.Normalize(moveDir + leftDir);
+                        else if (!world.IsSolidAt(rightCell)) moveDir = Vector3.Normalize(moveDir + rightDir);
+                    }
                 }
             }
 
-            // Атака Зомби и Паука
-            if ((Type == HostileType.Zombie || Type == HostileType.Spider) && dist < 1.8f && AttackCooldown <= 0f) {
+            // Атака Зомби, Свинозомби и Паука в ближнем бою
+            if ((Type == HostileType.Zombie || Type == HostileType.Spider || Type == HostileType.ZombiePigman) && dist < 1.8f && AttackCooldown <= 0f) {
                 var mobCenter = Position + new Vector3(0f, 0.35f, 0f);
                 var playerCenter = player.Position + new Vector3(0f, 0.60f, 0f);
                 if (HasLineOfSight(world, mobCenter, playerCenter) || HasLineOfSight(world, mobCenter, player.Eye)) {
                     AttackCooldown = 1.0f;
-                    float dmg = Type == HostileType.Spider ? 3f : 4f;
+                    float dmg = Type == HostileType.ZombiePigman ? 5f : Type == HostileType.Spider ? 3f : 4f;
                     player.ApplyDamage(dmg, session, Position);
                 }
             }
@@ -179,6 +188,20 @@ public sealed class HostileMob {
                     world.Arrows.Add(new ArrowProjectile(eyePos + arrowDir * 0.6f, arrowVel, this));
                 }
             }
+
+            // Атака Ифрита (Blaze): огненные снаряды
+            if (Type == HostileType.Blaze && dist < 22f && AttackCooldown <= 0f) {
+                var eyePos = Position + new Vector3(0f, 0.65f, 0f);
+                var targetPos = player.Position + new Vector3(0f, Player.EyeHeight * 0.5f, 0f);
+                if (HasLineOfSight(world, eyePos, targetPos)) {
+                    AttackCooldown = 2.5f;
+                    var toTarget = targetPos - eyePos;
+                    var shotDir = Vector3.Normalize(toTarget);
+                    var shotVel = shotDir * 20f;
+                    world.Arrows.Add(new ArrowProjectile(eyePos + shotDir * 0.6f, shotVel, this) { Damage = 5f });
+                    SoundSystem.PlayBowShoot();
+                }
+            }
         } else {
             // Плавное блуждание
             if (_random.NextDouble() < 0.02) {
@@ -193,9 +216,35 @@ public sealed class HostileMob {
             speed = 1.1f;
         }
 
+        bool isSpiderClimbing = false;
+        if (Type == HostileType.Spider) {
+            float probeDist = HalfSizeX + 0.25f;
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dz == 0) continue;
+                    var probePos = Position + new Vector3(dx * probeDist, 0f, dz * probeDist);
+                    for (int dy = -1; dy <= 2; dy++) {
+                        var cell = new Vec3i((int)MathF.Floor(probePos.X), (int)MathF.Floor(Position.Y + dy * 0.5f), (int)MathF.Floor(probePos.Z));
+                        if (world.IsSolidAt(cell)) {
+                            isSpiderClimbing = true;
+                            break;
+                        }
+                    }
+                    if (isSpiderClimbing) break;
+                }
+                if (isSpiderClimbing) break;
+            }
+        }
+
         Velocity.X = moveDir.X * speed;
         Velocity.Z = moveDir.Z * speed;
-        Velocity.Y -= 22f * dt;
+        if (isSpiderClimbing) {
+            Velocity.Y = 3.6f; // Лазание вверх по стене
+        } else if (Type == HostileType.Blaze) {
+            // Левитация ифрита
+        } else {
+            Velocity.Y -= 22f * dt;
+        }
 
         bool grounded = Collision.Move(world, ref Position, new Vector3(HalfSizeX, HalfSizeY, HalfSizeZ), ref Velocity, dt);
         if (grounded && Velocity.Y < 0f) Velocity.Y = 0f;
@@ -233,6 +282,13 @@ public sealed class HostileMob {
                 break;
             case HostileType.Spider:
                 world.SpawnPickup(GameData.StringItem.Id, _random.Next(1, 3), pos);
+                break;
+            case HostileType.ZombiePigman:
+                world.SpawnPickup(GameData.RottenFleshItem.Id, _random.Next(1, 3), pos);
+                if (_random.NextDouble() < 0.50) world.SpawnPickup(GameData.GoldIngotItem.Id, 1, pos);
+                break;
+            case HostileType.Blaze:
+                world.SpawnPickup(GameData.BlazeRodItem.Id, _random.Next(1, 3), pos);
                 break;
         }
     }
@@ -274,7 +330,7 @@ public sealed class HostileMob {
 }
 
 /// <summary>
-/// Летящая стрела: баллистическая траектория, столкновение с блоками и игроком.
+/// Летящая стрела: баллистическая траектория, столкновение с блоками, игроком и мобами.
 /// </summary>
 public sealed class ArrowProjectile {
     public Vector3 Position;
@@ -282,6 +338,8 @@ public sealed class ArrowProjectile {
     public bool Alive = true;
     public float LifeTime = 6.0f;
     public HostileMob? Shooter;
+    public bool FromPlayer;
+    public float Damage = 4f;
 
     public ArrowProjectile(Vector3 position, Vector3 velocity, HostileMob? shooter = null) {
         Position = position;
@@ -297,24 +355,49 @@ public sealed class ArrowProjectile {
         Velocity.Y -= 12.0f * dt;
         var nextPos = Position + Velocity * dt;
 
-        // Попадание в игрока
-        var toPlayer = (player.Position + new Vector3(0f, Player.EyeHeight * 0.5f, 0f)) - Position;
-        if (toPlayer.Length() < 0.85f) {
-            Alive = false;
-            player.ApplyDamage(3f, session, Position);
-            session.AddMessage("В вас попала стрела скелета! -3 HP");
-            return;
-        }
-
-        // Попадание в других мобов (Зомби, Пауки, другие Скелеты, но не самого стрелка)
-        foreach (var mob in world.HostileMobs) {
-            if (!mob.Alive || mob == Shooter) continue;
-            var toMob = (mob.Position + new Vector3(0f, 0.5f, 0f)) - Position;
-            if (toMob.Length() < 0.75f) {
+        if (FromPlayer) {
+            // Стрела игрока поражает враждебных мобов
+            foreach (var mob in world.HostileMobs) {
+                if (!mob.Alive) continue;
+                var toMob = (mob.Position + new Vector3(0f, 0.5f, 0f)) - Position;
+                if (toMob.Length() < 0.85f) {
+                    Alive = false;
+                    mob.TakeDamage(Damage, world, session);
+                    SoundSystem.PlayArrowHit();
+                    return;
+                }
+            }
+            // Стрела игрока поражает мирных животных
+            foreach (var ent in world.Animals) {
+                if (!ent.Alive) continue;
+                var toEnt = (ent.Position + new Vector3(0f, 0.45f, 0f)) - Position;
+                if (toEnt.Length() < 0.85f) {
+                    Alive = false;
+                    ent.TakeDamage(Damage, world);
+                    SoundSystem.PlayArrowHit();
+                    return;
+                }
+            }
+        } else {
+            // Стрела моба поражает игрока
+            var toPlayer = (player.Position + new Vector3(0f, Player.EyeHeight * 0.5f, 0f)) - Position;
+            if (toPlayer.Length() < 0.85f) {
                 Alive = false;
-                mob.TakeDamage(4f, world, session);
-                SoundSystem.PlayArrowHit();
+                player.ApplyDamage(Damage, session, Position);
+                session.AddMessage($"В вас попала стрела! -{Damage:F0} HP");
                 return;
+            }
+
+            // Попадание в других мобов
+            foreach (var mob in world.HostileMobs) {
+                if (!mob.Alive || mob == Shooter) continue;
+                var toMob = (mob.Position + new Vector3(0f, 0.5f, 0f)) - Position;
+                if (toMob.Length() < 0.75f) {
+                    Alive = false;
+                    mob.TakeDamage(Damage, world, session);
+                    SoundSystem.PlayArrowHit();
+                    return;
+                }
             }
         }
 

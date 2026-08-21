@@ -214,8 +214,14 @@ public sealed class WorldGenerator {
         // 1.19.2 Caves & Cliffs шумные пещеры + аквиферы
         CarveNoiseCaves(chunk, ox, oy, oz);
 
-        // Заброшенные шахты с крепями и факелами
+        // Заброшенные шахты с крепями, рельсами, паутиной и сундуками
         CarveMineshafts(chunk, ox, oy, oz);
+
+        // Подземные сокровищницы (Данжи)
+        PlaceDungeons(chunk, ox, oy, oz);
+
+        // Пустынные пирамиды и храмы
+        PlaceDesertPyramids(chunk, ox, oy, oz);
 
         // 3D-жилы руд
         PlaceOreVeins(chunk, ox, oy, oz);
@@ -277,6 +283,11 @@ public sealed class WorldGenerator {
                 int wx = ox + lx, wz = oz + lz;
                 int surface = SurfaceHeight(wx, wz);
 
+                // Вертикальные разломы / Каньоны (Ravines)
+                float ravineAngle = wx * 0.018f + wz * 0.012f;
+                float ravineDist = MathF.Abs(MathF.Sin(ravineAngle) * 35f - (wz * 0.035f));
+                bool isRavine = ravineDist < 1.8f;
+
                 for (int ly = 0; ly < Chunk.SizeY; ly++) {
                     int wy = oy + ly;
                     if (wy <= 3) continue; // коренная порода
@@ -286,30 +297,37 @@ public sealed class WorldGenerator {
                     ushort cur = chunk.Get(idx).TypeId;
                     if (cur == 0 || cur == GameData.BBedrock.Id) continue;
 
-                    // 1. Cheese Caves (Умеренные объемные залы и гроты)
-                    float cheese = _caveCheese.Fractal(wx * 0.016f, wy * 0.022f + 100f, wz * 0.016f, 2, 0.5f);
-                    bool isCheese = cheese > 0.56f && wy < surface - 3;
+                    // 1. Cheese Caves (Массивные глубокие залы и гроты)
+                    float cheese = _caveCheese.Fractal(wx * 0.014f, wy * 0.020f + 100f, wz * 0.014f, 3, 0.5f);
+                    bool isCheese = (wy < 36 ? cheese > 0.48f : cheese > 0.56f) && wy < surface - 3;
 
-                    // 2. Spaghetti Caves (Атмосферные извилистые туннели)
+                    // 2. Spaghetti Caves (Извилистые разветвленные туннели)
                     float sp1 = _caveSpaghetti1.Get(wx * 0.024f + wy * 0.015f, wz * 0.024f);
                     float sp2 = _caveSpaghetti2.Get(wx * 0.024f, wz * 0.024f + wy * 0.015f + 500f);
-                    bool isSpaghetti = (sp1 * sp1 + sp2 * sp2) < 0.022f && wy < surface - 2;
+                    bool isSpaghetti = (sp1 * sp1 + sp2 * sp2) < 0.024f && wy < surface - 2;
 
-                    // 3. Noodle Caves (Узкие разломы и трещины в породе)
+                    // 3. Noodle Caves (Узкие лабиринты и трещины)
                     float noodle = _caveNoodle.Get(wx * 0.015f + 2000f, wz * 0.015f + wy * 0.030f);
-                    bool isNoodle = MathF.Abs(noodle) < 0.025f && wy > 6 && wy < surface - 2;
+                    bool isNoodle = MathF.Abs(noodle) < 0.028f && wy > 6 && wy < surface - 2;
 
-                    // Выходы пещер и разломов на поверхность (редкие)
-                    bool surfaceBreach = wy >= surface - 3 && (isSpaghetti || isNoodle) && cheese > 0.48f;
+                    // 4. Каньон / Разлом (глубокий вертикальный разрез)
+                    bool inRavine = isRavine && wy >= 11 && wy <= surface - 4;
 
-                    if (isCheese || isSpaghetti || isNoodle || surfaceBreach) {
+                    // Выходы пещер и разломов на поверхность
+                    bool surfaceBreach = wy >= surface - 3 && (isSpaghetti || isNoodle || inRavine) && cheese > 0.46f;
+
+                    if (isCheese || isSpaghetti || isNoodle || inRavine || surfaceBreach) {
                         ushort replaceWith;
                         if (wy <= 10) {
                             replaceWith = GameData.BLava.Id; // Подземные озера лавы
+                        } else if (wy == 11 && (wx + wz) % 3 == 0) {
+                            replaceWith = GameData.BObsidian.Id; // Обсидиановые берега у лавы
                         } else if (wy <= SeaLevel && cur == GameData.BWater.Id) {
                             replaceWith = GameData.BWater.Id;
                         } else if (wy < SeaLevel && wy > surface - 6 && surface <= SeaLevel) {
                             replaceWith = GameData.BWater.Id; // Водоносный пласт у побережья
+                        } else if (isCheese && wy >= 14 && wy <= 30 && ((wx * 11 + wz * 7 + wy * 3) % 19 == 0)) {
+                            replaceWith = GameData.BMossyCobblestone.Id; // Замшелые гроты
                         } else {
                             replaceWith = 0; // Воздух
                         }
@@ -648,6 +666,173 @@ public sealed class WorldGenerator {
         int idx = Chunk.Index(x, y, z);
         if (chunk.Get(idx).TypeId != 0) return;
         var vx2 = MakeVoxel(type); chunk.SetVoxel(idx, in vx2);
+    }
+
+    public void SetWorldBlock(Chunk chunk, int ox, int oy, int oz, int wx, int wy, int wz, ushort blockId) {
+        int lx = wx - ox, lz = wz - oz, ly = wy - oy;
+        if (lx < 0 || lx >= Chunk.SizeX || lz < 0 || lz >= Chunk.SizeZ || ly < 0 || ly >= Chunk.SizeY) return;
+        var v = MakeVoxel(blockId);
+        chunk.SetVoxel(Chunk.Index(lx, ly, lz), in v);
+    }
+
+    private void PlaceDungeons(Chunk chunk, int ox, int oy, int oz) {
+        if (oy > 38 || oy + Chunk.SizeY < 8) return;
+        int sectorX = (int)MathF.Floor(ox / 48f);
+        int sectorZ = (int)MathF.Floor(oz / 48f);
+        int cx = sectorX * 48 + 24;
+        int cz = sectorZ * 48 + 24;
+        int cy = 12 + Math.Abs((sectorX * 37 + sectorZ * 19) % 20);
+
+        if (Math.Abs(ox + Chunk.SizeX / 2 - cx) > 28 || Math.Abs(oz + Chunk.SizeZ / 2 - cz) > 28) return;
+
+        // Комната 7x7x5
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dz = -3; dz <= 3; dz++) {
+                for (int dy = 0; dy <= 4; dy++) {
+                    int wx = cx + dx, wy = cy + dy, wz = cz + dz;
+                    bool isWall = dx == -3 || dx == 3 || dz == -3 || dz == 3 || dy == 0 || dy == 4;
+                    if (isWall) {
+                        ushort wallBlock = ((wx * 7 + wz * 13 + wy * 3) % 3 == 0) ? GameData.BMossyCobblestone.Id : GameData.BCobblestone.Id;
+                        SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, wallBlock);
+                    } else {
+                        ushort inside = 0;
+                        if (dx == 0 && dz == 0 && dy == 1) {
+                            inside = GameData.BMobSpawner.Id;
+                        } else if ((dx == -2 && dz == 0 && dy == 1) || (dx == 2 && dz == 0 && dy == 1)) {
+                            inside = GameData.BChest.Id;
+                        }
+                        SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, inside);
+                    }
+                }
+            }
+        }
+    }
+
+    private void PlaceDesertPyramids(Chunk chunk, int ox, int oy, int oz) {
+        int sectorX = (int)MathF.Floor(ox / 96f);
+        int sectorZ = (int)MathF.Floor(oz / 96f);
+        int cx = sectorX * 96 + 48;
+        int cz = sectorZ * 96 + 48;
+
+        if (GetBiome(cx, 40, cz) != BiomeType.Desert) return;
+        int surface = SurfaceHeight(cx, cz);
+        if (surface <= SeaLevel + 2) return;
+
+        if (Math.Abs(ox + Chunk.SizeX / 2 - cx) > 30 || Math.Abs(oz + Chunk.SizeZ / 2 - cz) > 30) return;
+
+        // Ступенчатая пирамида (7 ярусов)
+        for (int tier = 0; tier < 7; tier++) {
+            int r = 8 - tier;
+            int wy = surface + tier;
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    int wx = cx + dx, wz = cz + dz;
+                    bool edge = Math.Abs(dx) == r || Math.Abs(dz) == r;
+                    ushort b = edge ? GameData.BChiseledSandstone.Id : GameData.BSand.Id;
+                    // Центральный проход
+                    if (tier > 0 && Math.Abs(dx) <= 1 && Math.Abs(dz) <= 1) b = 0;
+                    SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, b);
+                }
+            }
+        }
+
+        // Центральная вертикальная шахта вниз к секретной сокровищнице
+        int vaultY = surface - 10;
+        for (int y = surface; y >= vaultY; y--) {
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    SetWorldBlock(chunk, ox, oy, oz, cx + dx, y, cz + dz, 0);
+                }
+            }
+        }
+
+        // Сокровищница 7x7x4
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dz = -3; dz <= 3; dz++) {
+                for (int dy = 0; dy <= 4; dy++) {
+                    int wx = cx + dx, wy = vaultY + dy, wz = cz + dz;
+                    bool wall = dx == -3 || dx == 3 || dz == -3 || dz == 3 || dy == 0 || dy == 4;
+                    if (wall) {
+                        SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, GameData.BChiseledSandstone.Id);
+                    } else {
+                        SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, 0);
+                    }
+                }
+            }
+        }
+
+        // Подземная ловушка: 3x3 TNT под полом и нажимная плита в центре
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                SetWorldBlock(chunk, ox, oy, oz, cx + dx, vaultY - 1, cz + dz, GameData.BTNT.Id);
+            }
+        }
+        SetWorldBlock(chunk, ox, oy, oz, cx, vaultY, cz, GameData.BPressurePlate.Id);
+
+        // 4 сундука вокруг нажимной плиты
+        SetWorldBlock(chunk, ox, oy, oz, cx + 2, vaultY, cz, GameData.BChest.Id);
+        SetWorldBlock(chunk, ox, oy, oz, cx - 2, vaultY, cz, GameData.BChest.Id);
+        SetWorldBlock(chunk, ox, oy, oz, cx, vaultY, cz + 2, GameData.BChest.Id);
+        SetWorldBlock(chunk, ox, oy, oz, cx, vaultY, cz - 2, GameData.BChest.Id);
+    }
+
+    public void GenerateNetherChunk(Chunk chunk, int ox, int oy, int oz) {
+        var rng = new Random(Seed ^ (ox * 73856093 ^ oy * 19349663 ^ oz * 83492791));
+        for (int lx = 0; lx < Chunk.SizeX; lx++) {
+            for (int lz = 0; lz < Chunk.SizeZ; lz++) {
+                int wx = ox + lx, wz = oz + lz;
+                for (int ly = 0; ly < Chunk.SizeY; ly++) {
+                    int wy = oy + ly;
+                    int idx = Chunk.Index(lx, ly, lz);
+
+                    if (wy <= 2 || wy >= 124) {
+                        chunk.SetVoxel(idx, MakeVoxel(GameData.BBedrock.Id));
+                        continue;
+                    }
+
+                    // 3D пещеры Нижнего мира
+                    float caveNoise = _caveCheese.Fractal(wx * 0.035f, wy * 0.035f, wz * 0.035f, 3, 0.5f);
+                    bool isSolid = caveNoise > 0.45f;
+
+                    ushort blockId = 0;
+                    if (isSolid) {
+                        blockId = GameData.BNetherrack.Id;
+                        // Кварцевые жилы
+                        if (rng.NextDouble() < 0.025) blockId = GameData.BNetherQuartzOre.Id;
+                    } else {
+                        // Лавовый океан на дне Ада (Y <= 31)
+                        if (wy <= 31) {
+                            blockId = GameData.BLava.Id;
+                        }
+                    }
+
+                    if (blockId == GameData.BNetherrack.Id && wy <= 33) {
+                        if (rng.NextDouble() < 0.35) blockId = GameData.BSoulSand.Id;
+                        else if (rng.NextDouble() < 0.20) blockId = GameData.BGravel.Id;
+                    }
+
+                    // Светокамень (Glowstone) сталактиты на потолках
+                    if (blockId == 0 && wy >= 50 && wy <= 110) {
+                        float glowNoise = _oreNoise.Fractal(wx * 0.08f, wy * 0.08f, wz * 0.08f, 2, 0.5f);
+                        if (glowNoise > 0.72f) blockId = GameData.BGlowstone.Id;
+                    }
+
+                    // Руины адских крепостей (Nether Fortress)
+                    int fortSectorX = (int)MathF.Floor(wx / 64f);
+                    int fortSectorZ = (int)MathF.Floor(wz / 64f);
+                    int fortX = fortSectorX * 64 + 32;
+                    int fortZ = fortSectorZ * 64 + 32;
+                    if (Math.Abs(wx - fortX) <= 2 && wy >= 45 && wy <= 50) {
+                        bool bridge = (Math.Abs(wx - fortX) == 2 && wy == 48) || wy == 45;
+                        if (bridge) blockId = GameData.BNetherBrick.Id;
+                        else if (wy == 46 && (wz % 16 == 0)) blockId = GameData.BMobSpawner.Id;
+                        else blockId = 0;
+                    }
+
+                    chunk.SetVoxel(idx, MakeVoxel(blockId));
+                }
+            }
+        }
     }
 
     public static VoxelData MakeVoxel(ushort blockId) {

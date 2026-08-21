@@ -210,6 +210,10 @@ internal static class Program {
                 continue;
             }
 
+            if (Raylib.IsKeyPressed(KeyBinds.ToggleDebug)) {
+                Hud.ShowDebugInfo = !Hud.ShowDebugInfo;
+            }
+
             var input = ReadInput(session.Ui == UiState.Playing, pauseDebounce);
             if (input.Pause) pauseDebounce = 0.25f;
             session.Tick(dt, input);
@@ -223,6 +227,7 @@ internal static class Program {
             renderer.Draw3DSky(session.Camera);
             renderer.DrawWorld();
             renderer.DrawClouds(session.Camera);
+            renderer.DrawWeather(session.Camera);
             renderer.DrawDecorations(dt);
             renderer.DrawEntities(session.Camera);
             Raylib.EndMode3D();
@@ -449,7 +454,43 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.SawdustItem.Id, TextureAtlas.TSawdust);
         TextureAtlas.SetItemTile(GameData.SawdustPorridgeItem.Id, TextureAtlas.TSawdustPorridge);
         TextureAtlas.SetItemTile(GameData.TotemItem.Id, TextureAtlas.TTotem);
+        TextureAtlas.SetItemTile(GameData.RawMuttonItem.Id, TextureAtlas.TRawMutton);
+        TextureAtlas.SetItemTile(GameData.CookedMuttonItem.Id, TextureAtlas.TCookedMutton);
+        TextureAtlas.SetItemTile(GameData.BowItem.Id, TextureAtlas.TBow);
+        TextureAtlas.SetItemTile(GameData.ShieldItem.Id, TextureAtlas.TShield);
+        TextureAtlas.SetItemTile(GameData.FlintItem.Id, TextureAtlas.TFlint);
+        TextureAtlas.SetItemTile(GameData.FlintAndSteelItem.Id, TextureAtlas.TFlintAndSteel);
+        TextureAtlas.SetItemTile(GameData.GoldenAppleItem.Id, TextureAtlas.TGoldenApple);
+        TextureAtlas.SetItemTile(GameData.SaddleItem.Id, TextureAtlas.TSaddle);
+        TextureAtlas.SetItemTile(GameData.EnchantedBookItem.Id, TextureAtlas.TEnchantedBook);
+        TextureAtlas.SetItemTile(GameData.MusicDiscItem.Id, TextureAtlas.TMusicDisc);
+        TextureAtlas.SetItemTile(GameData.NetherQuartzItem.Id, TextureAtlas.TNetherQuartz);
+        TextureAtlas.SetItemTile(GameData.BlazeRodItem.Id, TextureAtlas.TBlazeRod);
+        TextureAtlas.SetItemTile(GameData.GlowstoneDustItem.Id, TextureAtlas.TGlowstoneDust);
+        TextureAtlas.SetItemTile(GameData.TNTItem.Id, TextureAtlas.TTNTSide);
+        TextureAtlas.SetItemTile(GameData.NetherrackItem.Id, TextureAtlas.TNetherrack);
+        TextureAtlas.SetItemTile(GameData.SoulSandItem.Id, TextureAtlas.TSoulSand);
+        TextureAtlas.SetItemTile(GameData.GlowstoneItem.Id, TextureAtlas.TGlowstone);
+        TextureAtlas.SetItemTile(GameData.NetherQuartzOreItem.Id, TextureAtlas.TNetherQuartzOre);
+        TextureAtlas.SetItemTile(GameData.NetherBrickItem.Id, TextureAtlas.TNetherBrick);
+        TextureAtlas.SetItemTile(GameData.MossyCobblestoneItem.Id, TextureAtlas.TMossyCobble);
+        TextureAtlas.SetItemTile(GameData.ChiseledSandstoneItem.Id, TextureAtlas.TChiseledSandstone);
+        TextureAtlas.SetItemTile(GameData.RailItem.Id, TextureAtlas.TRail);
+
         TextureAtlas.SetBlockTiles(GameData.BFarmland.Id, TextureAtlas.TFarmland, TextureAtlas.TDirt, TextureAtlas.TDirt);
         TextureAtlas.SetBlockTiles(GameData.BTallGrass.Id, TextureAtlas.TTallGrass, TextureAtlas.TTallGrass, TextureAtlas.TTallGrass);
+        TextureAtlas.SetBlockTiles(GameData.BMossyCobblestone.Id, TextureAtlas.TMossyCobble, TextureAtlas.TMossyCobble, TextureAtlas.TMossyCobble);
+        TextureAtlas.SetBlockTiles(GameData.BMobSpawner.Id, TextureAtlas.TMobSpawner, TextureAtlas.TMobSpawner, TextureAtlas.TMobSpawner);
+        TextureAtlas.SetBlockTiles(GameData.BWeb.Id, TextureAtlas.TWeb, TextureAtlas.TWeb, TextureAtlas.TWeb);
+        TextureAtlas.SetBlockTiles(GameData.BRail.Id, TextureAtlas.TRail, TextureAtlas.TRail, TextureAtlas.TRail);
+        TextureAtlas.SetBlockTiles(GameData.BPressurePlate.Id, TextureAtlas.TPressurePlate, TextureAtlas.TPressurePlate, TextureAtlas.TPressurePlate);
+        TextureAtlas.SetBlockFaces(GameData.BTNT.Id, TextureAtlas.TTNTSide, TextureAtlas.TTNTSide, TextureAtlas.TTNTTop, TextureAtlas.TTNTBottom, TextureAtlas.TTNTSide, TextureAtlas.TTNTSide);
+        TextureAtlas.SetBlockTiles(GameData.BChiseledSandstone.Id, TextureAtlas.TChiseledSandstone, TextureAtlas.TChiseledSandstone, TextureAtlas.TChiseledSandstone);
+        TextureAtlas.SetBlockTiles(GameData.BNetherrack.Id, TextureAtlas.TNetherrack, TextureAtlas.TNetherrack, TextureAtlas.TNetherrack);
+        TextureAtlas.SetBlockTiles(GameData.BSoulSand.Id, TextureAtlas.TSoulSand, TextureAtlas.TSoulSand, TextureAtlas.TSoulSand);
+        TextureAtlas.SetBlockTiles(GameData.BGlowstone.Id, TextureAtlas.TGlowstone, TextureAtlas.TGlowstone, TextureAtlas.TGlowstone);
+        TextureAtlas.SetBlockTiles(GameData.BNetherQuartzOre.Id, TextureAtlas.TNetherQuartzOre, TextureAtlas.TNetherQuartzOre, TextureAtlas.TNetherQuartzOre);
+        TextureAtlas.SetBlockTiles(GameData.BNetherBrick.Id, TextureAtlas.TNetherBrick, TextureAtlas.TNetherBrick, TextureAtlas.TNetherBrick);
+        TextureAtlas.SetBlockTiles(GameData.BNetherPortal.Id, TextureAtlas.TNetherPortal, TextureAtlas.TNetherPortal, TextureAtlas.TNetherPortal);
     }
 }

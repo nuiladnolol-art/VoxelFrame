@@ -16,6 +16,7 @@ public static class SoundSystem {
     private static Sound _stepStone;
     private static Sound _stepWood;
     private static Sound _stepSand;
+    private static Sound _stepGravel;
     private static Sound _stepWater;
 
     // Ломание и установка
@@ -32,14 +33,18 @@ public static class SoundSystem {
     private static Sound _bowShootSound;
     private static Sound _arrowHitSound;
     private static Sound _explosionSound;
+    private static Sound _shieldBlockSound;
 
-    // Интерактив и визуал
+    // Интерактив, визуал и атмосфера
     private static Sound _eatSound;
     private static Sound _splashSound;
     private static Sound _popSound;
     private static Sound _chestSound;
     private static Sound _totemSound;
     private static Sound _fertilizeSound;
+    private static Sound _caveAmbianceSound;
+    private static Sound _thunderSound;
+    private static Sound _bgmMusic;
 
     public static void Initialize() {
         if (_audioReady) return;
@@ -51,6 +56,7 @@ public static class SoundSystem {
                 _stepStone = LoadProceduralSound(CreateToneWav(44100 / 18, 520f, 180f, 0.28f));
                 _stepWood = LoadProceduralSound(CreateToneWav(44100 / 12, 240f, 120f, 0.32f));
                 _stepSand = LoadProceduralSound(CreateNoiseWav(44100 / 10, 0.25f, highPass: false));
+                _stepGravel = LoadProceduralSound(CreateCrunchWav(44100 / 12, 0.35f));
                 _stepWater = LoadProceduralSound(CreateSplashWav(44100 / 10, 0.30f));
 
                 // Ломание
@@ -67,13 +73,17 @@ public static class SoundSystem {
                 _bowShootSound = LoadProceduralSound(CreateToneWav(44100 / 7, 260f, 680f, 0.45f));
                 _arrowHitSound = LoadProceduralSound(CreateToneWav(44100 / 16, 650f, 320f, 0.40f));
                 _explosionSound = LoadProceduralSound(CreateNoiseWav(44100 / 2, 0.85f, highPass: false));
+                _shieldBlockSound = LoadProceduralSound(CreateToneWav(44100 / 10, 850f, 320f, 0.65f));
 
-                // Интерактив
+                // Интерактив и атмосфера
                 _eatSound = LoadProceduralSound(CreateToneWav(44100 / 8, 280f, 420f, 0.45f));
                 _splashSound = LoadProceduralSound(CreateSplashWav(44100 / 4, 0.50f));
                 _popSound = LoadProceduralSound(CreateToneWav(44100 / 16, 550f, 850f, 0.30f));
                 _chestSound = LoadProceduralSound(CreateToneWav(44100 / 7, 360f, 480f, 0.35f));
                 _fertilizeSound = LoadProceduralSound(CreateToneWav(44100 / 6, 600f, 1200f, 0.40f));
+                _caveAmbianceSound = LoadProceduralSound(CreateToneWav(44100 * 3, 110f, 75f, 0.40f));
+                _thunderSound = LoadProceduralSound(CreateNoiseWav(44100 * 2, 0.90f, highPass: false));
+                _bgmMusic = LoadProceduralSound(CreateToneWav(44100 * 6, 261.6f, 329.6f, 0.25f));
 
                 // Звук тотема (MP3 / WAV файл, обрезанный ровно до 12.0 секунд)
                 string? totemPath = FindSoundFile("totem.mp3") 
@@ -128,13 +138,17 @@ public static class SoundSystem {
         float p = 0.9f + (float)Random.Shared.NextDouble() * 0.2f;
         if (blockId == GameData.BStone.Id || blockId == GameData.BCobblestone.Id || blockId == GameData.BObsidian.Id ||
             blockId == GameData.BCoalOre.Id || blockId == GameData.BIronOre.Id || blockId == GameData.BGoldOre.Id ||
-            blockId == GameData.BDiamondOre.Id || blockId == GameData.BRedstoneOre.Id) {
+            blockId == GameData.BDiamondOre.Id || blockId == GameData.BRedstoneOre.Id || blockId == GameData.BMossyCobblestone.Id ||
+            blockId == GameData.BNetherrack.Id || blockId == GameData.BNetherBrick.Id || blockId == GameData.BNetherQuartzOre.Id ||
+            blockId == GameData.BChiseledSandstone.Id || blockId == GameData.BFurnace.Id) {
             Play(_stepStone, p);
         } else if (blockId == GameData.BLog.Id || blockId == GameData.BPlanks.Id || blockId == GameData.BWorkbench.Id || blockId == GameData.BChest.Id) {
             Play(_stepWood, p);
-        } else if (blockId == GameData.BSand.Id || blockId == GameData.BGravel.Id) {
+        } else if (blockId == GameData.BGravel.Id) {
+            Play(_stepGravel, p);
+        } else if (blockId == GameData.BSand.Id || blockId == GameData.BSoulSand.Id) {
             Play(_stepSand, p);
-        } else if (blockId == GameData.BWater.Id) {
+        } else if (blockId == GameData.BWater.Id || blockId == GameData.BLava.Id) {
             Play(_stepWater, p);
         } else {
             Play(_stepGrass, p);
@@ -145,11 +159,12 @@ public static class SoundSystem {
         float p = 0.9f + (float)Random.Shared.NextDouble() * 0.2f;
         if (blockId == GameData.BStone.Id || blockId == GameData.BCobblestone.Id || blockId == GameData.BObsidian.Id ||
             blockId == GameData.BCoalOre.Id || blockId == GameData.BIronOre.Id || blockId == GameData.BGoldOre.Id ||
-            blockId == GameData.BDiamondOre.Id || blockId == GameData.BRedstoneOre.Id) {
+            blockId == GameData.BDiamondOre.Id || blockId == GameData.BRedstoneOre.Id || blockId == GameData.BMossyCobblestone.Id ||
+            blockId == GameData.BNetherrack.Id || blockId == GameData.BNetherBrick.Id || blockId == GameData.BNetherQuartzOre.Id) {
             Play(_digStone, p);
         } else if (blockId == GameData.BLog.Id || blockId == GameData.BPlanks.Id || blockId == GameData.BWorkbench.Id || blockId == GameData.BChest.Id) {
             Play(_digWood, p);
-        } else if (blockId == GameData.BSand.Id || blockId == GameData.BGravel.Id) {
+        } else if (blockId == GameData.BSand.Id || blockId == GameData.BGravel.Id || blockId == GameData.BSoulSand.Id) {
             Play(_digSand, p);
         } else {
             Play(_digGrass, p);
@@ -166,6 +181,10 @@ public static class SoundSystem {
     public static void PlayBowShoot() => Play(_bowShootSound);
     public static void PlayArrowHit() => Play(_arrowHitSound);
     public static void PlayExplosion() => Play(_explosionSound);
+    public static void PlayShieldBlock() => Play(_shieldBlockSound, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);
+    public static void PlayCaveAmbiance() => Play(_caveAmbianceSound, 0.85f + (float)Random.Shared.NextDouble() * 0.2f);
+    public static void PlayThunder() => Play(_thunderSound, 0.9f + (float)Random.Shared.NextDouble() * 0.2f);
+    public static void PlayBackgroundMusic() => Play(_bgmMusic, 1.0f);
     public static void PlayEat() => Play(_eatSound, 0.9f + (float)Random.Shared.NextDouble() * 0.2f);
     public static void PlaySplash() => Play(_splashSound);
     public static void PlayPop() => Play(_popSound, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);

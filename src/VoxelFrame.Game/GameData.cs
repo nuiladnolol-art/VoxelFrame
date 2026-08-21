@@ -165,6 +165,28 @@ public static class GameData {
     public static readonly ItemDefinition SawdustItem = Item(67, "Древесные опилки", Oak, 0.001);
     public static readonly ItemDefinition SawdustPorridgeItem = Item(68, "Каша из опилок", Oak, 0.05);
     public static readonly ItemDefinition TotemItem = Item(69, "Тотем бессмертия", GoldM, 0.02);
+    public static readonly ItemDefinition RawMuttonItem = Item(70, "Сырая баранина", BeefM, 0.02);
+    public static readonly ItemDefinition CookedMuttonItem = Item(71, "Жареная баранина", BeefM, 0.02);
+    public static readonly ItemDefinition BowItem = Item(72, "Лук", Oak, 0.05);
+    public static readonly ItemDefinition ShieldItem = Item(73, "Щит", Oak, 0.10);
+    public static readonly ItemDefinition FlintItem = Item(74, "Кремень", Stone, 0.001);
+    public static readonly ItemDefinition FlintAndSteelItem = Item(75, "Огниво", IronM, 0.005);
+    public static readonly ItemDefinition GoldenAppleItem = Item(76, "Золотое яблоко", GoldM, 0.01);
+    public static readonly ItemDefinition SaddleItem = Item(77, "Седло", LeatherM, 0.02);
+    public static readonly ItemDefinition EnchantedBookItem = Item(78, "Зачарованная книга", LeatherM, 0.01);
+    public static readonly ItemDefinition MusicDiscItem = Item(79, "Музыкальная пластинка", DiamondM, 0.01);
+    public static readonly ItemDefinition NetherQuartzItem = Item(80, "Кварц", DiamondM, 0.001);
+    public static readonly ItemDefinition BlazeRodItem = Item(81, "Стержень ифрита", GoldM, 0.01);
+    public static readonly ItemDefinition GlowstoneDustItem = Item(82, "Светопыль", RedstoneM, 0.001);
+    public static readonly ItemDefinition TNTItem = Item(83, "Динамит", SandM, 0.5);
+    public static readonly ItemDefinition NetherrackItem = Item(84, "Адский камень", Stone, 1.0);
+    public static readonly ItemDefinition SoulSandItem = Item(85, "Песок душ", SandM, 1.0);
+    public static readonly ItemDefinition GlowstoneItem = Item(86, "Светокамень", Stone, 1.0);
+    public static readonly ItemDefinition NetherQuartzOreItem = Item(87, "Кварцевая руда", Stone, 1.0);
+    public static readonly ItemDefinition NetherBrickItem = Item(88, "Адский кирпич", Stone, 1.0);
+    public static readonly ItemDefinition MossyCobblestoneItem = Item(89, "Замшелый булыжник", Stone, 1.0);
+    public static readonly ItemDefinition ChiseledSandstoneItem = Item(90, "Резной песчаник", SandM, 1.0);
+    public static readonly ItemDefinition RailItem = Item(91, "Рельсы", IronM, 0.02);
 
     // ── Блоки ─────────────────────────────────────────────────────────────────
     public static readonly BlockType BGrass = Block(1, "Трава", DirtM, drop: DirtItem);
@@ -188,7 +210,7 @@ public static class GameData {
     public static readonly BlockType BGravel = Block(17, "Гравий", Stone, drop: GravelItem);
     public static readonly BlockType BGlass = Block(18, "Стекло", Stone, drop: null).With(b => { b.IsOpaque = false; });
     public static readonly BlockType BWater = Block(19, "Вода", DirtM, drop: null).With(b => { b.IsSolid = false; b.IsOpaque = false; });
-    public static readonly BlockType BLava = Block(20, "Лава", Stone, drop: null, light: 15).With(b => { b.IsSolid = false; b.IsOpaque = false; });
+    public static readonly BlockType BLava = Block(20, "Лава", Stone, drop: null, light: 15).With(b => { b.IsSolid = false; b.IsOpaque = true; });
     public static readonly BlockType BGoldOre = Block(21, "Золотая руда", Stone, drop: GoldOreItem);
     public static readonly BlockType BDiamondOre = Block(22, "Алмазная руда", Stone, drop: DiamondItem);
     public static readonly BlockType BRedstoneOre = Block(23, "Редстоун руда", Stone, drop: RedstoneItem);
@@ -201,11 +223,31 @@ public static class GameData {
         .With(b => { b.IsSolid = false; b.IsOpaque = false; });
     public static readonly BlockType BTallGrass = Block(30, "Трава", LeavesM, drop: WheatSeedsItem)
         .With(b => { b.IsSolid = false; b.IsOpaque = false; });
+    public static readonly BlockType BMossyCobblestone = Block(31, "Замшелый булыжник", Stone, drop: MossyCobblestoneItem);
+    public static readonly BlockType BMobSpawner = Block(32, "Спавнер монстров", Stone, drop: null)
+        .With(b => { b.IsOpaque = false; });
+    public static readonly BlockType BWeb = Block(33, "Паутина", StringM, drop: StringItem)
+        .With(b => { b.IsSolid = false; b.IsOpaque = false; });
+    public static readonly BlockType BRail = Block(34, "Рельсы", IronM, drop: RailItem)
+        .With(b => { b.IsSolid = false; b.IsOpaque = false; });
+    public static readonly BlockType BPressurePlate = Block(35, "Нажимная плита", Stone, drop: StoneItem)
+        .With(b => { b.IsSolid = false; b.IsOpaque = false; });
+    public static readonly BlockType BTNT = Block(36, "Динамит", SandM, drop: TNTItem, flammable: true, burnTime: 0.1f);
+    public static readonly BlockType BChiseledSandstone = Block(37, "Резной песчаник", SandM, drop: ChiseledSandstoneItem);
+    public static readonly BlockType BNetherrack = Block(38, "Адский камень", Stone, drop: NetherrackItem, flammable: true, burnTime: 99999f);
+    public static readonly BlockType BSoulSand = Block(39, "Песок душ", SandM, drop: SoulSandItem);
+    public static readonly BlockType BGlowstone = Block(40, "Светокамень", Stone, drop: GlowstoneDustItem, light: 15)
+        .With(b => { b.DropItemCount = 3; });
+    public static readonly BlockType BNetherQuartzOre = Block(41, "Кварцевая руда", Stone, drop: NetherQuartzItem);
+    public static readonly BlockType BNetherBrick = Block(42, "Адский кирпич", Stone, drop: NetherBrickItem);
+    public static readonly BlockType BNetherPortal = Block(43, "Портал в Нижний мир", DiamondM, drop: null, light: 11)
+        .With(b => { b.IsSolid = false; b.IsOpaque = false; b.IsUnbreakable = true; });
 
     public static readonly BlockType[] Blocks =
         { BGrass, BDirt, BStone, BLog, BLeaves, BPlanks, BCoalOre, BTorch, BBedrock, BIronOre, BWorkbench, BFurnace,
           BCobblestone, BSand, BGravel, BGlass, BWater, BLava, BGoldOre, BDiamondOre, BRedstoneOre, BObsidian, BChest, BBed, BBedHead,
-          BFarmland, BWheatCrop, BTallGrass };
+          BFarmland, BWheatCrop, BTallGrass, BMossyCobblestone, BMobSpawner, BWeb, BRail, BPressurePlate, BTNT, BChiseledSandstone,
+          BNetherrack, BSoulSand, BGlowstone, BNetherQuartzOre, BNetherBrick, BNetherPortal };
 
 
     private static readonly Dictionary<ushort, BlockType> _byId = Blocks.ToDictionary(b => b.Id);
@@ -236,6 +278,9 @@ public static class GameData {
         { CookedBeefItem.Id, 8f },   // Жареный стейк: +8 HP
         { RottenFleshItem.Id, 2f },  // Гнилая плоть: +2 HP
         { SawdustPorridgeItem.Id, 4f }, // Каша из опилок: +4 HP
+        { RawMuttonItem.Id, 2f },    // Сырая баранина: +2 HP
+        { CookedMuttonItem.Id, 6f }, // Жареная баранина: +6 HP
+        { GoldenAppleItem.Id, 10f }, // Золотое яблоко: +10 HP
     };
 
     // ── Реестр предметов + менеджер материи (консервация) ────────────────────
@@ -473,6 +518,8 @@ public static class GameData {
             ChestItem, BedItem, RottenFleshItem,
             WoodHoeItem, StoneHoeItem, IronHoeItem, DiamondHoeItem,
             WheatItem, WheatSeedsItem,
+            BoneMealItem, SawdustItem, SawdustPorridgeItem, TotemItem,
+            RawMuttonItem, CookedMuttonItem
         }) {
             Items.Add(item.Id, item);
         }
@@ -661,6 +708,65 @@ public static class GameData {
             BoneItem, BoneItem,      BoneItem,
             null,     BoneItem,      null
         }, TotemItem, 1);
+
+        // Лук (Bow): 3 палки + 3 нити
+        AddShapeRecipe(new ItemDefinition?[] {
+            null,      StickItem, StringItem,
+            StickItem, null,      StringItem,
+            null,      StickItem, StringItem
+        }, BowItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] {
+            StringItem, StickItem, null,
+            StringItem, null,      StickItem,
+            StringItem, StickItem, null
+        }, BowItem, 1);
+
+        // Щит (Shield): 6 досок + 1 слиток железа
+        AddShapeRecipe(new ItemDefinition?[] {
+            PlankItem, IronIngotItem, PlankItem,
+            PlankItem, PlankItem,     PlankItem,
+            null,      PlankItem,     null
+        }, ShieldItem, 1);
+
+        // Огниво (Flint and Steel): 1 железо + 1 кремень
+        AddShapeRecipe(new ItemDefinition?[] {
+            IronIngotItem, null, null,
+            null, FlintItem, null,
+            null, null, null
+        }, FlintAndSteelItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] {
+            null, IronIngotItem, null,
+            null, FlintItem, null,
+            null, null, null
+        }, FlintAndSteelItem, 1);
+
+        // Динамит (TNT): 5 пороха + 4 песка (крест-накрест)
+        AddShapeRecipe(new ItemDefinition?[] {
+            GunpowderItem, SandItem,      GunpowderItem,
+            SandItem,      GunpowderItem, SandItem,
+            GunpowderItem, SandItem,      GunpowderItem
+        }, TNTItem, 1);
+
+        // Золотое яблоко: яблоко + 8 золотых слитков
+        AddShapeRecipe(new ItemDefinition?[] {
+            GoldIngotItem, GoldIngotItem, GoldIngotItem,
+            GoldIngotItem, AppleItem,     GoldIngotItem,
+            GoldIngotItem, GoldIngotItem, GoldIngotItem
+        }, GoldenAppleItem, 1);
+
+        // Блок светокамня: 4 светопыли 2×2
+        AddShapeRecipe(new ItemDefinition?[] {
+            GlowstoneDustItem, GlowstoneDustItem, null,
+            GlowstoneDustItem, GlowstoneDustItem, null,
+            null,              null,              null
+        }, GlowstoneItem, 1);
+
+        // Рельсы: 6 железа + 1 палка
+        AddShapeRecipe(new ItemDefinition?[] {
+            IronIngotItem, null,      IronIngotItem,
+            IronIngotItem, StickItem, IronIngotItem,
+            IronIngotItem, null,      IronIngotItem
+        }, RailItem, 16);
     }
 
     private static void InitSmeltingRecipes() {
@@ -672,6 +778,7 @@ public static class GameData {
         SmeltingRecipes[CobblestoneItem.Id] = (StoneItem, 1);
         SmeltingRecipes[LogItem.Id] = (CharcoalItem, 1);
         SmeltingRecipes[RawBeefItem.Id] = (CookedBeefItem, 1);
+        SmeltingRecipes[RawMuttonItem.Id] = (CookedMuttonItem, 1);
     }
 
     // ── Старый список рецептов (для DrawCraftPanel legacy) ───────────────────
