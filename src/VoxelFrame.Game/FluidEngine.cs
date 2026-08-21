@@ -29,6 +29,8 @@ public sealed class FluidEngine {
     private readonly HashSet<Vec3i> _activeLava = new();
     private readonly HashSet<Vec3i> _pendingUpdates = new();
 
+    public IReadOnlyCollection<Vec3i> ActiveLava => _activeLava;
+
     public FluidEngine(GameWorld world) {
         _world = world;
     }
@@ -128,6 +130,18 @@ public sealed class FluidEngine {
                 SoundSystem.PlaySplash();
                 NotifyNeighbors(pos);
                 return;
+            }
+
+            // Лава поджигает соседние деревянные / горючие блоки
+            var lavaDirs = new Vec3i[] {
+                new(1, 0, 0), new(-1, 0, 0), new(0, 1, 0), new(0, -1, 0), new(0, 0, 1), new(0, 0, -1)
+            };
+            foreach (var d in lavaDirs) {
+                var np = pos + d;
+                var nb = _world.GetBlockType(np);
+                if (nb != null && nb.IsFlammable) {
+                    _world.Fire.Ignite(np);
+                }
             }
         } else if (fluidId == GameData.BWater.Id) {
             // Если сверху на воду течет лава

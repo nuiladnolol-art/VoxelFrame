@@ -66,13 +66,23 @@ public sealed class FireSystem {
         // Распространение от горящих блоков (6 соседей).
         foreach (var pos in Burning.Keys.ToList()) {
             foreach (var d in WorldGridDirs) {
-                if (_random.NextDouble() < 0.18) TryIgnite(pos + d);
+                if (_random.NextDouble() < 0.25) TryIgnite(pos + d);
+            }
+        }
+        // Поджигание от лавы (соседние горючие блоки)
+        foreach (var lavaPos in _world.Fluids.ActiveLava.ToList()) {
+            foreach (var d in WorldGridDirs) {
+                var np = lavaPos + d;
+                var block = _world.GetBlockType(np);
+                if (block != null && block.IsFlammable) {
+                    if (_random.NextDouble() < 0.35) Ignite(np);
+                }
             }
         }
     }
 
     private void TryIgnite(Vec3i pos) {
-        if (_random.NextDouble() < 0.25) Ignite(pos);
+        if (_random.NextDouble() < 0.35) Ignite(pos);
     }
 
     private static readonly Vec3i[] WorldGridDirs = {

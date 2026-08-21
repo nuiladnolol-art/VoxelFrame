@@ -618,15 +618,28 @@ public sealed class Player {
                     wantUse = false;
                 } else if (item.Id == GameData.FlintAndSteelItem.Id) {
                     wantUse = false;
-                    if (session.HasTarget) {
+                    if (session.HasTarget && input.UsePressed) {
                         var targetVox = world.GetVoxel(session.TargetBlock);
                         if (targetVox.TypeId == GameData.BTNT.Id) {
                             world.RemoveBlock(session.TargetBlock);
                             GameWorld.CreateExplosion(new Vector3(session.TargetBlock.X + 0.5f, session.TargetBlock.Y + 0.5f, session.TargetBlock.Z + 0.5f), 4.2f, 26f, session);
+                            SoundSystem.PlayPlace();
+                        } else if (TryIgniteNetherPortal(world, session.TargetBlock, placeCell)) {
+                            SoundSystem.PlayPlace();
+                            session.AddMessage("Портал в Нижний мир активирован!");
                         } else {
-                            if (TryIgniteNetherPortal(world, session.TargetBlock, placeCell)) {
+                            var blk = world.GetBlockType(session.TargetBlock);
+                            if (blk != null && blk.IsFlammable) {
+                                world.Fire.Ignite(session.TargetBlock);
                                 SoundSystem.PlayPlace();
-                                session.AddMessage("Портал в Нижний мир активирован!");
+                            } else {
+                                var placeVox = world.GetVoxel(placeCell);
+                                if (placeVox.TypeId == 0) {
+                                    float dur = targetVox.TypeId == GameData.BNetherrack.Id ? 99999f : 14f;
+                                    world.Fire.Burning[placeCell] = dur;
+                                    world.MarkLightDirty(placeCell);
+                                    SoundSystem.PlayPlace();
+                                }
                             }
                         }
                     }

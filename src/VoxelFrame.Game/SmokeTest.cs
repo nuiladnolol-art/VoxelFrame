@@ -328,6 +328,13 @@ internal static class SmokeTest {
         s.Player.Inventory.TryInsert(GameData.NewItem(GameData.LogItem), 1);
         s.Player.Inventory.TryInsert(GameData.NewItem(GameData.CookedPorkItem), 2);
         s.World.PlacePlacedBlock(new Vec3i(3, s.World.SpawnBlock.Y + 1, 0), GameData.BPlanks, 1.0f);
+        var fPos = new Vec3i(4, s.World.SpawnBlock.Y + 1, 0);
+        var fn = s.World.GetOrCreateFurnace(fPos);
+        fn.Input = new ItemEntry(GameData.NewItem(GameData.IronOreItem), 5);
+        fn.Fuel = new ItemEntry(GameData.NewItem(GameData.CoalItem), 2);
+        fn.Output = new ItemEntry(GameData.NewItem(GameData.IronIngotItem), 1);
+        fn.FuelTimer = 35f;
+
         s.World.SpawnPickup(GameData.AppleItem.Id, 1, new Vec3i(1, s.World.SpawnBlock.Y + 2, 1));
         var pig = new Animal { Position = s.Player.Position + new Vector3(0f, 0f, 3f) };
         s.World.Animals.Add(pig);
@@ -352,6 +359,12 @@ internal static class SmokeTest {
         Check(loaded.World.Animals.Count == animalsBefore, "животные сохранены");
         var planksLoaded = loaded.World.GetBlockType(new Vec3i(3, s.World.SpawnBlock.Y + 1, 0));
         Check(planksLoaded?.Id == GameData.BPlanks.Id, "установленный блок на месте");
+
+        Check(loaded.World.Furnaces.TryGetValue(fPos, out var fnLoaded) &&
+              fnLoaded.Input?.Item.Definition.Id == GameData.IronOreItem.Id && fnLoaded.Input?.Quantity == 5 &&
+              fnLoaded.Fuel?.Item.Definition.Id == GameData.CoalItem.Id && fnLoaded.Fuel?.Quantity == 2 &&
+              fnLoaded.Output?.Item.Definition.Id == GameData.IronIngotItem.Id && fnLoaded.Output?.Quantity == 1 &&
+              fnLoaded.FuelTimer > 0f, "ресурсы и состояние печки сохранены и загружены");
 
         // Мир после загрузки продолжает работать.
         Tick(loaded, 2f);

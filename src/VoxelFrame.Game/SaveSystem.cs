@@ -13,7 +13,7 @@ namespace VoxelFrame.Game;
 /// </summary>
 public static class SaveSystem {
     public const uint Magic = 0x56465331;   // "VFS1"
-    public const int Version = 7;
+    public const int Version = 8;
 
     public static string CurrentWorldPath = "";
     public static int SelectedWorldSlot = 1;
@@ -186,6 +186,39 @@ public static class SaveSystem {
                     bw.Write((float)e.Value.Item.Condition);
                 }
             }
+
+            // Печи мира
+            bw.Write(session.World.Furnaces.Count);
+            foreach (var (fpos, f) in session.World.Furnaces) {
+                bw.Write(fpos.X); bw.Write(fpos.Y); bw.Write(fpos.Z);
+                bw.Write(f.FuelTimer);
+                bw.Write(f.MaxFuelTimer);
+                bw.Write(f.SmeltTimer);
+
+                // Input
+                bw.Write(f.Input.HasValue);
+                if (f.Input.HasValue) {
+                    bw.Write(f.Input.Value.Item.Definition.Id);
+                    bw.Write(f.Input.Value.Quantity);
+                    bw.Write((float)f.Input.Value.Item.Condition);
+                }
+
+                // Fuel
+                bw.Write(f.Fuel.HasValue);
+                if (f.Fuel.HasValue) {
+                    bw.Write(f.Fuel.Value.Item.Definition.Id);
+                    bw.Write(f.Fuel.Value.Quantity);
+                    bw.Write((float)f.Fuel.Value.Item.Condition);
+                }
+
+                // Output
+                bw.Write(f.Output.HasValue);
+                if (f.Output.HasValue) {
+                    bw.Write(f.Output.Value.Item.Definition.Id);
+                    bw.Write(f.Output.Value.Quantity);
+                    bw.Write((float)f.Output.Value.Item.Condition);
+                }
+            }
         }
         File.Move(tmp, path, overwrite: true);
     }
@@ -316,6 +349,50 @@ public static class SaveSystem {
                         cinv.InsertAt(cidx, new ItemEntry(cItem, cQty));
                     }
                 }
+            }
+        }
+
+        if (version >= 8) {
+            int furnaceCount = br.ReadInt32();
+            for (int fn = 0; fn < furnaceCount; fn++) {
+                var fpos = new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32());
+                var f = session.World.GetOrCreateFurnace(fpos);
+                f.FuelTimer = br.ReadSingle();
+                f.MaxFuelTimer = br.ReadSingle();
+                f.SmeltTimer = br.ReadSingle();
+
+                if (br.ReadBoolean()) {
+                    ushort defId = br.ReadUInt16();
+                    int qty = br.ReadInt32();
+                    float cond = br.ReadSingle();
+                    if (GameData.Items.TryGetValue(defId, out var def)) {
+                        var itm = GameData.NewItem(def);
+                        itm.Condition = Math.Clamp(cond, 0.0, 1.0);
+                        f.Input = new ItemEntry(itm, qty);
+                    }
+                } else f.Input = null;
+
+                if (br.ReadBoolean()) {
+                    ushort defId = br.ReadUInt16();
+                    int qty = br.ReadInt32();
+                    float cond = br.ReadSingle();
+                    if (GameData.Items.TryGetValue(defId, out var def)) {
+                        var itm = GameData.NewItem(def);
+                        itm.Condition = Math.Clamp(cond, 0.0, 1.0);
+                        f.Fuel = new ItemEntry(itm, qty);
+                    }
+                } else f.Fuel = null;
+
+                if (br.ReadBoolean()) {
+                    ushort defId = br.ReadUInt16();
+                    int qty = br.ReadInt32();
+                    float cond = br.ReadSingle();
+                    if (GameData.Items.TryGetValue(defId, out var def)) {
+                        var itm = GameData.NewItem(def);
+                        itm.Condition = Math.Clamp(cond, 0.0, 1.0);
+                        f.Output = new ItemEntry(itm, qty);
+                    }
+                } else f.Output = null;
             }
         }
 

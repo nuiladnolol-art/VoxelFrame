@@ -83,6 +83,7 @@ public sealed class ItemPickup {
     public float BobPhase;
     public Vector3 Velocity;
     public float PickupDelay = 0.3f;
+    public float Age = 0f;
 
     public ItemPickup(ItemDefinition definition, int quantity, Vector3 position) {
         Definition = definition;
@@ -97,12 +98,22 @@ public sealed class ItemPickup {
         Velocity = new Vector3(vx, vy, vz);
     }
 
-    /// <summary>Притяжение к игроку и сбор в инвентарь (с задержкой подбора).</summary>
+    /// <summary>Притяжение к игроку и сбор в инвентарь (с задержкой подбора и деспавном через 5 мин).</summary>
     public void Tick(float dt, GameWorld world, Player player) {
+        Age += dt;
+        if (Age >= 300f) {
+            Quantity = 0; // Испарение / деспавн предметов, пролежавших на земле > 5 минут
+            return;
+        }
+
         var cell = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z));
+        var belowCell = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y - 0.25f), (int)MathF.Floor(Position.Z));
         var vox = world.GetVoxel(cell);
-        if (vox.TypeId == GameData.BLava.Id || world.Fire.Burning.ContainsKey(cell)) {
+        var belowVox = world.GetVoxel(belowCell);
+        if (vox.TypeId == GameData.BLava.Id || belowVox.TypeId == GameData.BLava.Id ||
+            world.Fire.Burning.ContainsKey(cell) || world.Fire.Burning.ContainsKey(belowCell)) {
             Quantity = 0; // Предмет сгорает в лаве или огне!
+            SoundSystem.PlaySplash();
             return;
         }
 
