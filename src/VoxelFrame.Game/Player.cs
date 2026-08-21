@@ -44,6 +44,9 @@ public sealed class Player {
     public float HighestYInAir;
     public float AirSupply = 10f;
     public float FireTicks;
+    public float LavaBurnTimer;
+    public float FireBurnTimer;
+    public float DrownDamageTimer;
     /// <summary>Урон от застревания в блоках.</summary>
     public float StuckTimer;
     public const float MaxHunger = 20f;
@@ -263,23 +266,32 @@ public sealed class Player {
             }
             Velocity.X *= MathF.Exp(-2.5f * dt);
             Velocity.Z *= MathF.Exp(-2.5f * dt);
-            HighestYInAir = Position.Y; // вода гасит урон от падения
+            HighestYInAir = Position.Y; // вода полностью гасит урон от падения
             OnGround = Collision.Move(world, ref Position, HalfExtents, ref Velocity, dt, false);
         } else if (inLava) {
-            FireTicks = MathF.Max(FireTicks, 8.0f); // Поджигает на 8 секунд
-            ApplyDamage(dt * 8.0f, session);
-            speed *= 0.35f;
+            FireTicks = MathF.Max(FireTicks, 15.0f); // Лава поджигает на 15 секунд
+            LavaBurnTimer -= dt;
+            if (LavaBurnTimer <= 0f) {
+                LavaBurnTimer = 0.5f; // Урон лавы каждые 0.5с
+                InvulnerabilityTimer = 0f;
+                ApplyDamage(4.0f, session); // 4 HP (2 целых сердца) за тик лавы!
+            }
+
+            speed *= 0.55f;
             Velocity.X = wish.X * speed;
             Velocity.Z = wish.Z * speed;
-            Velocity.Y -= 4f * dt;
+            Velocity.Y -= 5f * dt;
             if (inJump) {
-                Velocity.Y = 3.2f;
+                bool nearSurface = eyeVoxel.TypeId != GameData.BLava.Id;
+                // Мощный импульс выпрыгивания из лавы на берег (1.25x JumpSpeed)
+                Velocity.Y = nearSurface ? JumpSpeed * 1.25f : 4.8f;
             }
-            Velocity.X *= MathF.Exp(-4f * dt);
-            Velocity.Z *= MathF.Exp(-4f * dt);
-            HighestYInAir = Position.Y;
+            Velocity.X *= MathF.Exp(-2.5f * dt);
+            Velocity.Z *= MathF.Exp(-2.5f * dt);
+            HighestYInAir = Position.Y; // лава также полностью гасит урон от падения
             OnGround = Collision.Move(world, ref Position, HalfExtents, ref Velocity, dt, false);
         } else {
+            LavaBurnTimer = 0f;
             Velocity.X = wish.X * speed;
             Velocity.Z = wish.Z * speed;
             if (inJump && OnGround) {
@@ -311,8 +323,10 @@ public sealed class Player {
             StepSoundTimer = 0.1f;
         }
 
-        // Урон от падения
-        if (!OnGround && !inWater && !inLava) {
+        // Урон от падения (в воде и лаве урон ВСЕГДА сбрасывается)
+        if (inWater || inLava) {
+            HighestYInAir = Position.Y;
+        } else if (!OnGround) {
             if (Position.Y > HighestYInAir) HighestYInAir = Position.Y;
         } else if (OnGround) {
             float fallDist = HighestYInAir - Position.Y;
@@ -324,16 +338,22 @@ public sealed class Player {
             HighestYInAir = Position.Y;
         }
 
-        // Проверка удушья под водой (плавный расход и восстановление воздуха)
+        // Проверка удушья под водой (дискретный урон 2 HP в секунду)
         if (eyeVoxel.TypeId == GameData.BWater.Id) {
             AirSupply -= dt;
             if (AirSupply <= 0f) {
                 AirSupply = 0f;
-                ApplyDamage(dt * 3f, session);
-                session.AddMessage("Вы тонете!");
+                DrownDamageTimer -= dt;
+                if (DrownDamageTimer <= 0f) {
+                    DrownDamageTimer = 1.0f;
+                    InvulnerabilityTimer = 0f;
+                    ApplyDamage(2.0f, session);
+                    session.AddMessage("Вы тонете!");
+                }
             }
         } else {
             AirSupply = MathF.Min(10f, AirSupply + dt * 4f);
+            DrownDamageTimer = 0f;
         }
 
         // Урон и мягкое выталкивание при застревании в блоках
@@ -757,7 +777,14 @@ public sealed class Player {
 
         if (FireTicks > 0f) {
             FireTicks = MathF.Max(0f, FireTicks - dt);
-            ApplyDamage(dt * 1.5f, session);
+            FireBurnTimer -= dt;
+            if (FireBurnTimer <= 0f) {
+                FireBurnTimer = 1.0f; // 1 HP горения в секунду
+                InvulnerabilityTimer = 0f;
+                ApplyDamage(1.0f, session);
+            }
+        } else {
+            FireBurnTimer = 0f;
         }
         if (Health <= 0f) session.DiePlayer();
     }
