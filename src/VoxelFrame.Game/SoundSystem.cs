@@ -34,12 +34,16 @@ public static class SoundSystem {
     private static Sound _arrowHitSound;
     private static Sound _explosionSound;
     private static Sound _shieldBlockSound;
+    private static Sound _creeperHissSound;
 
     // Интерактив, визуал и атмосфера
     private static Sound _eatSound;
     private static Sound _splashSound;
     private static Sound _popSound;
     private static Sound _chestSound;
+    private static Sound _doorOpenSound;
+    private static Sound _doorCloseSound;
+    private static Sound _dupePoliceSound;
     private static Sound _totemSound;
     private static Sound _fertilizeSound;
     private static Sound _caveAmbianceSound;
@@ -74,12 +78,16 @@ public static class SoundSystem {
                 _arrowHitSound = LoadProceduralSound(CreateToneWav(44100 / 16, 650f, 320f, 0.40f));
                 _explosionSound = LoadProceduralSound(CreateNoiseWav(44100 / 2, 0.85f, highPass: false));
                 _shieldBlockSound = LoadProceduralSound(CreateToneWav(44100 / 10, 850f, 320f, 0.65f));
+                _creeperHissSound = LoadProceduralSound(CreateNoiseWav(44100 * 3 / 2, 0.85f, highPass: true));
 
                 // Интерактив и атмосфера
                 _eatSound = LoadProceduralSound(CreateToneWav(44100 / 8, 280f, 420f, 0.45f));
                 _splashSound = LoadProceduralSound(CreateSplashWav(44100 / 4, 0.50f));
                 _popSound = LoadProceduralSound(CreateToneWav(44100 / 16, 550f, 850f, 0.30f));
                 _chestSound = LoadProceduralSound(CreateToneWav(44100 / 7, 360f, 480f, 0.35f));
+                _doorOpenSound = LoadProceduralSound(CreateToneWav(44100 / 6, 220f, 360f, 0.45f));
+                _doorCloseSound = LoadProceduralSound(CreateToneWav(44100 / 6, 360f, 180f, 0.45f));
+                _dupePoliceSound = LoadProceduralSound(CreateToneWav(44100 / 4, 880f, 220f, 0.65f));
                 _fertilizeSound = LoadProceduralSound(CreateToneWav(44100 / 6, 600f, 1200f, 0.40f));
                 _caveAmbianceSound = LoadProceduralSound(CreateToneWav(44100 * 3, 110f, 75f, 0.40f));
                 _thunderSound = LoadProceduralSound(CreateNoiseWav(44100 * 2, 0.90f, highPass: false));
@@ -182,6 +190,7 @@ public static class SoundSystem {
     public static void PlayArrowHit() => Play(_arrowHitSound);
     public static void PlayExplosion() => Play(_explosionSound);
     public static void PlayShieldBlock() => Play(_shieldBlockSound, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);
+    public static void PlayCreeperHiss() => Play(_creeperHissSound, 1.0f);
     public static void PlayCaveAmbiance() => Play(_caveAmbianceSound, 0.85f + (float)Random.Shared.NextDouble() * 0.2f);
     public static void PlayThunder() => Play(_thunderSound, 0.9f + (float)Random.Shared.NextDouble() * 0.2f);
     public static void PlayBackgroundMusic() => Play(_bgmMusic, 1.0f);
@@ -189,6 +198,9 @@ public static class SoundSystem {
     public static void PlaySplash() => Play(_splashSound);
     public static void PlayPop() => Play(_popSound, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);
     public static void PlayChest() => Play(_chestSound);
+    public static void PlayDoorOpen() => Play(_doorOpenSound, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);
+    public static void PlayDoorClose() => Play(_doorCloseSound, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);
+    public static void PlayDupePolice() => Play(_dupePoliceSound, 1.0f);
     public static void PlayTotem() => Play(_totemSound, 1.0f);
     public static void StopTotem() {
         if (_audioReady) Raylib.StopSound(_totemSound);

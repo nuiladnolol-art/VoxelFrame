@@ -336,7 +336,6 @@ public static class SaveSystem {
     public static bool FancyGraphics = true;
     public static int SoundVolume = 100; // 0..100%
     public static int RenderDistanceSetting = 5; // 3, 5, 7
-    public static bool KeepInventory = false; // По умолчанию инвентарь выпадает при смерти
 
     public static void SaveSettings() {
         try {
@@ -358,7 +357,6 @@ public static class SaveSystem {
                 ["FancyGraphics"] = FancyGraphics,
                 ["SoundVolume"] = SoundVolume,
                 ["RenderDistanceSetting"] = RenderDistanceSetting,
-                ["KeepInventory"] = KeepInventory,
             };
             File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(obj, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
         } catch { }
@@ -385,7 +383,6 @@ public static class SaveSystem {
             B("FancyGraphics", v => FancyGraphics = v);
             R("SoundVolume", v => SoundVolume = v);
             R("RenderDistanceSetting", v => RenderDistanceSetting = v);
-            B("KeepInventory", v => KeepInventory = v);
         } catch { }
     }
 }

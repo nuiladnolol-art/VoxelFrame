@@ -198,7 +198,7 @@ public sealed class WorldRenderer : IDisposable {
 
         bool holdingTorch = _session.Player.SelectedEntry?.Item.Definition.Id == GameData.TorchItem.Id || _session.Player.OffhandItem?.Id == GameData.TorchItem.Id;
         Vector3 lightPos = _session.Player.Eye;
-        float lightRadius = holdingTorch ? 12.5f : 0f;
+        float lightRadius = holdingTorch ? 14.0f : 0f;
         if (_playerLightPosLoc != -1) {
             unsafe { Raylib.SetShaderValue(_material.Shader, _playerLightPosLoc, &lightPos, ShaderUniformDataType.Vec3); }
         }
@@ -231,20 +231,17 @@ public sealed class WorldRenderer : IDisposable {
             unsafe { Raylib.SetShaderValue(_material.Shader, _cameraPosLoc, &camPos, ShaderUniformDataType.Vec3); }
         }
         if (_fogColorLoc != -1) {
-            float f = _session.DayNight.SkyFactor;
-            if (_session.Weather != WeatherType.Clear) f *= 0.45f;
-            Color fogC = (_world.Dimension == Dimension.Nether)
-                ? new Color(45, 10, 10, 255)
-                : LerpColor(C(16, 18, 40, 255), C(178, 208, 244, 255), f);
+            Color fogC = GetFogColor();
             var fogVec = new Vector3(fogC.R / 255f, fogC.G / 255f, fogC.B / 255f);
             unsafe { Raylib.SetShaderValue(_material.Shader, _fogColorLoc, &fogVec, ShaderUniformDataType.Vec3); }
         }
+        float maxRenderDist = SaveSystem.RenderDistanceSetting * 16.0f;
+        float fogStart = (_world.Dimension == Dimension.Nether) ? 20.0f : MathF.Max(25.0f, maxRenderDist * 0.55f);
+        float fogEnd = (_world.Dimension == Dimension.Nether) ? 68.0f : MathF.Max(40.0f, maxRenderDist * 0.95f);
         if (_fogStartLoc != -1) {
-            float fogStart = (_world.Dimension == Dimension.Nether) ? 20.0f : 45.0f;
             unsafe { Raylib.SetShaderValue(_material.Shader, _fogStartLoc, &fogStart, ShaderUniformDataType.Float); }
         }
         if (_fogEndLoc != -1) {
-            float fogEnd = (_world.Dimension == Dimension.Nether) ? 68.0f : 84.0f;
             unsafe { Raylib.SetShaderValue(_material.Shader, _fogEndLoc, &fogEnd, ShaderUniformDataType.Float); }
         }
 
@@ -426,16 +423,51 @@ public sealed class WorldRenderer : IDisposable {
                 var light = GetLightFactor(p);
 
                 if (v.TypeId == GameData.BTorch.Id) {
-                    byte tile = (byte)TextureAtlas.TTorch;
-                    var src = new Rectangle(
-                        tile % TextureAtlas.Cols * TextureAtlas.TilePx,
-                        tile / TextureAtlas.Cols * TextureAtlas.TilePx,
-                        TextureAtlas.TilePx, TextureAtlas.TilePx);
-                    var size = new Vector2(0.4f, 0.4f);
-                    Raylib.DrawBillboardRec(_session.Camera, TextureAtlas.Atlas, src, p, size, Color.White);
-                    // Пламя над телом.
-                    var flamePos = new Vector3(p.X, p.Y + 0.35f, p.Z);
-                    DrawFlame(flamePos, 0.3f, dt);
+                    byte torchFacing = v.SubGridLayerMask; // 0=Floor, 1=West wall (+X block), 2=East wall (-X block), 3=North wall (+Z block), 4=South wall (-Z block)
+                    var woodCol = new Color(130, 90, 48, 255);
+                    var headCol = new Color(50, 42, 38, 255);
+
+                    Vector3 stickPos;
+                    Vector3 stickSize;
+                    Vector3 flamePos;
+
+                    if (torchFacing == 1) {
+                        // Прикреплен к блоку на западе (+X): факел наклонен в сторону -X
+                        stickPos = new Vector3(pos.X + 0.25f, pos.Y + 0.38f, pos.Z + 0.5f);
+                        stickSize = new Vector3(0.12f, 0.48f, 0.12f);
+                        flamePos = new Vector3(pos.X + 0.30f, pos.Y + 0.58f, pos.Z + 0.5f);
+                        Raylib.DrawCube(stickPos, stickSize.X, stickSize.Y, stickSize.Z, woodCol);
+                        Raylib.DrawCube(new Vector3(flamePos.X, flamePos.Y - 0.05f, flamePos.Z), 0.14f, 0.12f, 0.14f, headCol);
+                    } else if (torchFacing == 2) {
+                        // Прикреплен к блоку на востоке (-X): факел наклонен в сторону +X
+                        stickPos = new Vector3(pos.X + 0.75f, pos.Y + 0.38f, pos.Z + 0.5f);
+                        stickSize = new Vector3(0.12f, 0.48f, 0.12f);
+                        flamePos = new Vector3(pos.X + 0.70f, pos.Y + 0.58f, pos.Z + 0.5f);
+                        Raylib.DrawCube(stickPos, stickSize.X, stickSize.Y, stickSize.Z, woodCol);
+                        Raylib.DrawCube(new Vector3(flamePos.X, flamePos.Y - 0.05f, flamePos.Z), 0.14f, 0.12f, 0.14f, headCol);
+                    } else if (torchFacing == 3) {
+                        // Прикреплен к блоку на севере (+Z): факел наклонен в сторону -Z
+                        stickPos = new Vector3(pos.X + 0.5f, pos.Y + 0.38f, pos.Z + 0.25f);
+                        stickSize = new Vector3(0.12f, 0.48f, 0.12f);
+                        flamePos = new Vector3(pos.X + 0.5f, pos.Y + 0.58f, pos.Z + 0.30f);
+                        Raylib.DrawCube(stickPos, stickSize.X, stickSize.Y, stickSize.Z, woodCol);
+                        Raylib.DrawCube(new Vector3(flamePos.X, flamePos.Y - 0.05f, flamePos.Z), 0.14f, 0.12f, 0.14f, headCol);
+                    } else if (torchFacing == 4) {
+                        // Прикреплен к блоку на юге (-Z): факел наклонен в сторону +Z
+                        stickPos = new Vector3(pos.X + 0.5f, pos.Y + 0.38f, pos.Z + 0.75f);
+                        stickSize = new Vector3(0.12f, 0.48f, 0.12f);
+                        flamePos = new Vector3(pos.X + 0.5f, pos.Y + 0.58f, pos.Z + 0.70f);
+                        Raylib.DrawCube(stickPos, stickSize.X, stickSize.Y, stickSize.Z, woodCol);
+                        Raylib.DrawCube(new Vector3(flamePos.X, flamePos.Y - 0.05f, flamePos.Z), 0.14f, 0.12f, 0.14f, headCol);
+                    } else {
+                        // Стоит прямо на полу
+                        stickPos = new Vector3(pos.X + 0.5f, pos.Y + 0.25f, pos.Z + 0.5f);
+                        stickSize = new Vector3(0.12f, 0.50f, 0.12f);
+                        flamePos = new Vector3(pos.X + 0.5f, pos.Y + 0.50f, pos.Z + 0.5f);
+                        Raylib.DrawCube(stickPos, stickSize.X, stickSize.Y, stickSize.Z, woodCol);
+                        Raylib.DrawCube(new Vector3(flamePos.X, flamePos.Y - 0.05f, flamePos.Z), 0.14f, 0.12f, 0.14f, headCol);
+                    }
+                    DrawFlame(flamePos, 0.22f, dt);
                 } else if (v.TypeId == GameData.BWheatCrop.Id) {
                     int stage = Math.Clamp((int)v.SubGridLayerMask, 0, 3);
                     byte tile = (byte)(TextureAtlas.TWheatCrop0 + stage);
@@ -445,7 +477,7 @@ public sealed class WorldRenderer : IDisposable {
                         TextureAtlas.TilePx, TextureAtlas.TilePx);
                     var size = new Vector2(0.85f, 0.85f);
                     var cropPos = new Vector3(pos.X + 0.5f, pos.Y + 0.425f, pos.Z + 0.5f);
-                    Color tint = ShadeColor(Color.White, light);
+                    Color tint = ShadeColor(Color.White, light, cropPos);
                     Raylib.DrawBillboardRec(_session.Camera, TextureAtlas.Atlas, src, cropPos, size, tint);
                 } else if (v.TypeId == GameData.BTallGrass.Id) {
                     byte tile = (byte)TextureAtlas.TTallGrass;
@@ -455,7 +487,7 @@ public sealed class WorldRenderer : IDisposable {
                         TextureAtlas.TilePx, TextureAtlas.TilePx);
                     var size = new Vector2(0.9f, 0.9f);
                     var grassPos = new Vector3(pos.X + 0.5f, pos.Y + 0.45f, pos.Z + 0.5f);
-                    Color tint = ShadeColor(Color.White, light);
+                    Color tint = ShadeColor(Color.White, light, grassPos);
                     Raylib.DrawBillboardRec(_session.Camera, TextureAtlas.Atlas, src, grassPos, size, tint);
                 }
             }
@@ -518,6 +550,23 @@ public sealed class WorldRenderer : IDisposable {
         );
     }
 
+    public Color GetFogColor() {
+        float f = _session.DayNight.SkyFactor;
+        if (_session.Weather != WeatherType.Clear) f *= 0.45f;
+        return (_world.Dimension == Dimension.Nether)
+            ? new Color(45, 10, 10, 255)
+            : LerpColor(C(16, 18, 40, 255), C(178, 208, 244, 255), f);
+    }
+
+    public float GetFogFactor(Vector3 pos) {
+        float dist = Vector3.Distance(_session.Camera.Position, pos);
+        float maxRenderDist = SaveSystem.RenderDistanceSetting * 16.0f;
+        float fogStart = (_world.Dimension == Dimension.Nether) ? 20.0f : MathF.Max(25.0f, maxRenderDist * 0.55f);
+        float fogEnd = (_world.Dimension == Dimension.Nether) ? 68.0f : MathF.Max(40.0f, maxRenderDist * 0.95f);
+        float fogFactor = Math.Clamp((dist - fogStart) / (fogEnd - fogStart), 0.0f, 1.0f);
+        return MathF.Pow(fogFactor, 1.35f);
+    }
+
     private static Color ShadeColor(Color baseColor, Vector3 light) =>
         new(
             (byte)Math.Clamp((int)(baseColor.R * light.X), 0, 255),
@@ -526,9 +575,19 @@ public sealed class WorldRenderer : IDisposable {
             baseColor.A
         );
 
+    private Color ShadeColor(Color baseColor, Vector3 light, Vector3 pos) {
+        var lit = ShadeColor(baseColor, light);
+        float fogFactor = GetFogFactor(pos);
+        if (fogFactor > 0.001f) {
+            var fog = GetFogColor();
+            return LerpColor(lit, fog, fogFactor);
+        }
+        return lit;
+    }
+
     public void DrawEntities(Camera3D camera) {
         float time = (float)Raylib.GetTime();
-        // 1. Draw Item Pickups as Billboards with ambient lighting
+        // 1. Draw Item Pickups as Billboards with ambient lighting and fog
         foreach (var p in _world.Pickups) {
             if (p.Quantity <= 0) continue;
             
@@ -543,16 +602,17 @@ public sealed class WorldRenderer : IDisposable {
                 TextureAtlas.TilePx, TextureAtlas.TilePx);
             
             var light = GetLightFactor(p.Position);
-            Color tint = ShadeColor(Color.White, light);
+            Color tint = ShadeColor(Color.White, light, p.Position);
             Raylib.DrawBillboardRec(camera, TextureAtlas.Atlas, src, pos, new Vector2(0.4f, 0.4f), tint);
         }
 
-        // 2. Draw Animals (Pig, Cow, Sheep) with 3D model & animations
+        // 2. Draw Animals (Pig, Cow, Sheep) with 3D model, animations and fog
         foreach (var a in _world.Animals) {
             if (!a.Alive) continue;
             DrawSoftShadow(a.Position - new Vector3(0f, a.HalfSizeY, 0f), a.HalfSizeX + 0.05f);
 
             var light = GetLightFactor(a.Position);
+            var aPos = a.Position;
 
             Vector3 fwd = new(0f, 0f, 1f);
             if (a.Velocity.LengthSquared() > 0.01f) {
@@ -575,9 +635,9 @@ public sealed class WorldRenderer : IDisposable {
 
             if (a.Type == AnimalType.Pig) {
                 // ── PIG MODEL ─────────────────────────────────────────────
-                var pigPink = ShadeColor(a.HurtTime > 0f ? new Color(240, 80, 80, 255) : new Color(240, 160, 160, 255), light);
-                var snoutColor = ShadeColor(a.HurtTime > 0f ? new Color(220, 60, 60, 255) : new Color(220, 120, 130, 255), light);
-                var pigOutline = ShadeColor(new Color(40, 20, 20, 180), light);
+                var pigPink = ShadeColor(a.HurtTime > 0f ? new Color(240, 80, 80, 255) : new Color(240, 160, 160, 255), light, aPos);
+                var snoutColor = ShadeColor(a.HurtTime > 0f ? new Color(220, 60, 60, 255) : new Color(220, 120, 130, 255), light, aPos);
+                var pigOutline = ShadeColor(new Color(40, 20, 20, 180), light, aPos);
 
                 // Body
                 Raylib.DrawCube(new Vector3(0f, 0.125f, 0f), 0.65f, 0.55f, 0.85f, pigPink);
@@ -593,8 +653,8 @@ public sealed class WorldRenderer : IDisposable {
                 Raylib.DrawCube(pigSnout, 0.22f, 0.14f, 0.10f, snoutColor);
 
                 // Eyes
-                Raylib.DrawCube(pigHead + new Vector3(-0.16f, 0.08f, 0.23f), 0.06f, 0.06f, 0.01f, ShadeColor(Color.Black, light));
-                Raylib.DrawCube(pigHead + new Vector3(0.16f, 0.08f, 0.23f), 0.06f, 0.06f, 0.01f, ShadeColor(Color.Black, light));
+                Raylib.DrawCube(pigHead + new Vector3(-0.16f, 0.08f, 0.23f), 0.06f, 0.06f, 0.01f, ShadeColor(Color.Black, light, aPos));
+                Raylib.DrawCube(pigHead + new Vector3(0.16f, 0.08f, 0.23f), 0.06f, 0.06f, 0.01f, ShadeColor(Color.Black, light, aPos));
 
                 // 4 Legs
                 float pLegW = 0.18f, pLegH = 0.35f, pLegD = 0.18f;
@@ -610,12 +670,12 @@ public sealed class WorldRenderer : IDisposable {
 
             } else if (a.Type == AnimalType.Cow) {
                 // ── COW MODEL ─────────────────────────────────────────────
-                var cowWhite = ShadeColor(a.HurtTime > 0f ? new Color(240, 80, 80, 255) : new Color(240, 240, 240, 255), light);
-                var cowBlack = ShadeColor(a.HurtTime > 0f ? new Color(180, 40, 40, 255) : new Color(55, 45, 40, 255), light);
-                var snoutColor = ShadeColor(a.HurtTime > 0f ? new Color(200, 70, 70, 255) : new Color(175, 140, 140, 255), light);
-                var hornColor = ShadeColor(new Color(210, 210, 205, 255), light);
-                var udderPink = ShadeColor(new Color(245, 170, 180, 255), light);
-                var cowOutline = ShadeColor(new Color(30, 20, 15, 180), light);
+                var cowWhite = ShadeColor(a.HurtTime > 0f ? new Color(240, 80, 80, 255) : new Color(240, 240, 240, 255), light, aPos);
+                var cowBlack = ShadeColor(a.HurtTime > 0f ? new Color(180, 40, 40, 255) : new Color(55, 45, 40, 255), light, aPos);
+                var snoutColor = ShadeColor(a.HurtTime > 0f ? new Color(200, 70, 70, 255) : new Color(175, 140, 140, 255), light, aPos);
+                var hornColor = ShadeColor(new Color(210, 210, 205, 255), light, aPos);
+                var udderPink = ShadeColor(new Color(245, 170, 180, 255), light, aPos);
+                var cowOutline = ShadeColor(new Color(30, 20, 15, 180), light, aPos);
 
                 // Body
                 Raylib.DrawCube(new Vector3(0f, 0.15f, 0f), 0.75f, 0.60f, 1.05f, cowWhite);
@@ -639,8 +699,8 @@ public sealed class WorldRenderer : IDisposable {
                 Raylib.DrawCube(headPos + new Vector3(0.22f, 0.24f, -0.05f), 0.08f, 0.16f, 0.08f, hornColor);
 
                 // Eyes
-                Raylib.DrawCube(headPos + new Vector3(-0.18f, 0.06f, 0.23f), 0.06f, 0.06f, 0.01f, ShadeColor(Color.Black, light));
-                Raylib.DrawCube(headPos + new Vector3(0.18f, 0.06f, 0.23f), 0.06f, 0.06f, 0.01f, ShadeColor(Color.Black, light));
+                Raylib.DrawCube(headPos + new Vector3(-0.18f, 0.06f, 0.23f), 0.06f, 0.06f, 0.01f, ShadeColor(Color.Black, light, aPos));
+                Raylib.DrawCube(headPos + new Vector3(0.18f, 0.06f, 0.23f), 0.06f, 0.06f, 0.01f, ShadeColor(Color.Black, light, aPos));
 
                 // 4 Legs
                 float cLegW = 0.20f, cLegH = 0.55f, cLegD = 0.20f;
@@ -656,9 +716,9 @@ public sealed class WorldRenderer : IDisposable {
 
             } else if (a.Type == AnimalType.Sheep) {
                 // ── SHEEP MODEL ───────────────────────────────────────────
-                var woolWhite = ShadeColor(a.HurtTime > 0f ? new Color(240, 80, 80, 255) : new Color(235, 235, 235, 255), light);
-                var skinTan = ShadeColor(a.HurtTime > 0f ? new Color(210, 80, 80, 255) : new Color(225, 205, 185, 255), light);
-                var sheepOutline = ShadeColor(new Color(50, 50, 50, 180), light);
+                var woolWhite = ShadeColor(a.HurtTime > 0f ? new Color(240, 80, 80, 255) : new Color(235, 235, 235, 255), light, aPos);
+                var skinTan = ShadeColor(a.HurtTime > 0f ? new Color(210, 80, 80, 255) : new Color(225, 205, 185, 255), light, aPos);
+                var sheepOutline = ShadeColor(new Color(50, 50, 50, 180), light, aPos);
 
                 // Fluffy Wool Body
                 Raylib.DrawCube(new Vector3(0f, 0.10f, 0f), 0.80f, 0.65f, 0.95f, woolWhite);
@@ -671,8 +731,8 @@ public sealed class WorldRenderer : IDisposable {
                 Raylib.DrawCube(headPos + new Vector3(0f, 0.18f, -0.05f), 0.36f, 0.14f, 0.34f, woolWhite);
 
                 // Eyes
-                Raylib.DrawCube(headPos + new Vector3(-0.14f, 0.04f, 0.215f), 0.05f, 0.05f, 0.01f, ShadeColor(Color.Black, light));
-                Raylib.DrawCube(headPos + new Vector3(0.14f, 0.04f, 0.215f), 0.05f, 0.05f, 0.01f, ShadeColor(Color.Black, light));
+                Raylib.DrawCube(headPos + new Vector3(-0.14f, 0.04f, 0.215f), 0.05f, 0.05f, 0.01f, ShadeColor(Color.Black, light, aPos));
+                Raylib.DrawCube(headPos + new Vector3(0.14f, 0.04f, 0.215f), 0.05f, 0.05f, 0.01f, ShadeColor(Color.Black, light, aPos));
 
                 // 4 Legs
                 float sLegW = 0.16f, sLegH = 0.45f, sLegD = 0.16f;
@@ -690,12 +750,13 @@ public sealed class WorldRenderer : IDisposable {
             Rlgl.PopMatrix();
         }
 
-        // 3. Draw Hostile Mobs (Zombie, Creeper, Skeleton, Spider) with light shading
+        // 3. Draw Hostile Mobs (Zombie, Creeper, Skeleton, Spider) with light and fog shading
         foreach (var h in _world.HostileMobs) {
             if (!h.Alive) continue;
             DrawSoftShadow(h.Position - new Vector3(0f, h.HalfSizeY, 0f), 0.45f);
 
             var light = GetLightFactor(h.Position);
+            var hPos = h.Position;
 
             Vector3 fwd = new(0f, 0f, 1f);
             if (h.Velocity.LengthSquared() > 0.01f) {
@@ -718,10 +779,10 @@ public sealed class WorldRenderer : IDisposable {
 
             if (h.Type == HostileType.Zombie) {
                 // ── ZOMBIE MODEL ──────────────────────────────────────────
-                var skinColor = ShadeColor(h.HurtTime > 0f ? new Color(220, 60, 60, 255) : new Color(45, 125, 45, 255), light);
-                var shirtColor = ShadeColor(h.HurtTime > 0f ? new Color(180, 50, 50, 255) : new Color(40, 140, 160, 255), light);
-                var pantsColor = ShadeColor(h.HurtTime > 0f ? new Color(140, 40, 40, 255) : new Color(40, 40, 110, 255), light);
-                var outlineColor = ShadeColor(new Color(20, 20, 20, 180), light);
+                var skinColor = ShadeColor(h.HurtTime > 0f ? new Color(220, 60, 60, 255) : new Color(45, 125, 45, 255), light, hPos);
+                var shirtColor = ShadeColor(h.HurtTime > 0f ? new Color(180, 50, 50, 255) : new Color(40, 140, 160, 255), light, hPos);
+                var pantsColor = ShadeColor(h.HurtTime > 0f ? new Color(140, 40, 40, 255) : new Color(40, 40, 110, 255), light, hPos);
+                var outlineColor = ShadeColor(new Color(20, 20, 20, 180), light, hPos);
 
                 // Body
                 Raylib.DrawCube(new Vector3(0f, 0.15f, 0f), 0.6f, 0.70f, 0.35f, shirtColor);
@@ -732,9 +793,9 @@ public sealed class WorldRenderer : IDisposable {
                 Raylib.DrawCube(headPos, 0.48f, 0.48f, 0.48f, skinColor);
                 Raylib.DrawCubeWires(headPos, 0.482f, 0.482f, 0.482f, outlineColor);
 
-                Raylib.DrawCube(headPos + new Vector3(-0.12f, 0.04f, 0.245f), 0.09f, 0.08f, 0.01f, ShadeColor(Color.Black, light));
-                Raylib.DrawCube(headPos + new Vector3(0.12f, 0.04f, 0.245f), 0.09f, 0.08f, 0.01f, ShadeColor(Color.Black, light));
-                Raylib.DrawCube(headPos + new Vector3(0f, -0.1f, 0.245f), 0.16f, 0.06f, 0.01f, ShadeColor(Color.Black, light));
+                Raylib.DrawCube(headPos + new Vector3(-0.12f, 0.04f, 0.245f), 0.09f, 0.08f, 0.01f, ShadeColor(Color.Black, light, hPos));
+                Raylib.DrawCube(headPos + new Vector3(0.12f, 0.04f, 0.245f), 0.09f, 0.08f, 0.01f, ShadeColor(Color.Black, light, hPos));
+                Raylib.DrawCube(headPos + new Vector3(0f, -0.1f, 0.245f), 0.16f, 0.06f, 0.01f, ShadeColor(Color.Black, light, hPos));
 
                 // Arms
                 var leftArm = new Vector3(-0.42f, 0.35f, 0.25f + MathF.Sin(time * 4f) * 0.03f);
@@ -754,11 +815,11 @@ public sealed class WorldRenderer : IDisposable {
 
             } else if (h.Type == HostileType.Skeleton) {
                 // ── SKELETON MODEL ────────────────────────────────────────
-                var boneColor = ShadeColor(h.HurtTime > 0f ? new Color(220, 60, 60, 255) : new Color(205, 205, 205, 255), light);
-                var ribColor = ShadeColor(h.HurtTime > 0f ? new Color(180, 40, 40, 255) : new Color(130, 130, 130, 255), light);
-                var bowColor = ShadeColor(new Color(125, 80, 45, 255), light);
-                var stringColor = ShadeColor(new Color(225, 225, 225, 255), light);
-                var outlineColor = ShadeColor(new Color(30, 30, 30, 180), light);
+                var boneColor = ShadeColor(h.HurtTime > 0f ? new Color(220, 60, 60, 255) : new Color(205, 205, 205, 255), light, hPos);
+                var ribColor = ShadeColor(h.HurtTime > 0f ? new Color(180, 40, 40, 255) : new Color(130, 130, 130, 255), light, hPos);
+                var bowColor = ShadeColor(new Color(125, 80, 45, 255), light, hPos);
+                var stringColor = ShadeColor(new Color(225, 225, 225, 255), light, hPos);
+                var outlineColor = ShadeColor(new Color(30, 30, 30, 180), light, hPos);
 
                 // Body
                 Raylib.DrawCube(new Vector3(0f, 0.15f, 0f), 0.45f, 0.70f, 0.22f, boneColor);
@@ -775,9 +836,9 @@ public sealed class WorldRenderer : IDisposable {
                 Raylib.DrawCubeWires(headPos, 0.442f, 0.442f, 0.442f, outlineColor);
 
                 // Skull eyes
-                Raylib.DrawCube(headPos + new Vector3(-0.10f, 0.04f, 0.225f), 0.09f, 0.09f, 0.01f, ShadeColor(Color.Black, light));
-                Raylib.DrawCube(headPos + new Vector3(0.10f, 0.04f, 0.225f), 0.09f, 0.09f, 0.01f, ShadeColor(Color.Black, light));
-                Raylib.DrawCube(headPos + new Vector3(0f, -0.09f, 0.225f), 0.12f, 0.05f, 0.01f, ShadeColor(Color.Black, light));
+                Raylib.DrawCube(headPos + new Vector3(-0.10f, 0.04f, 0.225f), 0.09f, 0.09f, 0.01f, ShadeColor(Color.Black, light, hPos));
+                Raylib.DrawCube(headPos + new Vector3(0.10f, 0.04f, 0.225f), 0.09f, 0.09f, 0.01f, ShadeColor(Color.Black, light, hPos));
+                Raylib.DrawCube(headPos + new Vector3(0f, -0.09f, 0.225f), 0.12f, 0.05f, 0.01f, ShadeColor(Color.Black, light, hPos));
 
                 // Arms
                 var leftArm = new Vector3(-0.30f, 0.35f, 0.22f);
@@ -800,8 +861,8 @@ public sealed class WorldRenderer : IDisposable {
 
             } else if (h.Type == HostileType.Spider) {
                 // ── SPIDER MODEL ──────────────────────────────────────────
-                var spiderColor = ShadeColor(h.HurtTime > 0f ? new Color(220, 50, 50, 255) : new Color(35, 25, 20, 255), light);
-                var eyeRed = new Color(220, 20, 20, 255); // Глаза паука светятся в темноте
+                var spiderColor = ShadeColor(h.HurtTime > 0f ? new Color(220, 50, 50, 255) : new Color(35, 25, 20, 255), light, hPos);
+                var eyeRed = ShadeColor(new Color(220, 20, 20, 255), Vector3.One, hPos); // Глаза паука
 
                 // Body
                 var headPos = new Vector3(0f, -0.05f, 0.30f);
@@ -827,8 +888,8 @@ public sealed class WorldRenderer : IDisposable {
                 // ── CREEPER MODEL ─────────────────────────────────────────
                 bool isFlashing = h.FuseTimer > 0f && (int)(h.FuseTimer * 12f) % 2 == 0;
                 var baseCreeper = isFlashing ? Color.White : (h.HurtTime > 0f ? new Color(240, 80, 80, 255) : new Color(30, 185, 55, 255));
-                var creeperGreen = isFlashing ? Color.White : ShadeColor(baseCreeper, light);
-                var outlineColor = ShadeColor(new Color(15, 60, 20, 180), light);
+                var creeperGreen = isFlashing ? ShadeColor(Color.White, light, hPos) : ShadeColor(baseCreeper, light, hPos);
+                var outlineColor = ShadeColor(new Color(15, 60, 20, 180), light, hPos);
 
                 float fuseScale = 1.0f + MathF.Min(0.25f, h.FuseTimer * 0.20f);
                 Rlgl.Scalef(fuseScale, fuseScale, fuseScale);
@@ -842,11 +903,11 @@ public sealed class WorldRenderer : IDisposable {
                 Raylib.DrawCube(headPos, 0.48f, 0.48f, 0.48f, creeperGreen);
                 Raylib.DrawCubeWires(headPos, 0.482f, 0.482f, 0.482f, outlineColor);
 
-                Raylib.DrawCube(headPos + new Vector3(-0.11f, 0.06f, 0.245f), 0.10f, 0.10f, 0.01f, ShadeColor(Color.Black, light));
-                Raylib.DrawCube(headPos + new Vector3(0.11f, 0.06f, 0.245f), 0.10f, 0.10f, 0.01f, ShadeColor(Color.Black, light));
-                Raylib.DrawCube(headPos + new Vector3(0f, -0.06f, 0.245f), 0.10f, 0.12f, 0.01f, ShadeColor(Color.Black, light));
-                Raylib.DrawCube(headPos + new Vector3(-0.07f, -0.12f, 0.245f), 0.06f, 0.12f, 0.01f, ShadeColor(Color.Black, light));
-                Raylib.DrawCube(headPos + new Vector3(0.07f, -0.12f, 0.245f), 0.06f, 0.12f, 0.01f, ShadeColor(Color.Black, light));
+                Raylib.DrawCube(headPos + new Vector3(-0.11f, 0.06f, 0.245f), 0.10f, 0.10f, 0.01f, ShadeColor(Color.Black, light, hPos));
+                Raylib.DrawCube(headPos + new Vector3(0.11f, 0.06f, 0.245f), 0.10f, 0.10f, 0.01f, ShadeColor(Color.Black, light, hPos));
+                Raylib.DrawCube(headPos + new Vector3(0f, -0.06f, 0.245f), 0.10f, 0.12f, 0.01f, ShadeColor(Color.Black, light, hPos));
+                Raylib.DrawCube(headPos + new Vector3(-0.07f, -0.12f, 0.245f), 0.06f, 0.12f, 0.01f, ShadeColor(Color.Black, light, hPos));
+                Raylib.DrawCube(headPos + new Vector3(0.07f, -0.12f, 0.245f), 0.06f, 0.12f, 0.01f, ShadeColor(Color.Black, light, hPos));
 
                 // 4 Legs
                 var legFL = new Vector3(-0.16f, -0.55f, 0.22f + walkSwing * 0.25f);
@@ -868,28 +929,31 @@ public sealed class WorldRenderer : IDisposable {
             Rlgl.PopMatrix();
         }
 
-        // 4. Draw Flying Arrows (стрелы скелетов) with lighting
+        // 4. Draw Flying Arrows (стрелы скелетов) with lighting and fog
         foreach (var arr in _world.Arrows) {
             if (!arr.Alive) continue;
             var arrLight = GetLightFactor(arr.Position);
             var fwd = arr.Velocity.LengthSquared() > 0.01f ? Vector3.Normalize(arr.Velocity) : Vector3.UnitZ;
-            Raylib.DrawCube(arr.Position, 0.06f, 0.06f, 0.55f, ShadeColor(new Color(175, 140, 95, 255), arrLight));
-            Raylib.DrawCube(arr.Position + fwd * 0.26f, 0.10f, 0.10f, 0.10f, ShadeColor(new Color(190, 190, 190, 255), arrLight));
-            Raylib.DrawCube(arr.Position - fwd * 0.24f, 0.12f, 0.12f, 0.12f, ShadeColor(new Color(245, 245, 245, 255), arrLight));
+            Raylib.DrawCube(arr.Position, 0.06f, 0.06f, 0.55f, ShadeColor(new Color(175, 140, 95, 255), arrLight, arr.Position));
+            Raylib.DrawCube(arr.Position + fwd * 0.26f, 0.10f, 0.10f, 0.10f, ShadeColor(new Color(190, 190, 190, 255), arrLight, arr.Position));
+            Raylib.DrawCube(arr.Position - fwd * 0.24f, 0.12f, 0.12f, 0.12f, ShadeColor(new Color(245, 245, 245, 255), arrLight, arr.Position));
         }
 
-        // 5. Falling blocks with lighting
+        // 5. Falling blocks with lighting and fog
         foreach (var f in _world.FallingBlocks) {
             if (!f.Alive) continue;
             var fallLight = GetLightFactor(f.Position);
-            var tint = ShadeColor(BlockTint(f.Block.Id), fallLight);
+            var tint = ShadeColor(BlockTint(f.Block.Id), fallLight, f.Position);
             Raylib.DrawCube(f.Position, 1.0f, 1.0f, 1.0f, tint);
-            Raylib.DrawCubeWires(f.Position, 1.002f, 1.002f, 1.002f, ShadeColor(new Color(20, 20, 25, 180), fallLight));
+            Raylib.DrawCubeWires(f.Position, 1.002f, 1.002f, 1.002f, ShadeColor(new Color(20, 20, 25, 180), fallLight, f.Position));
         }
     }
 
     private void DrawSoftShadow(Vector3 pos, float baseRadius) {
-        if (Vector3.DistanceSquared(pos, _session.Camera.Position) > 900f) return;
+        float fogFactor = GetFogFactor(pos);
+        if (fogFactor >= 0.95f) return;
+        float maxDistSq = (SaveSystem.RenderDistanceSetting * 16f) * (SaveSystem.RenderDistanceSetting * 16f);
+        if (Vector3.DistanceSquared(pos, _session.Camera.Position) > maxDistSq) return;
 
         float groundY = pos.Y;
         int px = (int)MathF.Floor(pos.X);
@@ -909,7 +973,9 @@ public sealed class WorldRenderer : IDisposable {
         float radius = baseRadius * scale;
         if (radius < 0.05f) return;
         
-        Raylib.DrawCircle3D(new Vector3(pos.X, groundY, pos.Z), radius, new Vector3(1, 0, 0), 90f, new Color((byte)0, (byte)0, (byte)0, (byte)(70 * scale)));
+        byte alpha = (byte)(70 * scale * (1f - fogFactor));
+        if (alpha < 2) return;
+        Raylib.DrawCircle3D(new Vector3(pos.X, groundY, pos.Z), radius, new Vector3(1, 0, 0), 90f, new Color((byte)0, (byte)0, (byte)0, alpha));
     }
 
     public void SpawnBlockParticles(Vec3i pos, ushort blockId) {

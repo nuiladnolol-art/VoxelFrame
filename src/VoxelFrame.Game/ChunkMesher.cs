@@ -336,9 +336,13 @@ namespace VoxelFrame.Game;
         if (f == 2) return tiles.PosY; // Верх (+Y)
         if (f == 3) return tiles.NegY; // Низ (-Y)
 
-        // Для блоков с ориентацией (Печь, Сундук, Кровать) поворачиваем 4 боковые грани
-        if (typeId == GameData.BFurnace.Id || typeId == GameData.BChest.Id || typeId == GameData.BBed.Id || typeId == GameData.BBedHead.Id) {
-            return facing switch {
+        // Для блоков с ориентацией (Печь, Сундук, Кровать, Двери) поворачиваем 4 боковые грани
+        if (typeId == GameData.BFurnace.Id || typeId == GameData.BChest.Id || typeId == GameData.BBed.Id || typeId == GameData.BBedHead.Id || GameData.IsDoor(typeId)) {
+            byte effFacing = (byte)(facing & 3);
+            if (GameData.IsDoor(typeId) && (facing & 8) != 0) {
+                effFacing = (byte)((effFacing + 1) & 3); // Поворот на 90 градусов при открытии двери
+            }
+            return effFacing switch {
                 1 => f switch { // перед на -X (f=1)
                     1 => tiles.PosZ, // перед
                     0 => tiles.NegZ, // зад

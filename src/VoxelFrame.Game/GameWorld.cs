@@ -26,6 +26,8 @@ public sealed class GameWorld : IDisposable {
     public readonly List<FallingBlock> FallingBlocks = new();
     public readonly Dictionary<Vec3i, FurnaceData> Furnaces = new();
     public readonly Dictionary<Vec3i, Container> Chests = new();
+    public readonly HashSet<Vec3i> PlacedChests = new();
+    public readonly HashSet<Vec3i> LootedStructureChests = new();
     public Vec3i SpawnBlock;
 
     private readonly WorldGrid _grid = new();
@@ -171,6 +173,9 @@ public sealed class GameWorld : IDisposable {
 
     public bool IsSolidAt(Vec3i w) {
         var v = GetVoxel(w);
+        if (GameData.IsDoor(v.TypeId)) {
+            return (v.SubGridLayerMask & 8) == 0;
+        }
         return (v.Flags & VoxelFlags.Solid) != 0;
     }
 
@@ -229,6 +234,10 @@ public sealed class GameWorld : IDisposable {
 
     public void PlacePlacedBlock(Vec3i w, BlockType block, float contentVolumeM3 = 1f, byte facing = 0) {
         SetVoxelInternal(w, MakePlacedVoxel(block, contentVolumeM3, facing));
+        if (block.Id == GameData.BChest.Id) {
+            PlacedChests.Add(w);
+            Chests[w] = new Container(1000000.0, 1000000.0);
+        }
     }
 
     public void SetBlock(Vec3i w, ushort typeId) {
@@ -331,11 +340,49 @@ public sealed class GameWorld : IDisposable {
                 }
             }
         }
+
+        // Связанное удаление парной части двери
+        if (curVox.TypeId == GameData.BDoorLower.Id) {
+            var upperPos = w + new Vec3i(0, 1, 0);
+            if (GetVoxel(upperPos).TypeId == GameData.BDoorUpper.Id) {
+                SetVoxelInternal(upperPos, VoxelData.Air);
+            }
+        } else if (curVox.TypeId == GameData.BDoorUpper.Id) {
+            var lowerPos = w + new Vec3i(0, -1, 0);
+            if (GetVoxel(lowerPos).TypeId == GameData.BDoorLower.Id) {
+                SetVoxelInternal(lowerPos, VoxelData.Air);
+                SpawnPickup(GameData.DoorItem.Id, 1, w);
+            }
+        }
     }
 
-    public Container GetOrCreateChest(Vec3i pos) {
+    public Container GetOrCreateChest(Vec3i pos, GameSession? session = null) {
         if (Chests.TryGetValue(pos, out var inv)) return inv;
         var newInv = new Container(1000000.0, 1000000.0);
+
+        if (PlacedChests.Contains(pos)) {
+            Chests[pos] = newInv;
+            return newInv;
+        }
+
+        if (LootedStructureChests.Contains(pos)) {
+            // Игрок сломал сгенерированный сундук и поставил новый на то же место ради дюпа лута!
+            // НАКАЗАНИЕ ДЮПЕРА:
+            SoundSystem.PlayDupePolice();
+            newInv.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.RottenFleshItem), 64));
+            newInv.InsertAt(1, new ItemEntry(GameData.NewItem(GameData.DirtItem), 64));
+            newInv.InsertAt(4, new ItemEntry(GameData.NewItem(GameData.BoneItem), 13));
+            Chests[pos] = newInv;
+
+            var policePos = new Vector3(pos.X + 0.5f, pos.Y + 1.0f, pos.Z + 0.5f);
+            var sheriff = new HostileMob(HostileType.ZombiePigman, policePos) { Health = 60f };
+            HostileMobs.Add(sheriff);
+
+            session?.AddMessage("🚨 ПОЛИЦИЯ ЖИТЕЛЕЙ: Попытка дюпа пресечена! Алмазы конфискованы, за вами выслан Шериф!");
+            return newInv;
+        }
+
+        LootedStructureChests.Add(pos);
         var rng = new Random(Seed ^ (pos.X * 73856093 ^ pos.Y * 19349663 ^ pos.Z * 83492791));
 
         if (Dimension == Dimension.Nether) {
@@ -829,8 +876,14 @@ public sealed class GameWorld : IDisposable {
     public void TickHostileMobs(float dt, Player player, GameSession session) {
         _hostileSpawnTimer -= dt;
         if (_hostileSpawnTimer <= 0f) {
-            _hostileSpawnTimer = 4f;
-            if (HostileMobs.Count < 10) {
+            _hostileSpawnTimer = 8f;
+            int nearbyHostiles = 0;
+            foreach (var m in HostileMobs) {
+                if (m.Alive && Vector3.DistanceSquared(m.Position, player.Position) < 45f * 45f) {
+                    nearbyHostiles++;
+                }
+            }
+            if (nearbyHostiles < 8) {
                 TrySpawnHostileNearPlayer(player, session);
             }
         }
@@ -853,7 +906,7 @@ public sealed class GameWorld : IDisposable {
     /// Предотвращает прохождение мобов и животных друг сквозь друга.
     /// </summary>
     public void ResolveEntityCollisions(Player? player) {
-        // 1. HostileMob vs HostileMob
+        // 1. HostileMob vs HostileMob / Animal / Player
         for (int i = 0; i < HostileMobs.Count; i++) {
             var mobA = HostileMobs[i];
             if (!mobA.Alive) continue;
@@ -861,87 +914,69 @@ public sealed class GameWorld : IDisposable {
             for (int j = i + 1; j < HostileMobs.Count; j++) {
                 var mobB = HostileMobs[j];
                 if (!mobB.Alive) continue;
+                PushEntities(ref mobA.Position, ref mobA.Velocity, mobA.HalfSizeX, mobA.HalfSizeZ,
+                             ref mobB.Position, ref mobB.Velocity, mobB.HalfSizeX, mobB.HalfSizeZ);
+            }
 
-                PushEntities(ref mobA.Position, ref mobA.Velocity, mobA.HalfSizeX, mobA.HalfSizeY,
-                             ref mobB.Position, ref mobB.Velocity, mobB.HalfSizeX, mobB.HalfSizeY);
+            // HostileMob vs Animals
+            for (int k = 0; k < Animals.Count; k++) {
+                var a = Animals[k];
+                if (!a.Alive) continue;
+                PushEntities(ref mobA.Position, ref mobA.Velocity, mobA.HalfSizeX, mobA.HalfSizeZ,
+                             ref a.Position, ref a.Velocity, a.HalfSizeX, a.HalfSizeZ);
+            }
+
+            // HostileMob vs Player
+            if (player != null) {
+                var pPos = player.Position;
+                var pVel = player.Velocity;
+                PushEntities(ref mobA.Position, ref mobA.Velocity, mobA.HalfSizeX, mobA.HalfSizeZ,
+                             ref pPos, ref pVel, Player.HalfExtents.X, Player.HalfExtents.Z);
+                player.Position = pPos;
+                player.Velocity = pVel;
             }
         }
 
         // 2. Animal vs Animal
         for (int i = 0; i < Animals.Count; i++) {
-            var aA = Animals[i];
-            if (!aA.Alive) continue;
+            var a1 = Animals[i];
+            if (!a1.Alive) continue;
 
             for (int j = i + 1; j < Animals.Count; j++) {
-                var aB = Animals[j];
-                if (!aB.Alive) continue;
-
-                PushEntities(ref aA.Position, ref aA.Velocity, aA.HalfSizeX, aA.HalfSizeY,
-                             ref aB.Position, ref aB.Velocity, aB.HalfSizeX, aB.HalfSizeY);
-            }
-        }
-
-        // 3. HostileMob vs Animal
-        for (int i = 0; i < HostileMobs.Count; i++) {
-            var mob = HostileMobs[i];
-            if (!mob.Alive) continue;
-
-            for (int j = 0; j < Animals.Count; j++) {
-                var anim = Animals[j];
-                if (!anim.Alive) continue;
-
-                PushEntities(ref mob.Position, ref mob.Velocity, mob.HalfSizeX, mob.HalfSizeY,
-                             ref anim.Position, ref anim.Velocity, anim.HalfSizeX, anim.HalfSizeY);
-            }
-        }
-
-        // 4. HostileMob / Animal vs Player
-        if (player != null) {
-            for (int i = 0; i < HostileMobs.Count; i++) {
-                var mob = HostileMobs[i];
-                if (!mob.Alive) continue;
-
-                PushEntities(ref mob.Position, ref mob.Velocity, mob.HalfSizeX, mob.HalfSizeY,
-                             ref player.Position, ref player.Velocity, Player.HalfExtents.X, Player.HalfExtents.Y);
+                var a2 = Animals[j];
+                if (!a2.Alive) continue;
+                PushEntities(ref a1.Position, ref a1.Velocity, a1.HalfSizeX, a1.HalfSizeZ,
+                             ref a2.Position, ref a2.Velocity, a2.HalfSizeX, a2.HalfSizeZ);
             }
 
-            for (int i = 0; i < Animals.Count; i++) {
-                var anim = Animals[i];
-                if (!anim.Alive) continue;
-
-                PushEntities(ref anim.Position, ref anim.Velocity, anim.HalfSizeX, anim.HalfSizeY,
-                             ref player.Position, ref player.Velocity, Player.HalfExtents.X, Player.HalfExtents.Y);
+            // Animal vs Player
+            if (player != null) {
+                var pPos = player.Position;
+                var pVel = player.Velocity;
+                PushEntities(ref a1.Position, ref a1.Velocity, a1.HalfSizeX, a1.HalfSizeZ,
+                             ref pPos, ref pVel, Player.HalfExtents.X, Player.HalfExtents.Z);
+                player.Position = pPos;
+                player.Velocity = pVel;
             }
         }
     }
 
-    private static void PushEntities(ref Vector3 posA, ref Vector3 velA, float rAX, float rAY,
-                                     ref Vector3 posB, ref Vector3 velB, float rBX, float rBY) {
-        float dy = MathF.Abs(posA.Y - posB.Y);
-        float maxDy = rAY + rBY;
-        if (dy >= maxDy) return;
-
-        float minDist = rAX + rBX;
+    private static void PushEntities(ref Vector3 posA, ref Vector3 velA, float hxA, float hzA,
+                                     ref Vector3 posB, ref Vector3 velB, float hxB, float hzB) {
         float dx = posA.X - posB.X;
         float dz = posA.Z - posB.Z;
+        float minDistX = hxA + hxB;
+        float minDistZ = hzA + hzB;
         float distSq = dx * dx + dz * dz;
+        float minDist = MathF.Max(minDistX, minDistZ);
 
-        if (distSq >= minDist * minDist) return;
+        if (distSq >= minDist * minDist || distSq < 0.00001f) return;
 
-        float dist;
-        float nx, nz;
-        if (distSq < 0.00001f) {
-            float angle = Random.Shared.NextSingle() * MathF.Tau;
-            nx = MathF.Cos(angle);
-            nz = MathF.Sin(angle);
-            dist = 0.001f;
-        } else {
-            dist = MathF.Sqrt(distSq);
-            nx = dx / dist;
-            nz = dz / dist;
-        }
-
+        float dist = MathF.Sqrt(distSq);
         float overlap = (minDist - dist) * 0.5f;
+        float nx = dx / dist;
+        float nz = dz / dist;
+
         posA.X += nx * overlap;
         posA.Z += nz * overlap;
         posB.X -= nx * overlap;
@@ -959,7 +994,7 @@ public sealed class GameWorld : IDisposable {
 
         for (int attempt = 0; attempt < 8; attempt++) {
             float angle = (float)_random.NextDouble() * MathF.Tau;
-            float r = 14f + (float)_random.NextDouble() * 16f; // 14..30м от игрока
+            float r = 24f + (float)_random.NextDouble() * 18f; // 24..42м от игрока
             int spawnX = (int)MathF.Floor(pPos.X + MathF.Cos(angle) * r);
             int spawnZ = (int)MathF.Floor(pPos.Z + MathF.Sin(angle) * r);
 
@@ -979,11 +1014,11 @@ public sealed class GameWorld : IDisposable {
                 var feetVoxel = GetVoxel(feetCell);
                 if (feetVoxel.TypeId == GameData.BWater.Id || feetVoxel.TypeId == GameData.BLava.Id) continue;
 
-                // Проверка освещения: спавн только в темноте (свет <= 7)
+                // Проверка освещения: спавн только в глубокой темноте (свет <= 6). Факелы гарантированно защищают дом!
                 byte blockLight = GetBlockLight(feetCell);
                 byte sunLight = GetSunLight(feetCell);
                 float effectiveLight = MathF.Max(blockLight, sunLight * skyFactor);
-                if (effectiveLight > 7.0f) continue;
+                if (blockLight >= 6 || effectiveLight > 6.0f) continue;
 
                 var type = (HostileType)_random.Next(0, 4);
                 float halfX = type == HostileType.Spider ? 0.65f : 0.4f;

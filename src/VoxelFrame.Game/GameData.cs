@@ -187,6 +187,7 @@ public static class GameData {
     public static readonly ItemDefinition MossyCobblestoneItem = Item(89, "Замшелый булыжник", Stone, 1.0);
     public static readonly ItemDefinition ChiseledSandstoneItem = Item(90, "Резной песчаник", SandM, 1.0);
     public static readonly ItemDefinition RailItem = Item(91, "Рельсы", IronM, 0.02);
+    public static readonly ItemDefinition DoorItem = Item(95, "Деревянная дверь", Oak, 0.5);
 
     // ── Блоки ─────────────────────────────────────────────────────────────────
     public static readonly BlockType BGrass = Block(1, "Трава", DirtM, drop: DirtItem);
@@ -242,12 +243,16 @@ public static class GameData {
     public static readonly BlockType BNetherBrick = Block(42, "Адский кирпич", Stone, drop: NetherBrickItem);
     public static readonly BlockType BNetherPortal = Block(43, "Портал в Нижний мир", DiamondM, drop: null, light: 11)
         .With(b => { b.IsSolid = false; b.IsOpaque = false; b.IsUnbreakable = true; });
+    public static readonly BlockType BDoorLower = Block(44, "Деревянная дверь", Oak, drop: DoorItem, flammable: true, burnTime: 6f)
+        .With(b => { b.IsOpaque = false; });
+    public static readonly BlockType BDoorUpper = Block(45, "Деревянная дверь (верх)", Oak, drop: null, flammable: true, burnTime: 6f)
+        .With(b => { b.IsOpaque = false; });
 
     public static readonly BlockType[] Blocks =
         { BGrass, BDirt, BStone, BLog, BLeaves, BPlanks, BCoalOre, BTorch, BBedrock, BIronOre, BWorkbench, BFurnace,
           BCobblestone, BSand, BGravel, BGlass, BWater, BLava, BGoldOre, BDiamondOre, BRedstoneOre, BObsidian, BChest, BBed, BBedHead,
           BFarmland, BWheatCrop, BTallGrass, BMossyCobblestone, BMobSpawner, BWeb, BRail, BPressurePlate, BTNT, BChiseledSandstone,
-          BNetherrack, BSoulSand, BGlowstone, BNetherQuartzOre, BNetherBrick, BNetherPortal };
+          BNetherrack, BSoulSand, BGlowstone, BNetherQuartzOre, BNetherBrick, BNetherPortal, BDoorLower, BDoorUpper };
 
 
     private static readonly Dictionary<ushort, BlockType> _byId = Blocks.ToDictionary(b => b.Id);
@@ -354,6 +359,9 @@ public static class GameData {
 
     public static bool IsHoe(ushort itemId) =>
         itemId == WoodHoeItem.Id || itemId == StoneHoeItem.Id || itemId == IronHoeItem.Id || itemId == DiamondHoeItem.Id;
+
+    public static bool IsDoor(ushort blockId) =>
+        blockId == BDoorLower.Id || blockId == BDoorUpper.Id;
 
     /// <summary>
     /// Детерминированный парсинг сида (FNV-1a), не зависящий от рандомизации .NET процесса.
@@ -466,14 +474,14 @@ public static class GameData {
         bool canHarvest = CanHarvestBlock(b, toolId);
 
         if (!canHarvest) {
-            return baseHardness * 5.0f; // Не тот инструмент или нет нужного тира: долго ломается и не дропается
+            return baseHardness * 5.0f * 1.8f; // Не тот инструмент или нет нужного тира: долго ломается и не дропается
         }
 
         if (speed > 1.0f) {
-            return (baseHardness * 1.5f) / speed;
+            return (baseHardness * 1.5f * 1.8f) / speed;
         }
 
-        return baseHardness * 1.5f;
+        return baseHardness * 1.5f * 1.8f;
     }
 
     public static string MiningRequirementHint(BlockType b) {
@@ -519,7 +527,7 @@ public static class GameData {
             WoodHoeItem, StoneHoeItem, IronHoeItem, DiamondHoeItem,
             WheatItem, WheatSeedsItem,
             BoneMealItem, SawdustItem, SawdustPorridgeItem, TotemItem,
-            RawMuttonItem, CookedMuttonItem
+            RawMuttonItem, CookedMuttonItem, DoorItem
         }) {
             Items.Add(item.Id, item);
         }
@@ -767,6 +775,18 @@ public static class GameData {
             IronIngotItem, StickItem, IronIngotItem,
             IronIngotItem, null,      IronIngotItem
         }, RailItem, 16);
+
+        // Деревянная дверь: 6 досок (2 вертикальные колонки)
+        AddShapeRecipe(new ItemDefinition?[] {
+            PlankItem, PlankItem, null,
+            PlankItem, PlankItem, null,
+            PlankItem, PlankItem, null
+        }, DoorItem, 3);
+        AddShapeRecipe(new ItemDefinition?[] {
+            null, PlankItem, PlankItem,
+            null, PlankItem, PlankItem,
+            null, PlankItem, PlankItem
+        }, DoorItem, 3);
     }
 
     private static void InitSmeltingRecipes() {

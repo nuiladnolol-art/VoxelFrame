@@ -157,7 +157,7 @@ public static class Hud {
             float leftHandY = player.IsBlocking ? (h - offhandSize - 60f) : (h - offhandSize - 10f + bob);
             float offhandRot = player.IsBlocking ? 0.05f : -0.35f;
             var leftRect = new Rectangle(leftHandX, leftHandY, offhandSize, offhandSize);
-            DrawItemIconRotated(player.OffhandItem, leftRect, 1f, offhandRot);
+            DrawHandHeldItem(player.OffhandItem, leftRect, 1f, offhandRot);
         }
 
         // Предмет в правой руке (правый нижний угол, классический Minecraft-вид от первого лица)
@@ -185,7 +185,7 @@ public static class Hud {
                 swing = MathF.Sin((1f - player.AttackTimer / Player.AttackCooldown) * MathF.PI) * 0.9f;
             }
             var handRect = new Rectangle(handX, handY, handSize, handSize);
-            DrawItemIconRotated(held.Item.Definition, handRect, 1f, swing);
+            DrawHandHeldItem(held.Item.Definition, handRect, 1f, swing);
         }
 
         // Здоровье (сердечки слева) и Сытость (окорочка справа) над хотбаром
@@ -299,17 +299,75 @@ public static class Hud {
         }
     }
 
-    /// <summary>Иконка предмета с поворотом вокруг центра (замах в руке).</summary>
-    private static void DrawItemIconRotated(VoxelFrame.Core.Inventory.ItemDefinition def, Rectangle slot, float scale, float rotation) {
-        byte tile = TextureAtlas.ItemTile(def.Id);
-        var src = new Rectangle(
-            tile % TextureAtlas.Cols * TextureAtlas.TilePx,
-            tile / TextureAtlas.Cols * TextureAtlas.TilePx,
-            TextureAtlas.TilePx, TextureAtlas.TilePx);
-        float size = MathF.Min(slot.Width, slot.Height) * scale;
-        var dest = new Rectangle(slot.X + slot.Width / 2f, slot.Y + slot.Height / 2f, size, size);
-        unsafe {
-            Raylib.DrawTexturePro(TextureAtlas.Atlas, src, dest, new System.Numerics.Vector2(size / 2f, size / 2f), rotation, Color.White);
+    /// <summary>Отрисовка 3D блока или объемного экструдированного 3D предмета в руке (как в Minecraft).</summary>
+    private static void DrawHandHeldItem(VoxelFrame.Core.Inventory.ItemDefinition def, Rectangle slot, float scale, float rotation) {
+        if (GameData.TryGetBlockByItem(def.Id, out var block) && block != null && block.Id != GameData.BTorch.Id && block.Id != GameData.BWheatCrop.Id && block.Id != GameData.BTallGrass.Id && !GameData.IsDoor(block.Id)) {
+            // ── 3D Изометрический куб блока в руке ─────────────────────────
+            float cx = slot.X + slot.Width / 2f;
+            float cy = slot.Y + slot.Height / 2f;
+            float sz = MathF.Min(slot.Width, slot.Height) * scale * 0.72f;
+
+            var tiles = TextureAtlas.BlockTiles(block.Id);
+            var topUv = TextureAtlas.TileUv(tiles.PosY);
+            var leftUv = TextureAtlas.TileUv(tiles.PosX);
+            var rightUv = TextureAtlas.TileUv(tiles.PosZ);
+
+            Rlgl.SetTexture(TextureAtlas.Atlas.Id);
+            Rlgl.PushMatrix();
+            Rlgl.Translatef(cx, cy, 0f);
+            Rlgl.Rotatef(rotation * (180f / MathF.PI), 0f, 0f, 1f);
+
+            Rlgl.Begin((int)DrawMode.Quads);
+
+            // 1. Верхняя грань (+Y) - светлая
+            Rlgl.Color4ub(255, 255, 255, 255);
+            Rlgl.TexCoord2f(topUv.X, topUv.Y);                               Rlgl.Vertex2f(0f, -sz * 0.50f);
+            Rlgl.TexCoord2f(topUv.X, topUv.Y + topUv.Height);                Rlgl.Vertex2f(-sz * 0.44f, -sz * 0.25f);
+            Rlgl.TexCoord2f(topUv.X + topUv.Width, topUv.Y + topUv.Height); Rlgl.Vertex2f(0f, 0f);
+            Rlgl.TexCoord2f(topUv.X + topUv.Width, topUv.Y);                Rlgl.Vertex2f(sz * 0.44f, -sz * 0.25f);
+
+            // 2. Левая грань (+X) - умеренно затененная (82%)
+            Rlgl.Color4ub(210, 210, 210, 255);
+            Rlgl.TexCoord2f(leftUv.X, leftUv.Y);                               Rlgl.Vertex2f(-sz * 0.44f, -sz * 0.25f);
+            Rlgl.TexCoord2f(leftUv.X, leftUv.Y + leftUv.Height);                Rlgl.Vertex2f(-sz * 0.44f, sz * 0.25f);
+            Rlgl.TexCoord2f(leftUv.X + leftUv.Width, leftUv.Y + leftUv.Height); Rlgl.Vertex2f(0f, sz * 0.50f);
+            Rlgl.TexCoord2f(leftUv.X + leftUv.Width, leftUv.Y);                Rlgl.Vertex2f(0f, 0f);
+
+            // 3. Правая грань (+Z) - темная грань (68%)
+            Rlgl.Color4ub(175, 175, 175, 255);
+            Rlgl.TexCoord2f(rightUv.X, rightUv.Y);                               Rlgl.Vertex2f(0f, 0f);
+            Rlgl.TexCoord2f(rightUv.X, rightUv.Y + rightUv.Height);                Rlgl.Vertex2f(0f, sz * 0.50f);
+            Rlgl.TexCoord2f(rightUv.X + rightUv.Width, rightUv.Y + rightUv.Height); Rlgl.Vertex2f(sz * 0.44f, sz * 0.25f);
+            Rlgl.TexCoord2f(rightUv.X + rightUv.Width, rightUv.Y);                Rlgl.Vertex2f(sz * 0.44f, -sz * 0.25f);
+
+            Rlgl.End();
+            Rlgl.PopMatrix();
+            Rlgl.SetTexture(0);
+        } else {
+            // ── 3D Объемный экструдированный предмет (толщина в несколько пикселей) ─────
+            byte tile = TextureAtlas.ItemTile(def.Id);
+            var src = new Rectangle(
+                tile % TextureAtlas.Cols * TextureAtlas.TilePx,
+                tile / TextureAtlas.Cols * TextureAtlas.TilePx,
+                TextureAtlas.TilePx, TextureAtlas.TilePx);
+            float size = MathF.Min(slot.Width, slot.Height) * scale;
+            var origin = new System.Numerics.Vector2(size / 2f, size / 2f);
+
+            // Отрисовка нескольких слоев толщины (экструзия в 3D) с теневым градиентом
+            for (int layer = 3; layer >= 1; layer--) {
+                float off = layer * 1.5f;
+                var layerDest = new Rectangle(slot.X + slot.Width / 2f - off, slot.Y + slot.Height / 2f + off, size, size);
+                byte shade = (byte)(80 + layer * 35);
+                unsafe {
+                    Raylib.DrawTexturePro(TextureAtlas.Atlas, src, layerDest, origin, rotation, new Color(shade, shade, shade, (byte)255));
+                }
+            }
+
+            // Лицевой слой предмета
+            var frontDest = new Rectangle(slot.X + slot.Width / 2f, slot.Y + slot.Height / 2f, size, size);
+            unsafe {
+                Raylib.DrawTexturePro(TextureAtlas.Atlas, src, frontDest, origin, rotation, Color.White);
+            }
         }
     }
 

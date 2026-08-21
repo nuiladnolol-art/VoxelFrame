@@ -107,9 +107,9 @@ public sealed class GameSession {
                 OffhandCount = 1,
             },
         };
-        // Спавн: площадка 3×3 на поверхности у (0,0).
+        // Спавн: площадка 3×3 на поверхности у (0,0). Мгновенная плавная загрузка без фризов
         int target = session.World.Generator.SurfaceHeight(0, 0);
-        session.World.EnsureLoadedAroundSync(new Vector3(0.5f, target + 1.9f, 0.5f), 4);
+        session.World.EnsureLoadedAroundSync(new Vector3(0.5f, target + 1.9f, 0.5f), 1);
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 int sh = session.World.Generator.SurfaceHeight(dx, dz);
@@ -278,24 +278,33 @@ public sealed class GameSession {
     public void DiePlayer(string message = "Вы погибли!") {
         if (Ui == UiState.Death) return;
         Screens.ReturnHeld(this);
-        if (!SaveSystem.KeepInventory) {
-            // Дроп всех предметов из инвентаря на месте гибели с разлетом и задержкой подбора 2.5с
-            var dropPos = Player.Position + new Vector3(0f, 0.5f, 0f);
-            var rng = Random.Shared;
-            for (int i = 0; i < Player.Inventory.Capacity; i++) {
-                var slot = Player.Inventory.Slots[i];
-                if (slot != null && slot.Value.Quantity > 0) {
-                    float angle = rng.NextSingle() * MathF.Tau;
-                    float speed = 1.2f + rng.NextSingle() * 2.0f;
-                    var pickup = new ItemPickup(slot.Value.Item.Definition, slot.Value.Quantity, dropPos) {
-                        PickupDelay = 2.5f,
-                        Velocity = new Vector3(MathF.Cos(angle) * speed, 3.5f + rng.NextSingle() * 2.0f, MathF.Sin(angle) * speed)
-                    };
-                    World.Pickups.Add(pickup);
-                }
+        // Дроп всех предметов из инвентаря на месте гибели с разлетом и задержкой подбора 2.5с
+        var dropPos = Player.Position + new Vector3(0f, 0.5f, 0f);
+        var rng = Random.Shared;
+        for (int i = 0; i < Player.Inventory.Capacity; i++) {
+            var slot = Player.Inventory.Slots[i];
+            if (slot != null && slot.Value.Quantity > 0) {
+                float angle = rng.NextSingle() * MathF.Tau;
+                float speed = 1.2f + rng.NextSingle() * 2.0f;
+                var pickup = new ItemPickup(slot.Value.Item.Definition, slot.Value.Quantity, dropPos) {
+                    PickupDelay = 2.5f,
+                    Velocity = new Vector3(MathF.Cos(angle) * speed, 3.5f + rng.NextSingle() * 2.0f, MathF.Sin(angle) * speed)
+                };
+                World.Pickups.Add(pickup);
             }
-            Player.Inventory.Clear();
         }
+        if (Player.OffhandItem != null && Player.OffhandCount > 0) {
+            float angle = rng.NextSingle() * MathF.Tau;
+            float speed = 1.2f + rng.NextSingle() * 2.0f;
+            var pickup = new ItemPickup(Player.OffhandItem, Player.OffhandCount, dropPos) {
+                PickupDelay = 2.5f,
+                Velocity = new Vector3(MathF.Cos(angle) * speed, 3.5f + rng.NextSingle() * 2.0f, MathF.Sin(angle) * speed)
+            };
+            World.Pickups.Add(pickup);
+            Player.OffhandItem = null;
+            Player.OffhandCount = 0;
+        }
+        Player.Inventory.Clear();
         Player.Health = 0f;
         Player.Velocity = Vector3.Zero;
         Player.FireTicks = 0f;

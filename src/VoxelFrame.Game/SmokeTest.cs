@@ -683,13 +683,12 @@ internal static class SmokeTest {
         Check(!s.IsSleeping, "игрок проснулся");
         Check(Math.Abs(s.DayNight.TimeOfDay - 0.32f) < 0.05f, "наступил рассвет");
 
-        // 14. Смерть, экран смерти и KeepInventory
-        SaveSystem.KeepInventory = false;
+        // 14. Смерть, экран смерти и выпадение вещей
         inv.Slots[0] = new ItemEntry(GameData.NewItem(GameData.DiamondItem), 5);
         s.Player.Health = 0f;
         s.Player.Update(0.1f, PlayerInput.Idle, w, s);
         Check(s.Ui == UiState.Death, "при смерти активируется экран смерти (UiState.Death)");
-        Check(inv.CountOf(GameData.DiamondItem) == 0, "при KeepInventory=false вещи выпадают из инвентаря");
+        Check(inv.CountOf(GameData.DiamondItem) == 0, "вещи безоговорочно выпадают из инвентаря при смерти");
         Check(w.Pickups.Any(p => p.Definition.Id == GameData.DiamondItem.Id), "выпавшие алмазы лежат на месте гибели");
         s.RespawnPlayer();
         Check(s.Ui == UiState.Playing && s.Player.Health == s.Player.MaxHealth, "возрождение восстанавливает здоровье");
@@ -927,5 +926,45 @@ internal static class SmokeTest {
             w.PlacePlacedBlock(coveredGrass, GameData.BDirt, 1f);
         }
         Check(w.GetVoxel(coveredGrass).TypeId == GameData.BDirt.Id, "трава под сплошным непрозрачным блоком отмирает и превращается в землю");
+
+        // 31. Двери: крафт (6 досок -> 3 двери) и 2-блочная установка
+        var doorGrid = new ItemDefinition?[] {
+            GameData.PlankItem, GameData.PlankItem, null,
+            GameData.PlankItem, GameData.PlankItem, null,
+            GameData.PlankItem, GameData.PlankItem, null
+        };
+        string doorKey = GameData.NormalizeGrid(doorGrid);
+        Check(GameData.ShapeRecipes.TryGetValue(doorKey, out var doorRes) && doorRes.Item.Id == GameData.DoorItem.Id && doorRes.Count == 3, "крафт деревянной двери (6 досок -> 3 двери)");
+
+        var doorPos = new Vec3i(130, w.SpawnBlock.Y, 130);
+        w.PlacePlacedBlock(doorPos + new Vec3i(0, -1, 0), GameData.BStone, 1f);
+        w.RemoveBlock(doorPos);
+        w.RemoveBlock(doorPos + new Vec3i(0, 1, 0));
+        s.Player.Inventory.Slots[0] = new ItemEntry(GameData.NewItem(GameData.DoorItem), 1);
+        s.Player.SelectedSlot = 0;
+        s.Player.TryPlaceBlock(w, s, doorPos, GameData.BDoorLower, GameData.DoorItem);
+        Check(w.GetVoxel(doorPos).TypeId == GameData.BDoorLower.Id && w.GetVoxel(doorPos + new Vec3i(0, 1, 0)).TypeId == GameData.BDoorUpper.Id, "установка двери создает нижнюю и верхнюю половины");
+
+        // 32. Замедление скорости всех инструментов в 1.8 раза
+        float handTime = GameData.GetMiningTime(GameData.BLog, null);
+        float axeTime = GameData.GetMiningTime(GameData.BLog, GameData.IronAxeItem);
+        Check(handTime >= 4.0f && axeTime >= 0.7f, "скорость инструментов замедлена в 1.8 раза");
+
+        // 33. Пресечение дюпа лута в сундуках деревень
+        var dupeChestPos = new Vec3i(140, w.SpawnBlock.Y, 140);
+        var chest1 = w.GetOrCreateChest(dupeChestPos, s); // первое открытие генерирует лут
+        Check(chest1.Slots.Any(s => s != null), "первое открытие сгенерированного сундука дает нормальный лут");
+        w.RemoveBlock(dupeChestPos); // сломали сундук
+        w.Chests.Remove(dupeChestPos);
+        w.PlacedChests.Remove(dupeChestPos); // симулируем попытку дюпа сгенерированного сундука
+        var trapChest = w.GetOrCreateChest(dupeChestPos, s);
+        Check(trapChest.Slots[0]?.Item.Definition.Id == GameData.RottenFleshItem.Id && w.HostileMobs.Any(m => m.Type == HostileType.ZombiePigman), "дюперы сундуков наказываются гнилой плотью и вызовом Шерифа Свинозомби!");
+
+        // 34. Безоговорочное выпадение вещей при смерти
+        s.Player.Inventory.Slots[0] = new ItemEntry(GameData.NewItem(GameData.DiamondItem), 5);
+        s.Player.OffhandItem = GameData.TorchItem;
+        s.Player.OffhandCount = 10;
+        s.DiePlayer();
+        Check(s.Player.Inventory.Slots.All(s => s == null) && s.Player.OffhandItem == null, "при смерти игрока весь инвентарь и вторая рука выпадают на землю без исключений");
     }
 }

@@ -502,6 +502,20 @@ public sealed class Player {
                     session.Ui = UiState.Chest;
                     SoundSystem.PlayChest();
                     wantUse = false;
+                } else if (GameData.IsDoor(targetVox.TypeId)) {
+                    var lowerPos = targetVox.TypeId == GameData.BDoorLower.Id ? session.TargetBlock : session.TargetBlock + new Vec3i(0, -1, 0);
+                    var upperPos = lowerPos + new Vec3i(0, 1, 0);
+                    var lVox = world.GetVoxel(lowerPos);
+                    var uVox = world.GetVoxel(upperPos);
+                    bool isOpen = (lVox.SubGridLayerMask & 8) != 0;
+                    byte newMask = (byte)(lVox.SubGridLayerMask ^ 8);
+                    lVox.SubGridLayerMask = newMask;
+                    uVox.SubGridLayerMask = newMask;
+                    world.SetVoxelRaw(lowerPos, in lVox);
+                    world.SetVoxelRaw(upperPos, in uVox);
+                    if (isOpen) SoundSystem.PlayDoorClose();
+                    else SoundSystem.PlayDoorOpen();
+                    wantUse = false;
                 } else if (targetVox.TypeId == GameData.BBed.Id || targetVox.TypeId == GameData.BBedHead.Id) {
                     float tod = session.DayNight.TimeOfDay;
                     bool isNight = tod > 0.75f || tod < 0.25f;
@@ -911,6 +925,21 @@ public sealed class Player {
             else { facing = 0; forwardH = new Vec3i(0, 0, -1); }
         }
 
+        // Специальная установка 2-блочной двери (низ + верх)
+        if (item.Id == GameData.DoorItem.Id) {
+            var above = cell + new Vec3i(0, 1, 0);
+            if (world.IsSolidAt(above) || world.GetVoxel(above).TypeId != 0) return false;
+            if (!world.IsSolidAt(cell + new Vec3i(0, -1, 0))) return false;
+
+            if (TryConsumeSelected(item, 1)) {
+                world.PlacePlacedBlock(cell, GameData.BDoorLower, 1f, facing);
+                world.PlacePlacedBlock(above, GameData.BDoorUpper, 1f, facing);
+                SoundSystem.PlayPlace();
+                return true;
+            }
+            return false;
+        }
+
         // Специальная установка 2-блочной кровати (изножье + изголовье)
         if (block.Id == GameData.BBed.Id) {
             var headCell = cell + forwardH;
@@ -923,6 +952,23 @@ public sealed class Player {
             if (TryConsumeSelected(item, 1)) {
                 world.PlacePlacedBlock(cell, GameData.BBed, 1f, facing);
                 world.PlacePlacedBlock(headCell, GameData.BBedHead, 1f, facing);
+                SoundSystem.PlayPlace();
+                return true;
+            }
+            return false;
+        }
+
+        // 3D Факел: установка на пол (facing=0) или на стену (facing=1..4)
+        if (block.Id == GameData.BTorch.Id) {
+            var hitNormal = cell - session.TargetBlock;
+            byte torchFacing = 0;
+            if (hitNormal.X == 1) torchFacing = 1;      // Прикреплен к стене на западе
+            else if (hitNormal.X == -1) torchFacing = 2; // Прикреплен к стене на востоке
+            else if (hitNormal.Z == 1) torchFacing = 3;  // Прикреплен к стене на севере
+            else if (hitNormal.Z == -1) torchFacing = 4; // Прикреплен к стене на юге
+
+            if (TryConsumeSelected(item, 1)) {
+                world.PlacePlacedBlock(cell, block, 1f, torchFacing);
                 SoundSystem.PlayPlace();
                 return true;
             }
@@ -1004,6 +1050,17 @@ public sealed class Player {
         if (isStrong) SoundSystem.PlayStrongAttack();
         else SoundSystem.PlayWeakAttack();
 
+        // Износ прочности оружия/инструмента при ударе
+        if (SelectedEntry is { } heldEntry && (GameData.IsSword(toolId) || GameData.IsAxe(toolId) || GameData.IsPickaxe(toolId) || GameData.IsShovel(toolId) || GameData.IsHoe(toolId))) {
+            int maxDur = GameData.GetMaxToolDurability(toolId);
+            heldEntry.Item.Condition -= 1.0 / maxDur;
+            if (heldEntry.Item.Condition <= 0.0) {
+                Inventory.RemoveAt(SelectedSlot);
+                SoundSystem.PlayBreakTool();
+                session.AddMessage($"Оружие {heldEntry.Item.Definition.Name} сломалось!");
+            }
+        }
+
         if (best.Health <= 0f) {
             best.Die(world, session);
         }
@@ -1042,6 +1099,17 @@ public sealed class Player {
 
         if (isStrong) SoundSystem.PlayStrongAttack();
         else SoundSystem.PlayWeakAttack();
+
+        // Износ прочности оружия/инструмента при ударе
+        if (SelectedEntry is { } heldHostileEntry && (GameData.IsSword(toolId) || GameData.IsAxe(toolId) || GameData.IsPickaxe(toolId) || GameData.IsShovel(toolId) || GameData.IsHoe(toolId))) {
+            int maxDur = GameData.GetMaxToolDurability(toolId);
+            heldHostileEntry.Item.Condition -= 1.0 / maxDur;
+            if (heldHostileEntry.Item.Condition <= 0.0) {
+                Inventory.RemoveAt(SelectedSlot);
+                SoundSystem.PlayBreakTool();
+                session.AddMessage($"Оружие {heldHostileEntry.Item.Definition.Name} сломалось!");
+            }
+        }
 
         if (mob.Health <= 0f) {
             mob.Die(world, session);

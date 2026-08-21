@@ -109,6 +109,9 @@ public sealed class HostileMob {
                 bool canSeePlayer = HasLineOfSight(world, mobCenter, playerCenter) || HasLineOfSight(world, mobCenter, player.Eye);
                 // Начинает шипеть и взводиться на расстоянии до 3.8 блоков (не вплотную)
                 if (dist < 3.8f && canSeePlayer) {
+                    if (FuseTimer <= 0f) {
+                        SoundSystem.PlayCreeperHiss();
+                    }
                     speed = 0.4f; // Замедляется при раздувании
                     FuseTimer += dt;
                     if (FuseTimer >= 1.3f) {

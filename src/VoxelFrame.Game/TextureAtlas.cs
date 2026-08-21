@@ -40,7 +40,8 @@ public static class TextureAtlas {
                      TTNT = 101, TTNTSide = 102, TTNTTop = 103, TTNTBottom = 104,
                      TMossyCobble = 105, TMobSpawner = 106, TWeb = 107, TRail = 108, TPressurePlate = 109,
                      TChiseledSandstone = 110, TNetherrack = 111, TSoulSand = 112, TGlowstone = 113,
-                     TNetherQuartzOre = 114, TNetherBrick = 115, TNetherPortal = 116;
+                     TNetherQuartzOre = 114, TNetherBrick = 115, TNetherPortal = 116,
+                     TDoorLower = 117, TDoorUpper = 118, TDoorItem = 119;
 
     public record struct BlockFaceTiles(byte PosX, byte NegX, byte PosY, byte NegY, byte PosZ, byte NegZ);
 
@@ -394,6 +395,9 @@ public static class TextureAtlas {
         palette[TNetherQuartzOre] = (new Color(135, 45, 45, 255), true);
         palette[TNetherBrick] = (new Color(55, 25, 30, 255), true);
         palette[TNetherPortal] = (new Color(120, 30, 210, 200), true);
+        palette[TDoorLower] = (new Color(145, 105, 60, 255), false);
+        palette[TDoorUpper] = (new Color(145, 105, 60, 255), false);
+        palette[TDoorItem] = (new Color(145, 105, 60, 255), false);
 
         var rng = new Random(20260812);
         for (int tile = 0; tile < palette.Length; tile++) {
@@ -1009,6 +1013,37 @@ public static class TextureAtlas {
                         g = Math.Clamp(30 + wave / 2, 10, 90);
                         b = Math.Clamp(230 + wave, 140, 255);
                         a = 210;
+                    } else if (tile == TDoorUpper) {
+                        bool frame = px <= 1 || px >= 14 || py <= 1 || py >= 14;
+                        bool window = ((px >= 3 && px <= 6) || (px >= 9 && px <= 12)) && (py >= 3 && py <= 10);
+                        if (window) {
+                            r = 170; g = 215; b = 240; a = 190;
+                        } else if (frame) {
+                            r = 110; g = 75; b = 40; a = 255;
+                        } else {
+                            r = 145 + (px % 3) * 10; g = 105; b = 60; a = 255;
+                        }
+                    } else if (tile == TDoorLower) {
+                        bool frame = px <= 1 || px >= 14 || py <= 1 || py >= 14;
+                        bool handle = (px == 12 || px == 13) && (py == 3 || py == 4);
+                        if (handle) {
+                            r = 40; g = 40; b = 45; a = 255;
+                        } else if (frame) {
+                            r = 110; g = 75; b = 40; a = 255;
+                        } else {
+                            r = 145 + (px % 3) * 10; g = 105; b = 60; a = 255;
+                        }
+                    } else if (tile == TDoorItem) {
+                        if (px >= 3 && px <= 12 && py >= 1 && py <= 14) {
+                            bool window = ((px >= 5 && px <= 6) || (px >= 9 && px <= 10)) && (py >= 3 && py <= 6);
+                            bool handle = (px == 10 || px == 11) && (py == 8);
+                            if (window) { r = 170; g = 215; b = 240; a = 230; }
+                            else if (handle) { r = 40; g = 40; b = 45; a = 255; }
+                            else if (px == 3 || px == 12 || py == 1 || py == 14) { r = 110; g = 75; b = 40; a = 255; }
+                            else { r = 145; g = 105; b = 60; a = 255; }
+                        } else {
+                            a = 0;
+                        }
                     } else {
                         if (tile == TPlanks && (py == 4 || py == 11)) { r -= 40; g -= 30; b -= 20; }
                         if (tile == TLogSide && py % 5 == 4) { r -= 30; g -= 24; b -= 14; }

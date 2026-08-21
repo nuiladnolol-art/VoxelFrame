@@ -279,6 +279,39 @@ public static class Screens {
         }
     }
 
+    private static bool Slider(float x, float y, float w, float h, string text, float value, float min, float max, out float newValue) {
+        newValue = value;
+        var mouse = Raylib.GetMousePosition();
+        var rect = new Rectangle(x, y, w, h);
+        bool hovered = Raylib.CheckCollisionPointRec(mouse, rect);
+        bool dragging = hovered && Raylib.IsMouseButtonDown(MouseButton.Left);
+
+        if (dragging) {
+            float ratio = Math.Clamp((mouse.X - x) / w, 0f, 1f);
+            newValue = min + ratio * (max - min);
+        }
+
+        // Фон трека слайдера (глубокий стилизованный блок)
+        Raylib.DrawRectangle((int)x, (int)y, (int)w, (int)h, new Color(28, 22, 20, 255));
+        Raylib.DrawRectangleLinesEx(rect, 2f, new Color(55, 45, 40, 255));
+
+        // Ползунок (ручка бегунка)
+        float currentRatio = Math.Clamp((value - min) / (max - min), 0f, 1f);
+        float thumbW = 18f;
+        float thumbX = x + currentRatio * (w - thumbW);
+        var thumbRect = new Rectangle(thumbX, y, thumbW, h);
+
+        bool thumbHover = Raylib.CheckCollisionPointRec(mouse, thumbRect) || dragging;
+        Color thumbBg = thumbHover ? new Color(175, 175, 175, 255) : new Color(130, 130, 130, 255);
+        Raylib.DrawRectangle((int)thumbX, (int)y, (int)thumbW, (int)h, thumbBg);
+        Raylib.DrawRectangleLinesEx(thumbRect, 1.5f, new Color(220, 220, 220, 255));
+
+        // Текст
+        Fonts.DrawCentered(text, x + w / 2f, y + (h - 18f) / 2f, 18f, Color.White);
+
+        return dragging;
+    }
+
     public static void DrawGraphics() {
         int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
         
@@ -292,7 +325,7 @@ public static class Screens {
 
         Fonts.DrawCentered("НАСТРОЙКИ ГРАФИКИ", w / 2f, h * 0.15f, 44f, new Color(255, 220, 120, 255));
 
-        float cy = h * 0.32f;
+        float cy = h * 0.30f;
         bool isFs = Raylib.IsWindowState(ConfigFlags.UndecoratedWindow) || Raylib.IsWindowFullscreen();
         string fsText = isFs ? "Режим экрана: Полноэкранный (в окне)" : "Режим экрана: Оконный";
         if (Button(w / 2f - 180f, cy, 360f, 46f, fsText, true)) {
@@ -304,13 +337,10 @@ public static class Screens {
             SaveSystem.FancyGraphics = !SaveSystem.FancyGraphics;
         }
 
+        // Слайдер дальности прорисовки: от 2 до 20 чанков!
         string distText = $"Дальность прорисовки: {SaveSystem.RenderDistanceSetting} чанков";
-        if (Button(w / 2f - 180f, cy + 112f, 360f, 46f, distText, true)) {
-            SaveSystem.RenderDistanceSetting = SaveSystem.RenderDistanceSetting switch {
-                3 => 5,
-                5 => 7,
-                _ => 3
-            };
+        if (Slider(w / 2f - 180f, cy + 112f, 360f, 46f, distText, SaveSystem.RenderDistanceSetting, 2f, 20f, out float newDist)) {
+            SaveSystem.RenderDistanceSetting = Math.Clamp((int)MathF.Round(newDist), 2, 20);
         }
 
         if (Button(w / 2f - 140f, h * 0.82f, 280f, 46f, "Готово", true)) {
@@ -334,11 +364,10 @@ public static class Screens {
 
         float cy = h * 0.36f;
         string volText = SaveSystem.SoundVolume > 0 ? $"Общая громкость: {SaveSystem.SoundVolume}%" : "Общая громкость: Выкл";
-        if (Button(w / 2f - 180f, cy, 360f, 46f, volText, true)) {
-            SaveSystem.SoundVolume = (SaveSystem.SoundVolume + 25) % 125;
+        if (Slider(w / 2f - 180f, cy, 360f, 46f, volText, SaveSystem.SoundVolume, 0f, 100f, out float newVol)) {
+            SaveSystem.SoundVolume = Math.Clamp((int)MathF.Round(newVol), 0, 100);
             if (SaveSystem.SoundVolume > 0) {
                 Raylib.SetMasterVolume(SaveSystem.SoundVolume / 100f);
-                SoundSystem.PlayPop();
             } else {
                 Raylib.SetMasterVolume(0f);
             }
@@ -364,10 +393,8 @@ public static class Screens {
         Fonts.DrawCentered("ИГРОВОЙ ПРОЦЕСС", w / 2f, h * 0.15f, 44f, new Color(255, 220, 120, 255));
 
         float cy = h * 0.36f;
-        string keepInvText = SaveSystem.KeepInventory ? "Сохранение инвентаря: Вкл (Сохраняется)" : "Сохранение инвентаря: Выкл (Выпадает)";
-        if (Button(w / 2f - 180f, cy, 360f, 46f, keepInvText, true)) {
-            SaveSystem.KeepInventory = !SaveSystem.KeepInventory;
-        }
+        Button(w / 2f - 180f, cy, 360f, 46f, "Режим игры: Классическое выживание", false);
+        Button(w / 2f - 180f, cy + 56f, 360f, 46f, "Потеря вещей при смерти: Включена", false);
 
         if (Button(w / 2f - 140f, h * 0.82f, 280f, 46f, "Готово", true)) {
             InGameplayScreen = false;
@@ -1672,7 +1699,27 @@ public static class Screens {
             DrawSlot(session, pInv, invX + col * (slotSz + gap), hotY, col, col == session.Player.SelectedSlot);
 
         DrawHeldItem();
-        HandleWorkbenchInput(session, pInv, invX, invY, hotY);
+
+        if (leftClick || rightClick) {
+            for (int row = 0; row < 3; row++) {
+                for (int col = 0; col < 9; col++) {
+                    float sx = invX + col * (slotSz + gap);
+                    float sy = invY + row * (slotSz + gap);
+                    if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(sx, sy, slotSz, slotSz))) {
+                        HandleContainerSlotClick(pInv, 9 + row * 9 + col, leftClick, rightClick, chestInv);
+                        return;
+                    }
+                }
+            }
+            for (int col = 0; col < 9; col++) {
+                float sx = invX + col * (slotSz + gap);
+                float sy = hotY;
+                if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(sx, sy, slotSz, slotSz))) {
+                    HandleContainerSlotClick(pInv, col, leftClick, rightClick, chestInv);
+                    return;
+                }
+            }
+        }
     }
 
     private static void HandleContainerSlotClick(Container inv, int slotIdx, bool leftClick, bool rightClick, Container? targetTransferInv = null) {
@@ -1682,10 +1729,37 @@ public static class Screens {
         bool shift = Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift);
         if (shift && !rightClick && slotItem != null && targetTransferInv != null) {
             var item = slotItem.Value;
-            if (targetTransferInv.TryInsert(item.Item, item.Quantity)) {
-                inv.RemoveAt(slotIdx);
-                return;
+            int inserted = 0;
+            // 1. Сначала объединяем с существующими одинаковыми стаками
+            for (int i = 0; i < targetTransferInv.Slots.Length; i++) {
+                var s = targetTransferInv.Slots[i];
+                if (s.HasValue && s.Value.Item.Definition.Id == item.Item.Definition.Id && s.Value.Quantity < maxStack) {
+                    int space = maxStack - s.Value.Quantity;
+                    int add = Math.Min(space, item.Quantity - inserted);
+                    targetTransferInv.InsertAt(i, s.Value with { Quantity = s.Value.Quantity + add });
+                    inserted += add;
+                    if (inserted >= item.Quantity) break;
+                }
             }
+            // 2. Остаток помещаем в первые свободные пустые слоты
+            if (inserted < item.Quantity) {
+                for (int i = 0; i < targetTransferInv.Slots.Length; i++) {
+                    if (!targetTransferInv.Slots[i].HasValue) {
+                        int add = Math.Min(maxStack, item.Quantity - inserted);
+                        targetTransferInv.InsertAt(i, new ItemEntry(item.Item, add));
+                        inserted += add;
+                        if (inserted >= item.Quantity) break;
+                    }
+                }
+            }
+            if (inserted >= item.Quantity) {
+                inv.RemoveAt(slotIdx);
+                SoundSystem.PlayPop();
+            } else if (inserted > 0) {
+                inv.InsertAt(slotIdx, item with { Quantity = item.Quantity - inserted });
+                SoundSystem.PlayPop();
+            }
+            return;
         }
 
         if (rightClick) {

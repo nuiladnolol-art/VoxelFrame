@@ -450,6 +450,7 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.WoodHoeItem.Id, TextureAtlas.THoeWood);
         TextureAtlas.SetItemTile(GameData.StoneHoeItem.Id, TextureAtlas.THoeStone);
         TextureAtlas.SetItemTile(GameData.IronHoeItem.Id, TextureAtlas.THoeIron);
+        TextureAtlas.SetItemTile(GameData.DiamondHoeItem.Id, TextureAtlas.THoeDiamond);
         TextureAtlas.SetItemTile(GameData.BoneMealItem.Id, TextureAtlas.TBoneMeal);
         TextureAtlas.SetItemTile(GameData.SawdustItem.Id, TextureAtlas.TSawdust);
         TextureAtlas.SetItemTile(GameData.SawdustPorridgeItem.Id, TextureAtlas.TSawdustPorridge);
@@ -473,6 +474,9 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.GlowstoneItem.Id, TextureAtlas.TGlowstone);
         TextureAtlas.SetItemTile(GameData.NetherQuartzOreItem.Id, TextureAtlas.TNetherQuartzOre);
         TextureAtlas.SetItemTile(GameData.NetherBrickItem.Id, TextureAtlas.TNetherBrick);
+        TextureAtlas.SetItemTile(GameData.DoorItem.Id, TextureAtlas.TDoorItem);
+        TextureAtlas.SetBlockFaces(GameData.BDoorLower.Id, TextureAtlas.TDoorLower, TextureAtlas.TDoorLower, TextureAtlas.TPlanks, TextureAtlas.TPlanks, TextureAtlas.TDoorLower, TextureAtlas.TDoorLower);
+        TextureAtlas.SetBlockFaces(GameData.BDoorUpper.Id, TextureAtlas.TDoorUpper, TextureAtlas.TDoorUpper, TextureAtlas.TPlanks, TextureAtlas.TPlanks, TextureAtlas.TDoorUpper, TextureAtlas.TDoorUpper);
         TextureAtlas.SetItemTile(GameData.MossyCobblestoneItem.Id, TextureAtlas.TMossyCobble);
         TextureAtlas.SetItemTile(GameData.ChiseledSandstoneItem.Id, TextureAtlas.TChiseledSandstone);
         TextureAtlas.SetItemTile(GameData.RailItem.Id, TextureAtlas.TRail);
