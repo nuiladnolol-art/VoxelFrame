@@ -652,9 +652,9 @@ public sealed class Player {
                                 Hunger = MathF.Min(MaxHunger, Hunger + foodVal);
                                 Saturation = MathF.Min(Hunger, Saturation + foodVal * 0.6f);
                                 if (item.Id == GameData.GoldenAppleItem.Id) {
-                                    Health = MathF.Min(MaxHealth, Health + 10f);
-                                    InvulnerabilityTimer = 5.0f;
-                                    session.AddMessage("Золотое яблоко: +10 HP и 5с неуязвимости!");
+                                    Health = MathF.Min(MaxHealth, Health + 4f);
+                                    InvulnerabilityTimer = 1.5f;
+                                    session.AddMessage("Золотое яблоко: +4 HP и кратковременная защита!");
                                 }
                                 SoundSystem.PlayEat();
                             }

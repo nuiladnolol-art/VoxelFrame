@@ -232,9 +232,11 @@ public sealed class WorldGenerator {
         // Растительность (2D трава)
         PlaceFoliage(chunk, ox, oz);
 
-        // Редкие деревни с сундуками
-        if (chunk.Origin.Y == 1 || chunk.Origin.Y == 2) // только наземные чанки
+        // Редкие деревни и разрушенные порталы
+        if (chunk.Origin.Y == 1 || chunk.Origin.Y == 2) {
             PlaceVillages(chunk, ox, oz);
+            PlaceRuinedPortals(chunk, ox, oy, oz);
+        }
     }
 
     private void PlaceFoliage(Chunk chunk, int ox, int oz) {
@@ -578,55 +580,220 @@ public sealed class WorldGenerator {
         int surface = SurfaceHeight(houseWX, houseWZ);
         if (surface < SeaLevel + 2) return;
 
-        const int W = 7, D = 6, H = 4; // ширина, глубина, высота
+        int houseType = houseIdx % 4; // 0 = Коттедж, 1 = Кузница, 2 = Фермер с грядкой, 3 = Малая хижина
 
-        for (int dz = 0; dz < D; dz++) {
-            for (int dx = 0; dx < W; dx++) {
-                int wx = houseWX + dx - W / 2;
-                int wz = houseWZ + dz - D / 2;
+        if (houseType == 1) {
+            // ── 1. Кузница селения (Blacksmith Forge) 7x5 ──
+            const int W = 7, D = 5, H = 4;
+            for (int dz = 0; dz < D; dz++) {
+                for (int dx = 0; dx < W; dx++) {
+                    int wx = houseWX + dx - W / 2;
+                    int wz = houseWZ + dz - D / 2;
+                    int wy = surface;
+
+                    for (int under = 0; under <= 3; under++)
+                        SetVillageBlock(chunk, ox, oz, wx, wy - under, wz, GameData.BCobblestone.Id);
+
+                    SetVillageBlock(chunk, ox, oz, wx, wy, wz, GameData.BCobblestone.Id);
+
+                    bool isCorner = (dx == 0 || dx == W - 1) && (dz == 0 || dz == D - 1);
+                    bool isBack = dz == D - 1;
+                    bool isLeft = dx == 0;
+
+                    for (int y = 1; y <= H - 1; y++) {
+                        if (isCorner) {
+                            SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, GameData.BLog.Id);
+                        } else if (isBack || (isLeft && y <= 2)) {
+                            SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, GameData.BCobblestone.Id);
+                        } else {
+                            SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, 0);
+                        }
+                    }
+                    SetVillageBlock(chunk, ox, oz, wx, wy + H, wz, GameData.BStone.Id);
+                }
+            }
+            // 2 Печи, верстак, сундук кузнеца
+            SetVillageBlock(chunk, ox, oz, houseWX - 2, surface + 1, houseWZ + 1, GameData.BFurnace.Id);
+            SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ + 1, GameData.BFurnace.Id);
+            SetVillageBlock(chunk, ox, oz, houseWX + 1, surface + 1, houseWZ + 1, GameData.BWorkbench.Id);
+            SetVillageBlock(chunk, ox, oz, houseWX + 2, surface + 1, houseWZ + 1, GameData.BChest.Id);
+            SetVillageBlock(chunk, ox, oz, houseWX - 2, surface + 1, houseWZ - 1, GameData.BLava.Id); // лава кузницы
+            SetVillageBlock(chunk, ox, oz, houseWX, surface + 3, houseWZ, GameData.BTorch.Id);
+            return;
+        }
+
+        if (houseType == 2) {
+            // ── 2. Фермерский дом (Farmhouse) + Грядка с пшеницей ──
+            const int W = 6, D = 5, H = 4;
+            for (int dz = 0; dz < D; dz++) {
+                for (int dx = 0; dx < W; dx++) {
+                    int wx = houseWX + dx - W / 2;
+                    int wz = houseWZ + dz - D / 2;
+                    int wy = surface;
+
+                    for (int under = 0; under <= 3; under++)
+                        SetVillageBlock(chunk, ox, oz, wx, wy - under, wz, GameData.BCobblestone.Id);
+
+                    SetVillageBlock(chunk, ox, oz, wx, wy, wz, GameData.BPlanks.Id);
+
+                    bool isEdge = dx == 0 || dx == W - 1 || dz == 0 || dz == D - 1;
+                    bool isDoor = dz == 0 && (dx == W / 2);
+                    bool isWindow = (dx == 0 || dx == W - 1) && dz == D / 2;
+
+                    for (int y = 1; y <= H - 1; y++) {
+                        if (isEdge) {
+                            if (isDoor && (y == 1 || y == 2)) {
+                                SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, y == 1 ? GameData.BDoorLower.Id : GameData.BDoorUpper.Id);
+                            } else if (isWindow && y == 2) {
+                                SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, GameData.BGlass.Id);
+                            } else {
+                                SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, GameData.BPlanks.Id);
+                            }
+                        } else {
+                            SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, 0);
+                        }
+                    }
+                    SetVillageBlock(chunk, ox, oz, wx, wy + H, wz, GameData.BLog.Id);
+                }
+            }
+            // Кровать и сундук внутри
+            SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ + 1, GameData.BBed.Id);
+            SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ, GameData.BBedHead.Id);
+            SetVillageBlock(chunk, ox, oz, houseWX + 1, surface + 1, houseWZ + 1, GameData.BChest.Id);
+            SetVillageBlock(chunk, ox, oz, houseWX, surface + 3, houseWZ, GameData.BTorch.Id);
+
+            // Огород рядом с домом (4x4)
+            for (int fz = 0; fz < 4; fz++) {
+                for (int fx = 0; fx < 4; fx++) {
+                    int gwx = houseWX + W / 2 + 1 + fx;
+                    int gwz = houseWZ - 2 + fz;
+                    int gwy = SurfaceHeight(gwx, gwz);
+                    if (gwy >= SeaLevel + 1) {
+                        bool isWaterCanal = (fx == 1 && (fz == 1 || fz == 2));
+                        if (isWaterCanal) {
+                            SetVillageBlock(chunk, ox, oz, gwx, gwy, gwz, GameData.BWater.Id);
+                        } else {
+                            SetVillageBlock(chunk, ox, oz, gwx, gwy, gwz, GameData.BFarmland.Id);
+                            SetVillageBlock(chunk, ox, oz, gwx, gwy + 1, gwz, GameData.BWheatCrop.Id);
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        // ── 0 и 3. Жилой коттедж и Малая хижина со стеклами, дверями и кроватями ──
+        int houseW = (houseType == 0) ? 6 : 5;
+        int houseD = (houseType == 0) ? 6 : 5;
+        const int houseH = 4;
+
+        for (int dz = 0; dz < houseD; dz++) {
+            for (int dx = 0; dx < houseW; dx++) {
+                int wx = houseWX + dx - houseW / 2;
+                int wz = houseWZ + dz - houseD / 2;
                 int wy = surface;
 
-                // Фундамент из булыжника и заполнение под домом
-                for (int under = 0; under <= 3; under++) {
+                for (int under = 0; under <= 3; under++)
                     SetVillageBlock(chunk, ox, oz, wx, wy - under, wz, GameData.BCobblestone.Id);
-                }
 
-                // Пол внутри дома
                 SetVillageBlock(chunk, ox, oz, wx, wy, wz, GameData.BPlanks.Id);
 
-                // Стены из досок (только периметр)
-                bool isEdge = dx == 0 || dx == W - 1 || dz == 0 || dz == D - 1;
-                // Дверной проём: центр ближней стены (dz==0, dx==W/2)
-                bool isDoor = dz == 0 && (dx == W / 2);
+                bool isCorner = (dx == 0 || dx == houseW - 1) && (dz == 0 || dz == houseD - 1);
+                bool isEdge = dx == 0 || dx == houseW - 1 || dz == 0 || dz == houseD - 1;
+                bool isDoor = dz == 0 && (dx == houseW / 2);
+                bool isWindow = (dx == 0 || dx == houseW - 1) && dz == houseD / 2;
 
-                for (int y = 1; y <= H - 1; y++) {
-                    if (isEdge) {
-                        if (!(isDoor && y <= 2)) {
-                            SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, GameData.BPlanks.Id);
+                for (int y = 1; y <= houseH - 1; y++) {
+                    if (isCorner) {
+                        SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, GameData.BLog.Id);
+                    } else if (isEdge) {
+                        if (isDoor && (y == 1 || y == 2)) {
+                            SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, y == 1 ? GameData.BDoorLower.Id : GameData.BDoorUpper.Id);
+                        } else if (isWindow && y == 2) {
+                            SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, GameData.BGlass.Id);
                         } else {
-                            SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, 0); // дверной проём
+                            SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, GameData.BPlanks.Id);
                         }
                     } else {
-                        // Очистка внутреннего пространства воздухом
                         SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, 0);
                     }
                 }
 
-                // Крыша из бревен (верхний ряд сплошной)
-                SetVillageBlock(chunk, ox, oz, wx, wy + H, wz, GameData.BLog.Id);
+                SetVillageBlock(chunk, ox, oz, wx, wy + houseH, wz, GameData.BLog.Id);
             }
         }
 
-        // Сундук внутри домика
-        int chestX = houseWX + 1;
-        int chestZ = houseWZ + 1;
-        SetVillageBlock(chunk, ox, oz, chestX, surface + 1, chestZ, GameData.BChest.Id);
+        // Кровать в углу
+        SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ + 1, GameData.BBed.Id);
+        SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ, GameData.BBedHead.Id);
 
-        // Факел внутри дома для уюта и света
-        SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 2, houseWZ + 1, GameData.BTorch.Id);
+        // Сундук и верстак
+        SetVillageBlock(chunk, ox, oz, houseWX + 1, surface + 1, houseWZ + 1, GameData.BChest.Id);
+        if (houseType == 0) {
+            SetVillageBlock(chunk, ox, oz, houseWX + 1, surface + 1, houseWZ - 1, GameData.BWorkbench.Id);
+        }
 
-        // Факел у входа снаружи
-        SetVillageBlock(chunk, ox, oz, houseWX + 1, surface + 2, houseWZ - D / 2, GameData.BTorch.Id);
+        // Факел внутри дома и над входом
+        SetVillageBlock(chunk, ox, oz, houseWX, surface + 3, houseWZ, GameData.BTorch.Id);
+        SetVillageBlock(chunk, ox, oz, houseWX, surface + 3, houseWZ - houseD / 2 - 1, GameData.BTorch.Id);
+    }
+
+    private void PlaceRuinedPortals(Chunk chunk, int ox, int oy, int oz) {
+        const int portalSectorSize = 192; // Редкий разрушенный портал
+        int sectorX = (int)MathF.Floor((float)ox / portalSectorSize);
+        int sectorZ = (int)MathF.Floor((float)oz / portalSectorSize);
+
+        var rng = new Random(_seed ^ (sectorX * 458921) ^ (sectorZ * 912837));
+        float pSeed = _mineshaftNoise.Get(sectorX * 43.19f + 555.55f, sectorZ * 43.19f + 777.77f);
+        if (pSeed < 0.60f) return;
+
+        int portalWX = sectorX * portalSectorSize + rng.Next(24, portalSectorSize - 24);
+        int portalWZ = sectorZ * portalSectorSize + rng.Next(24, portalSectorSize - 24);
+
+        int chunkMinX = ox, chunkMaxX = ox + Chunk.SizeX - 1;
+        int chunkMinZ = oz, chunkMaxZ = oz + Chunk.SizeZ - 1;
+        if (portalWX + 15 < chunkMinX || portalWX - 15 > chunkMaxX) return;
+        if (portalWZ + 15 < chunkMinZ || portalWZ - 15 > chunkMaxZ) return;
+
+        int surface = SurfaceHeight(portalWX, portalWZ);
+        if (surface <= SeaLevel + 2) return;
+
+        // Платформа адского камня 7x7 с маленькой лавой
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dz = -3; dz <= 3; dz++) {
+                int r2 = dx * dx + dz * dz;
+                if (r2 > 10) continue;
+                int pwx = portalWX + dx, pwz = portalWZ + dz;
+                int pwy = SurfaceHeight(pwx, pwz);
+                if (pwy >= SeaLevel) {
+                    SetVillageBlock(chunk, ox, oz, pwx, pwy, pwz, GameData.BNetherrack.Id);
+                    if (r2 == 0) {
+                        SetVillageBlock(chunk, ox, oz, pwx, pwy, pwz, GameData.BLava.Id);
+                    }
+                }
+            }
+        }
+
+        // Рама разрушенного портала 4x5
+        for (int px = -1; px <= 2; px++) {
+            for (int py = 1; py <= 5; py++) {
+                bool isFrame = px == -1 || px == 2 || py == 1 || py == 5;
+                if (isFrame) {
+                    int bwx = portalWX + px, bwz = portalWZ;
+                    int bwy = surface + py;
+
+                    bool broken = (px == 2 && py == 4) || (px == -1 && py == 5 && rng.NextDouble() < 0.5);
+                    ushort b = broken ? (ushort)0 : (rng.NextDouble() < 0.25 ? GameData.BNetherrack.Id : GameData.BObsidian.Id);
+                    if (b != 0) {
+                        SetWorldBlock(chunk, ox, oy, oz, bwx, bwy, bwz, b);
+                    }
+                }
+            }
+        }
+
+        // Сундук портала на адском камне
+        SetWorldBlock(chunk, ox, oy, oz, portalWX + 2, surface + 1, portalWZ + 1, GameData.BChest.Id);
+        SetWorldBlock(chunk, ox, oy, oz, portalWX - 2, surface + 1, portalWZ - 1, GameData.BGoldOre.Id);
     }
 
     private void PlaceVillageRoad(Chunk chunk, int ox, int oz, int cx, int cz, Random rng) {
@@ -677,15 +844,21 @@ public sealed class WorldGenerator {
 
     private void PlaceDungeons(Chunk chunk, int ox, int oy, int oz) {
         if (oy > 38 || oy + Chunk.SizeY < 8) return;
-        int sectorX = (int)MathF.Floor(ox / 48f);
-        int sectorZ = (int)MathF.Floor(oz / 48f);
-        int cx = sectorX * 48 + 24;
-        int cz = sectorZ * 48 + 24;
-        int cy = 12 + Math.Abs((sectorX * 37 + sectorZ * 19) % 20);
+        const int dungeonSector = 128;
+        int sectorX = (int)MathF.Floor((float)ox / dungeonSector);
+        int sectorZ = (int)MathF.Floor((float)oz / dungeonSector);
+
+        // Вероятность данжа в секторе (~45%)
+        float dSeed = _mineshaftNoise.Get(sectorX * 23.45f + 111f, sectorZ * 23.45f + 222f);
+        if (dSeed < 0.55f) return;
+
+        int cx = sectorX * dungeonSector + 64;
+        int cz = sectorZ * dungeonSector + 64;
+        int cy = 14 + Math.Abs((sectorX * 37 + sectorZ * 19) % 18);
 
         if (Math.Abs(ox + Chunk.SizeX / 2 - cx) > 28 || Math.Abs(oz + Chunk.SizeZ / 2 - cz) > 28) return;
 
-        // Комната 7x7x5
+        // Комната 7x7x5 с мшистым булыжником
         for (int dx = -3; dx <= 3; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
                 for (int dy = 0; dy <= 4; dy++) {

@@ -360,63 +360,44 @@ public sealed class GameWorld : IDisposable {
         if (Chests.TryGetValue(pos, out var inv)) return inv;
         var newInv = new Container(1000000.0, 1000000.0);
 
-        if (PlacedChests.Contains(pos)) {
+        if (PlacedChests.Contains(pos) || LootedStructureChests.Contains(pos)) {
+            // Сундук игрока или уже разграбленная структура: создается чистый пустой сундук без дюпа
             Chests[pos] = newInv;
-            return newInv;
-        }
-
-        if (LootedStructureChests.Contains(pos)) {
-            // Игрок сломал сгенерированный сундук и поставил новый на то же место ради дюпа лута!
-            // НАКАЗАНИЕ ДЮПЕРА:
-            SoundSystem.PlayDupePolice();
-            newInv.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.RottenFleshItem), 64));
-            newInv.InsertAt(1, new ItemEntry(GameData.NewItem(GameData.DirtItem), 64));
-            newInv.InsertAt(4, new ItemEntry(GameData.NewItem(GameData.BoneItem), 13));
-            Chests[pos] = newInv;
-
-            var policePos = new Vector3(pos.X + 0.5f, pos.Y + 1.0f, pos.Z + 0.5f);
-            var sheriff = new HostileMob(HostileType.ZombiePigman, policePos) { Health = 60f };
-            HostileMobs.Add(sheriff);
-
-            session?.AddMessage("🚨 ПОЛИЦИЯ ЖИТЕЛЕЙ: Попытка дюпа пресечена! Алмазы конфискованы, за вами выслан Шериф!");
             return newInv;
         }
 
         LootedStructureChests.Add(pos);
         var rng = new Random(Seed ^ (pos.X * 73856093 ^ pos.Y * 19349663 ^ pos.Z * 83492791));
 
-        if (Dimension == Dimension.Nether) {
-            // Сундуки в Нижнем мире
-            newInv.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.GoldIngotItem), rng.Next(2, 6)));
-            newInv.InsertAt(1, new ItemEntry(GameData.NewItem(GameData.NetherQuartzItem), rng.Next(4, 12)));
-            newInv.InsertAt(2, new ItemEntry(GameData.NewItem(GameData.BlazeRodItem), rng.Next(1, 3)));
-            newInv.InsertAt(3, new ItemEntry(GameData.NewItem(GameData.FlintAndSteelItem), 1));
-            if (rng.NextDouble() < 0.35) newInv.InsertAt(5, new ItemEntry(GameData.NewItem(GameData.DiamondItem), rng.Next(1, 3)));
-            if (rng.NextDouble() < 0.25) newInv.InsertAt(8, new ItemEntry(GameData.NewItem(GameData.GoldenAppleItem), 1));
-            if (rng.NextDouble() < 0.20) newInv.InsertAt(12, new ItemEntry(GameData.NewItem(GameData.SaddleItem), 1));
+        if (Dimension == Dimension.Nether || pos.Y >= 50 && (pos.X * 37 + pos.Z * 19) % 29 == 0) {
+            // Сундуки в Нижнем мире и у Разрушенных порталов
+            newInv.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.GoldIngotItem), rng.Next(1, 4)));
+            newInv.InsertAt(1, new ItemEntry(GameData.NewItem(GameData.FlintAndSteelItem), 1));
+            newInv.InsertAt(2, new ItemEntry(GameData.NewItem(GameData.ObsidianItem), rng.Next(1, 3)));
+            newInv.InsertAt(3, new ItemEntry(GameData.NewItem(GameData.CoalItem), rng.Next(2, 6)));
+            if (rng.NextDouble() < 0.35) newInv.InsertAt(5, new ItemEntry(GameData.NewItem(GameData.NetherQuartzItem), rng.Next(2, 6)));
+            if (rng.NextDouble() < 0.20) newInv.InsertAt(6, new ItemEntry(GameData.NewItem(GameData.IronIngotItem), rng.Next(1, 3)));
+            if (rng.NextDouble() < 0.10) newInv.InsertAt(8, new ItemEntry(GameData.NewItem(GameData.GoldenAppleItem), 1));
         } else if (pos.Y <= 38 && pos.Y >= 10) {
             // Сундуки в Данжах (Подземных сокровищницах) и Шахтах
-            newInv.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.IronIngotItem), rng.Next(2, 7)));
+            newInv.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.IronIngotItem), rng.Next(1, 4)));
             newInv.InsertAt(1, new ItemEntry(GameData.NewItem(GameData.StringItem), rng.Next(2, 6)));
             newInv.InsertAt(2, new ItemEntry(GameData.NewItem(GameData.BoneItem), rng.Next(2, 7)));
-            newInv.InsertAt(3, new ItemEntry(GameData.NewItem(GameData.GunpowderItem), rng.Next(1, 5)));
-            newInv.InsertAt(4, new ItemEntry(GameData.NewItem(GameData.BreadItem), rng.Next(1, 4)));
-            if (rng.NextDouble() < 0.40) newInv.InsertAt(6, new ItemEntry(GameData.NewItem(GameData.GoldenAppleItem), 1));
-            if (rng.NextDouble() < 0.35) newInv.InsertAt(7, new ItemEntry(GameData.NewItem(GameData.SaddleItem), 1));
-            if (rng.NextDouble() < 0.30) newInv.InsertAt(8, new ItemEntry(GameData.NewItem(GameData.EnchantedBookItem), 1));
-            if (rng.NextDouble() < 0.25) newInv.InsertAt(9, new ItemEntry(GameData.NewItem(GameData.MusicDiscItem), 1));
-            if (rng.NextDouble() < 0.15) newInv.InsertAt(13, new ItemEntry(GameData.NewItem(GameData.DiamondItem), rng.Next(1, 3)));
+            newInv.InsertAt(3, new ItemEntry(GameData.NewItem(GameData.GunpowderItem), rng.Next(1, 4)));
+            newInv.InsertAt(4, new ItemEntry(GameData.NewItem(GameData.BreadItem), rng.Next(1, 3)));
+            newInv.InsertAt(5, new ItemEntry(GameData.NewItem(GameData.TorchItem), rng.Next(4, 10)));
+            if (rng.NextDouble() < 0.15) newInv.InsertAt(8, new ItemEntry(GameData.NewItem(GameData.EnchantedBookItem), 1));
+            if (rng.NextDouble() < 0.10) newInv.InsertAt(9, new ItemEntry(GameData.NewItem(GameData.MusicDiscItem), 1));
         } else {
-            // Сундуки в Пирамидах / Домах
-            newInv.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.BreadItem), rng.Next(2, 6)));
-            newInv.InsertAt(1, new ItemEntry(GameData.NewItem(GameData.GoldIngotItem), rng.Next(2, 5)));
-            newInv.InsertAt(2, new ItemEntry(GameData.NewItem(GameData.AppleItem), rng.Next(1, 4)));
-            newInv.InsertAt(3, new ItemEntry(GameData.NewItem(GameData.IronIngotItem), rng.Next(2, 5)));
-            newInv.InsertAt(4, new ItemEntry(GameData.NewItem(GameData.TorchItem), rng.Next(3, 8)));
-            if (rng.NextDouble() < 0.40) newInv.InsertAt(6, new ItemEntry(GameData.NewItem(GameData.GoldenAppleItem), 1));
-            if (rng.NextDouble() < 0.35) newInv.InsertAt(7, new ItemEntry(GameData.NewItem(GameData.SaddleItem), 1));
-            if (rng.NextDouble() < 0.30) newInv.InsertAt(8, new ItemEntry(GameData.NewItem(GameData.EnchantedBookItem), 1));
-            if (rng.NextDouble() < 0.25) newInv.InsertAt(12, new ItemEntry(GameData.NewItem(GameData.DiamondItem), rng.Next(1, 4)));
+            // Сбалансированные сундуки в Деревнях и Домах (стартовый бытовой лут)
+            newInv.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.BreadItem), rng.Next(2, 5)));
+            newInv.InsertAt(1, new ItemEntry(GameData.NewItem(GameData.WheatSeedsItem), rng.Next(3, 8)));
+            newInv.InsertAt(2, new ItemEntry(GameData.NewItem(GameData.AppleItem), rng.Next(1, 3)));
+            newInv.InsertAt(3, new ItemEntry(GameData.NewItem(GameData.TorchItem), rng.Next(4, 10)));
+            newInv.InsertAt(4, new ItemEntry(GameData.NewItem(GameData.PlankItem), rng.Next(3, 8)));
+            if (rng.NextDouble() < 0.45) newInv.InsertAt(5, new ItemEntry(GameData.NewItem(GameData.CoalItem), rng.Next(1, 3)));
+            if (rng.NextDouble() < 0.30) newInv.InsertAt(6, new ItemEntry(GameData.NewItem(GameData.StonePickaxeItem), 1));
+            if (rng.NextDouble() < 0.20) newInv.InsertAt(7, new ItemEntry(GameData.NewItem(GameData.IronIngotItem), rng.Next(1, 2)));
         }
         Chests[pos] = newInv;
         return newInv;

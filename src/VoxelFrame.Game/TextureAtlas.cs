@@ -484,16 +484,32 @@ public static class TextureAtlas {
                         else if (isBorder) { r = 85; g = 50; b = 25; a = 255; }
                         else { r = 150 + (px % 3) * 5; g = 105 + (px % 3) * 4; b = 55; a = 255; }
                     } else if (tile == TBedTop) {
-                        bool isPillow = py <= 5 && px >= 2 && px <= 13;
-                        if (isPillow) { r = 245; g = 245; b = 250; a = 255; }
-                        else { r = 210 + (px % 2) * 10; g = 35; b = 35; a = 255; }
+                        bool isPillow = py >= 1 && py <= 5 && px >= 2 && px <= 13;
+                        bool isPillowEdge = isPillow && (py == 1 || py == 5 || px == 2 || px == 13);
+                        if (isPillowEdge) { r = 215; g = 215; b = 222; a = 255; }
+                        else if (isPillow) { r = 245; g = 245; b = 250; a = 255; }
+                        else if (py == 6 || py == 15 || px == 0 || px == 15) { r = 150; g = 20; b = 20; a = 255; } // темная окантовка одеяла
+                        else {
+                            bool quiltPattern = ((px + py) % 4 == 0);
+                            r = (byte)(quiltPattern ? 205 : 180);
+                            g = (byte)(quiltPattern ? 40 : 25);
+                            b = (byte)(quiltPattern ? 40 : 25);
+                            a = 255;
+                        }
                     } else if (tile == TBedSide) {
-                        if (py >= 12) { r = 120; g = 80; b = 40; a = 255; }
-                        else if (px <= 5 && py <= 5) { r = 245; g = 245; b = 250; a = 255; }
-                        else { r = 210; g = 35; b = 35; a = 255; }
+                        bool isLeg = (px <= 2 || px >= 13) && py >= 10;
+                        bool isFrame = py >= 10;
+                        if (isLeg) { r = 95; g = 60; b = 30; a = 255; } // ножки кровати
+                        else if (isFrame) { r = 135; g = 92; b = 48; a = 255; } // дубовый каркас
+                        else if (py == 8 || py == 9) { r = 240; g = 240; b = 245; a = 255; } // простыня
+                        else { r = (byte)(185 + (px % 2) * 15); g = 30; b = 30; a = 255; } // одеяло
                     } else if (tile == TBedEnd) {
-                        if (py >= 12) { r = 120; g = 80; b = 40; a = 255; }
-                        else { r = 210; g = 35; b = 35; a = 255; }
+                        bool isLeg = (px <= 2 || px >= 13) && py >= 10;
+                        bool isFrame = py >= 10;
+                        if (isLeg) { r = 95; g = 60; b = 30; a = 255; }
+                        else if (isFrame) { r = 135; g = 92; b = 48; a = 255; }
+                        else if (py >= 7 && py <= 9) { r = 240; g = 240; b = 245; a = 255; }
+                        else { r = 185; g = 30; b = 30; a = 255; }
                     } else if (tile == TTorch) {
                         bool isStick = px >= 7 && px <= 8 && py >= 6 && py <= 14;
                         bool isFlame = px >= 6 && px <= 9 && py >= 1 && py <= 5;

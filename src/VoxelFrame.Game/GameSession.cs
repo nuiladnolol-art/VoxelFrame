@@ -102,10 +102,7 @@ public sealed class GameSession {
         var session = new GameSession(headless) {
             World = new GameWorld(seed),
             DayNight = new DayNightCycle(),
-            Player = new Player {
-                OffhandItem = GameData.TotemItem,
-                OffhandCount = 1,
-            },
+            Player = new Player(),
         };
         // Спавн: площадка 3×3 на поверхности у (0,0). Мгновенная плавная загрузка без фризов
         int target = session.World.Generator.SurfaceHeight(0, 0);

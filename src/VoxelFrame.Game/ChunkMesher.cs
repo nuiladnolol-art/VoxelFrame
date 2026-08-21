@@ -202,6 +202,8 @@ namespace VoxelFrame.Game;
                                 byte lvl = v.SubGridLayerMask;
                                 if (lvl == 0 || lvl == FluidEngine.FallingLevel) actualFy = 0.90f;
                                 else actualFy = MathF.Max(0.35f, 0.90f - lvl * 0.08f);
+                            } else if ((v.TypeId == GameData.BBed.Id || v.TypeId == GameData.BBedHead.Id) && fy > 0.5f) {
+                                actualFy = 0.56f;
                             }
 
                             verts.Add(worldOffsetX + lx + fx);
