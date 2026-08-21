@@ -643,7 +643,7 @@ public sealed class WorldGenerator {
                     for (int y = 1; y <= H - 1; y++) {
                         if (isEdge) {
                             if (isDoor && (y == 1 || y == 2)) {
-                                SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, y == 1 ? GameData.BDoorLower.Id : GameData.BDoorUpper.Id);
+                                SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, y == 1 ? GameData.BDoorLower.Id : GameData.BDoorUpper.Id, 2);
                             } else if (isWindow && y == 2) {
                                 SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, GameData.BGlass.Id);
                             } else {
@@ -656,9 +656,9 @@ public sealed class WorldGenerator {
                     SetVillageBlock(chunk, ox, oz, wx, wy + H, wz, GameData.BLog.Id);
                 }
             }
-            // Кровать и сундук внутри
-            SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ + 1, GameData.BBed.Id);
-            SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ, GameData.BBedHead.Id);
+            // Кровать и сундук внутри (изголовье к задней стене)
+            SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ + 1, GameData.BBedHead.Id, 0);
+            SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ, GameData.BBed.Id, 0);
             SetVillageBlock(chunk, ox, oz, houseWX + 1, surface + 1, houseWZ + 1, GameData.BChest.Id);
             SetVillageBlock(chunk, ox, oz, houseWX, surface + 3, houseWZ, GameData.BTorch.Id);
 
@@ -708,7 +708,7 @@ public sealed class WorldGenerator {
                         SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, GameData.BLog.Id);
                     } else if (isEdge) {
                         if (isDoor && (y == 1 || y == 2)) {
-                            SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, y == 1 ? GameData.BDoorLower.Id : GameData.BDoorUpper.Id);
+                            SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, y == 1 ? GameData.BDoorLower.Id : GameData.BDoorUpper.Id, 2);
                         } else if (isWindow && y == 2) {
                             SetVillageBlock(chunk, ox, oz, wx, wy + y, wz, GameData.BGlass.Id);
                         } else {
@@ -723,9 +723,9 @@ public sealed class WorldGenerator {
             }
         }
 
-        // Кровать в углу
-        SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ + 1, GameData.BBed.Id);
-        SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ, GameData.BBedHead.Id);
+        // Кровать в углу (изголовье к задней стене, изножье вперед)
+        SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ + 1, GameData.BBedHead.Id, 0);
+        SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ, GameData.BBed.Id, 0);
 
         // Сундук и верстак
         SetVillageBlock(chunk, ox, oz, houseWX + 1, surface + 1, houseWZ + 1, GameData.BChest.Id);
@@ -814,12 +814,12 @@ public sealed class WorldGenerator {
         SetVillageBlock(chunk, ox, oz, wx, surface, wz, GameData.BGravel.Id);
     }
 
-    private void SetVillageBlock(Chunk chunk, int ox, int oz, int wx, int wy, int wz, ushort blockId) {
+    private void SetVillageBlock(Chunk chunk, int ox, int oz, int wx, int wy, int wz, ushort blockId, byte facing = 0) {
         int lx = wx - ox, lz = wz - oz;
         if (lx < 0 || lx >= Chunk.SizeX || lz < 0 || lz >= Chunk.SizeZ) return;
         int ly = wy - chunk.Origin.Y * Chunk.SizeY;
         if (ly < 0 || ly >= Chunk.SizeY) return;
-        var v = MakeVoxel(blockId);
+        var v = MakeVoxel(blockId, facing);
         chunk.SetVoxel(Chunk.Index(lx, ly, lz), in v);
     }
 
@@ -835,10 +835,10 @@ public sealed class WorldGenerator {
         var vx2 = MakeVoxel(type); chunk.SetVoxel(idx, in vx2);
     }
 
-    public void SetWorldBlock(Chunk chunk, int ox, int oy, int oz, int wx, int wy, int wz, ushort blockId) {
+    public void SetWorldBlock(Chunk chunk, int ox, int oy, int oz, int wx, int wy, int wz, ushort blockId, byte facing = 0) {
         int lx = wx - ox, lz = wz - oz, ly = wy - oy;
         if (lx < 0 || lx >= Chunk.SizeX || lz < 0 || lz >= Chunk.SizeZ || ly < 0 || ly >= Chunk.SizeY) return;
-        var v = MakeVoxel(blockId);
+        var v = MakeVoxel(blockId, facing);
         chunk.SetVoxel(Chunk.Index(lx, ly, lz), in v);
     }
 
@@ -1008,7 +1008,7 @@ public sealed class WorldGenerator {
         }
     }
 
-    public static VoxelData MakeVoxel(ushort blockId) {
+    public static VoxelData MakeVoxel(ushort blockId, byte facing = 0) {
         if (blockId == 0) return VoxelData.Air;
         var b = GameData.GetBlock(blockId);
         var flags = VoxelFlags.None;
@@ -1017,6 +1017,7 @@ public sealed class WorldGenerator {
         return new VoxelData {
             TypeId = blockId,
             Flags = flags,
+            SubGridLayerMask = facing,
             Weight = (float)b.Material.MassOf(1.0),
             ContentVolumeM3 = 1f,
             LoadBearingCapacity = b.LoadCapacityKN,

@@ -151,6 +151,81 @@ namespace VoxelFrame.Game;
                         continue;
                     }
 
+                    // ── Тонкие 3D-двери (Minecraft Door: панель толщиной 3/16 м с поворотом на 90° при открытии) ──
+                    if (GameData.IsDoor(v.TypeId)) {
+                        byte facing = (byte)(v.SubGridLayerMask & 3);
+                        bool isOpen = (v.SubGridLayerMask & 8) != 0;
+                        byte effFacing = isOpen ? (byte)((facing + 1) & 3) : facing;
+
+                        float T = 0.1875f;
+                        float x0 = 0f, x1 = 1f, z0 = 0f, z1 = 1f;
+                        switch (effFacing) {
+                            case 0: z0 = 1f - T; z1 = 1f; break;
+                            case 1: x0 = 0f; x1 = T; break;
+                            case 2: z0 = 0f; z1 = T; break;
+                            default: x0 = 1f - T; x1 = 1f; break;
+                        }
+
+                        byte mainTile = (byte)(v.TypeId == GameData.BDoorUpper.Id ? TextureAtlas.TDoorUpper : TextureAtlas.TDoorLower);
+                        byte edgeTile = (byte)TextureAtlas.TPlanks;
+
+                        float worldOffsetX = gc.Coord.X * Chunk.SizeX;
+                        float worldOffsetY = gc.Coord.Y * Chunk.SizeY;
+                        float worldOffsetZ = gc.Coord.Z * Chunk.SizeZ;
+
+                        for (int df = 0; df < 6; df++) {
+                            if (verts.Count / 3 + 4 > MaxVertices) Flush();
+                            int bv = verts.Count / 3;
+
+                            byte tile = (df switch {
+                                0 or 1 => (effFacing == 1 || effFacing == 3) ? mainTile : edgeTile,
+                                4 or 5 => (effFacing == 0 || effFacing == 2) ? mainTile : edgeTile,
+                                _ => edgeTile
+                            });
+
+                            var (dx, dy, dz, nx, ny, nz) = Faces[df];
+                            var (sun, blockL) = GetFaceLight(neighbors, gc, lx, ly, lz, dx, dy, dz);
+                            var (u0, v0, u1, v1) = TileUv(tile);
+
+                            float faceDir = df switch {
+                                2 => 1.0f,
+                                3 => 0.55f,
+                                0 or 1 => 0.82f,
+                                _ => 0.68f
+                            };
+                            byte shadeSun = (byte)(255f * sun);
+                            byte shadeBlock = (byte)(255f * blockL);
+                            byte shadeDir = (byte)(255f * faceDir);
+
+                            (float px, float py, float pz, float u, float v)[] faceVerts = df switch {
+                                0 => new[] { (x1, 0f, z0, u1, v1), (x1, 1f, z0, u1, v0), (x1, 1f, z1, u0, v0), (x1, 0f, z1, u0, v1) },
+                                1 => new[] { (x0, 0f, z1, u0, v1), (x0, 1f, z1, u0, v0), (x0, 1f, z0, u1, v0), (x0, 0f, z0, u1, v1) },
+                                2 => new[] { (x0, 1f, z1, u0, v1), (x1, 1f, z1, u1, v1), (x1, 1f, z0, u1, v0), (x0, 1f, z0, u0, v0) },
+                                3 => new[] { (x0, 0f, z0, u0, v0), (x1, 0f, z0, u1, v0), (x1, 0f, z1, u1, v1), (x0, 0f, z1, u0, v1) },
+                                4 => new[] { (x0, 0f, z1, u0, v1), (x1, 0f, z1, u1, v1), (x1, 1f, z1, u1, v0), (x0, 1f, z1, u0, v0) },
+                                _ => new[] { (x1, 0f, z0, u1, v1), (x0, 0f, z0, u0, v1), (x0, 1f, z0, u0, v0), (x1, 1f, z0, u1, v0) }
+                            };
+
+                            foreach (var (vx, vy, vz, vu, vv) in faceVerts) {
+                                verts.Add(worldOffsetX + lx + vx);
+                                verts.Add(worldOffsetY + ly + vy);
+                                verts.Add(worldOffsetZ + lz + vz);
+                                norms.Add(nx); norms.Add(ny); norms.Add(nz);
+                                uvs.Add(u0 + (u1 - u0) * vu);
+                                uvs.Add(v0 + (v1 - v0) * vv);
+                                cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(shadeDir); cols.Add((byte)255);
+                            }
+
+                            indices.Add((ushort)(bv + 0));
+                            indices.Add((ushort)(bv + 1));
+                            indices.Add((ushort)(bv + 2));
+                            indices.Add((ushort)(bv + 0));
+                            indices.Add((ushort)(bv + 2));
+                            indices.Add((ushort)(bv + 3));
+                        }
+                        continue;
+                    }
+
                     if (!block.IsSolid && !block.IsOpaque && !isFluid) continue;   // факелы рисуются как 3D-декор
 
                     var tiles = TextureAtlas.BlockTiles(v.TypeId);
@@ -409,12 +484,9 @@ namespace VoxelFrame.Game;
         if (f == 2) return tiles.PosY; // Верх (+Y)
         if (f == 3) return tiles.NegY; // Низ (-Y)
 
-        // Для блоков с ориентацией (Печь, Сундук, Кровать, Двери) поворачиваем 4 боковые грани
-        if (typeId == GameData.BFurnace.Id || typeId == GameData.BChest.Id || typeId == GameData.BBed.Id || typeId == GameData.BBedHead.Id || GameData.IsDoor(typeId)) {
+        // Для блоков с ориентацией (Печь, Сундук, Кровать) поворачиваем 4 боковые грани
+        if (typeId == GameData.BFurnace.Id || typeId == GameData.BChest.Id || typeId == GameData.BBed.Id || typeId == GameData.BBedHead.Id) {
             byte effFacing = (byte)(facing & 3);
-            if (GameData.IsDoor(typeId) && (facing & 8) != 0) {
-                effFacing = (byte)((effFacing + 1) & 3); // Поворот на 90 градусов при открытии двери
-            }
             return effFacing switch {
                 1 => f switch { // перед на -X (f=1)
                     1 => tiles.PosZ, // перед

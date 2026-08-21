@@ -29,7 +29,8 @@ public static class TextureAtlas {
                      TFeather = 56, TGunpowder = 57, TString = 58, TArrow = 59, TBone = 60,
                      TCharcoal = 61, TRawBeef = 62, TCookedBeef = 63, TLeather = 64, TWool = 65,
                      TChestTop = 66, TChestSide = 67, TChestFront = 68,
-                     TBedTop = 69, TBedSide = 70, TBedEnd = 71,
+                     TBedHeadTop = 69, TBedFootTop = 70, TBedSide = 71, TBedEnd = 120,
+                     TBedTop = 69, // backward compatibility
                      TRottenFlesh = 72, TWheat = 73, TWheatSeeds = 74,
                      TFarmland = 75, TWheatCrop0 = 76, TWheatCrop1 = 77, TWheatCrop2 = 78, TWheatCrop3 = 79,
                      THoeWood = 80, THoeStone = 81, THoeIron = 82, THoeDiamond = 83,
@@ -351,7 +352,8 @@ public static class TextureAtlas {
         palette[TChestTop] = (new Color(150, 105, 55, 255), true);
         palette[TChestSide] = (new Color(150, 105, 55, 255), true);
         palette[TChestFront] = (new Color(150, 105, 55, 255), true);
-        palette[TBedTop] = (new Color(210, 40, 40, 255), true);
+        palette[TBedHeadTop] = (new Color(210, 40, 40, 255), true);
+        palette[TBedFootTop] = (new Color(210, 40, 40, 255), true);
         palette[TBedSide] = (new Color(210, 40, 40, 255), true);
         palette[TBedEnd] = (new Color(210, 40, 40, 255), true);
         palette[TRottenFlesh] = (new Color(150, 75, 45, 255), true);
@@ -483,12 +485,21 @@ public static class TextureAtlas {
                         if (isLock) { r = 220; g = 220; b = 225; a = 255; }
                         else if (isBorder) { r = 85; g = 50; b = 25; a = 255; }
                         else { r = 150 + (px % 3) * 5; g = 105 + (px % 3) * 4; b = 55; a = 255; }
-                    } else if (tile == TBedTop) {
+                    } else if (tile == TBedHeadTop) {
                         bool isPillow = py >= 1 && py <= 5 && px >= 2 && px <= 13;
                         bool isPillowEdge = isPillow && (py == 1 || py == 5 || px == 2 || px == 13);
                         if (isPillowEdge) { r = 215; g = 215; b = 222; a = 255; }
                         else if (isPillow) { r = 245; g = 245; b = 250; a = 255; }
-                        else if (py == 6 || py == 15 || px == 0 || px == 15) { r = 150; g = 20; b = 20; a = 255; } // темная окантовка одеяла
+                        else if (py == 6 || px == 0 || px == 15) { r = 150; g = 20; b = 20; a = 255; }
+                        else {
+                            bool quiltPattern = ((px + py) % 4 == 0);
+                            r = (byte)(quiltPattern ? 205 : 180);
+                            g = (byte)(quiltPattern ? 40 : 25);
+                            b = (byte)(quiltPattern ? 40 : 25);
+                            a = 255;
+                        }
+                    } else if (tile == TBedFootTop) {
+                        if (py == 0 || py == 15 || px == 0 || px == 15) { r = 150; g = 20; b = 20; a = 255; }
                         else {
                             bool quiltPattern = ((px + py) % 4 == 0);
                             r = (byte)(quiltPattern ? 205 : 180);

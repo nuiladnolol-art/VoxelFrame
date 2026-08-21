@@ -449,15 +449,15 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.BoneItem.Id, TextureAtlas.TBone);
         TextureAtlas.SetItemTile(GameData.CharcoalItem.Id, TextureAtlas.TCharcoal);
         TextureAtlas.SetBlockFaces(GameData.BChest.Id, TextureAtlas.TChestSide, TextureAtlas.TChestSide, TextureAtlas.TChestTop, TextureAtlas.TChestTop, TextureAtlas.TChestFront, TextureAtlas.TChestSide);
-        TextureAtlas.SetBlockFaces(GameData.BBed.Id, TextureAtlas.TBedSide, TextureAtlas.TBedSide, TextureAtlas.TBedTop, TextureAtlas.TPlanks, TextureAtlas.TBedEnd, TextureAtlas.TBedEnd);
-        TextureAtlas.SetBlockFaces(GameData.BBedHead.Id, TextureAtlas.TBedSide, TextureAtlas.TBedSide, TextureAtlas.TBedTop, TextureAtlas.TPlanks, TextureAtlas.TBedEnd, TextureAtlas.TBedEnd);
+        TextureAtlas.SetBlockFaces(GameData.BBed.Id, TextureAtlas.TBedSide, TextureAtlas.TBedSide, TextureAtlas.TBedFootTop, TextureAtlas.TPlanks, TextureAtlas.TBedEnd, TextureAtlas.TBedEnd);
+        TextureAtlas.SetBlockFaces(GameData.BBedHead.Id, TextureAtlas.TBedSide, TextureAtlas.TBedSide, TextureAtlas.TBedHeadTop, TextureAtlas.TPlanks, TextureAtlas.TBedEnd, TextureAtlas.TBedEnd);
 
         TextureAtlas.SetItemTile(GameData.RawBeefItem.Id, TextureAtlas.TRawBeef);
         TextureAtlas.SetItemTile(GameData.CookedBeefItem.Id, TextureAtlas.TCookedBeef);
         TextureAtlas.SetItemTile(GameData.LeatherItem.Id, TextureAtlas.TLeather);
         TextureAtlas.SetItemTile(GameData.WhiteWoolItem.Id, TextureAtlas.TWool);
         TextureAtlas.SetItemTile(GameData.ChestItem.Id, TextureAtlas.TChestFront);
-        TextureAtlas.SetItemTile(GameData.BedItem.Id, TextureAtlas.TBedTop);
+        TextureAtlas.SetItemTile(GameData.BedItem.Id, TextureAtlas.TBedHeadTop);
         TextureAtlas.SetItemTile(GameData.RottenFleshItem.Id, TextureAtlas.TRottenFlesh);
         TextureAtlas.SetItemTile(GameData.WheatItem.Id, TextureAtlas.TWheat);
         TextureAtlas.SetItemTile(GameData.WheatSeedsItem.Id, TextureAtlas.TWheatSeeds);
