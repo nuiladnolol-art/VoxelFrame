@@ -186,8 +186,8 @@ internal static class Program {
                 Raylib.BeginMode3D(session.Camera);
                 renderer.Draw3DSky(session.Camera);
                 renderer.DrawWorld();
-                renderer.DrawDecorations(dt);
                 renderer.DrawEntities(session.Camera);
+                renderer.DrawDecorations(dt);
                 Raylib.EndMode3D();
 
                 var pauseAction = Screens.DrawPause(session);
@@ -226,10 +226,10 @@ internal static class Program {
             Raylib.BeginMode3D(session.Camera);
             renderer.Draw3DSky(session.Camera);
             renderer.DrawWorld();
+            renderer.DrawEntities(session.Camera);
+            renderer.DrawDecorations(dt);
             renderer.DrawClouds(session.Camera);
             renderer.DrawWeather(session.Camera);
-            renderer.DrawDecorations(dt);
-            renderer.DrawEntities(session.Camera);
             Raylib.EndMode3D();
 
             // Защита от X-Ray (если камера внутри непрозрачного блока — черная заглушка)
@@ -322,13 +322,27 @@ internal static class Program {
         return 0;
     }
 
+    private static float _lastForwardPressTime = -10f;
+    private static bool _doubleTapSprint = false;
+
     private static PlayerInput ReadInput(bool cursorCaptured, float pauseDebounce) {
+        float now = (float)Raylib.GetTime();
+        if (Raylib.IsKeyPressed(KeyBinds.Forward)) {
+            if (now - _lastForwardPressTime < 0.28f) {
+                _doubleTapSprint = true;
+            }
+            _lastForwardPressTime = now;
+        }
+        if (!Raylib.IsKeyDown(KeyBinds.Forward)) {
+            _doubleTapSprint = false;
+        }
+
         var input = new PlayerInput {
             MoveX = (Raylib.IsKeyDown(KeyBinds.Right) ? 1f : 0f) - (Raylib.IsKeyDown(KeyBinds.Left) ? 1f : 0f),
             MoveZ = (Raylib.IsKeyDown(KeyBinds.Forward) ? 1f : 0f) - (Raylib.IsKeyDown(KeyBinds.Backward) ? 1f : 0f),
             Jump = Raylib.IsKeyDown(KeyBinds.Jump),
             Crouch = Raylib.IsKeyDown(KeyBinds.Crouch),
-            Sprint = Raylib.IsKeyDown(KeyBinds.Sprint) || Raylib.IsKeyDown(KeyboardKey.LeftControl),
+            Sprint = Raylib.IsKeyDown(KeyBinds.Sprint) || Raylib.IsKeyDown(KeyboardKey.LeftControl) || _doubleTapSprint,
             Drop = Raylib.IsKeyPressed(KeyBinds.Drop),
             AttackHeld = Raylib.IsMouseButtonDown(MouseButton.Left),
             AttackPressed = Raylib.IsMouseButtonPressed(MouseButton.Left),

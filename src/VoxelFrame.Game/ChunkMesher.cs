@@ -80,6 +80,77 @@ namespace VoxelFrame.Game;
                     var block = GameData.GetBlock(v.TypeId);
                     bool isFluid = v.TypeId == GameData.BWater.Id || v.TypeId == GameData.BLava.Id;
                     bool isWater = v.TypeId == GameData.BWater.Id;
+                    bool isFoliage = v.TypeId == GameData.BTallGrass.Id || v.TypeId == GameData.BWheatCrop.Id;
+
+                    if (isFoliage) {
+                        byte foliageTile = v.TypeId == GameData.BTallGrass.Id
+                            ? (byte)TextureAtlas.TTallGrass
+                            : (byte)(TextureAtlas.TWheatCrop0 + Math.Clamp((int)v.SubGridLayerMask, 0, 3));
+                        
+                        var (u0, v0, u1, v1) = TileUv(foliageTile);
+                        var (sun, blockL) = GetFaceLight(neighbors, gc, lx, ly, lz, 0, 0, 0);
+                        byte shadeSun = (byte)(255f * MathF.Max(sun, 0.4f));
+                        byte shadeBlock = (byte)(255f * blockL);
+                        float worldOffsetX = gc.Coord.X * Chunk.SizeX;
+                        float worldOffsetY = gc.Coord.Y * Chunk.SizeY;
+                        float worldOffsetZ = gc.Coord.Z * Chunk.SizeZ;
+
+                        (float X0, float Z0, float X1, float Z1)[] crossPlanes = {
+                            (0.12f, 0.12f, 0.88f, 0.88f),
+                            (0.12f, 0.88f, 0.88f, 0.12f)
+                        };
+
+                        foreach (var plane in crossPlanes) {
+                            if (verts.Count / 3 + 8 > MaxVertices) Flush();
+                            int bv = verts.Count / 3;
+
+                            float x0 = worldOffsetX + lx + plane.X0;
+                            float z0 = worldOffsetZ + lz + plane.Z0;
+                            float x1 = worldOffsetX + lx + plane.X1;
+                            float z1 = worldOffsetZ + lz + plane.Z1;
+                            float y0 = worldOffsetY + ly;
+                            float y1 = worldOffsetY + ly + 0.95f;
+
+                            // 4 вершины плоскости
+                            verts.Add(x0); verts.Add(y0); verts.Add(z0);
+                            norms.Add(0); norms.Add(1); norms.Add(0);
+                            uvs.Add(u0); uvs.Add(v1);
+                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(230); cols.Add(255);
+
+                            verts.Add(x1); verts.Add(y0); verts.Add(z1);
+                            norms.Add(0); norms.Add(1); norms.Add(0);
+                            uvs.Add(u1); uvs.Add(v1);
+                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(230); cols.Add(255);
+
+                            verts.Add(x1); verts.Add(y1); verts.Add(z1);
+                            norms.Add(0); norms.Add(1); norms.Add(0);
+                            uvs.Add(u1); uvs.Add(v0);
+                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(230); cols.Add(255);
+
+                            verts.Add(x0); verts.Add(y1); verts.Add(z0);
+                            norms.Add(0); norms.Add(1); norms.Add(0);
+                            uvs.Add(u0); uvs.Add(v0);
+                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(230); cols.Add(255);
+
+                            // Лицевая сторона (Front face)
+                            indices.Add((ushort)(bv + 0));
+                            indices.Add((ushort)(bv + 1));
+                            indices.Add((ushort)(bv + 2));
+                            indices.Add((ushort)(bv + 0));
+                            indices.Add((ushort)(bv + 2));
+                            indices.Add((ushort)(bv + 3));
+
+                            // Обратная сторона (Back face - двусторонняя видимость)
+                            indices.Add((ushort)(bv + 2));
+                            indices.Add((ushort)(bv + 1));
+                            indices.Add((ushort)(bv + 0));
+                            indices.Add((ushort)(bv + 3));
+                            indices.Add((ushort)(bv + 2));
+                            indices.Add((ushort)(bv + 0));
+                        }
+                        continue;
+                    }
+
                     if (!block.IsSolid && !block.IsOpaque && !isFluid) continue;   // факелы рисуются как 3D-декор
 
                     var tiles = TextureAtlas.BlockTiles(v.TypeId);

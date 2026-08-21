@@ -468,27 +468,6 @@ public sealed class WorldRenderer : IDisposable {
                         Raylib.DrawCube(new Vector3(flamePos.X, flamePos.Y - 0.05f, flamePos.Z), 0.14f, 0.12f, 0.14f, headCol);
                     }
                     DrawFlame(flamePos, 0.22f, dt);
-                } else if (v.TypeId == GameData.BWheatCrop.Id) {
-                    int stage = Math.Clamp((int)v.SubGridLayerMask, 0, 3);
-                    byte tile = (byte)(TextureAtlas.TWheatCrop0 + stage);
-                    var src = new Rectangle(
-                        tile % TextureAtlas.Cols * TextureAtlas.TilePx,
-                        tile / TextureAtlas.Cols * TextureAtlas.TilePx,
-                        TextureAtlas.TilePx, TextureAtlas.TilePx);
-                    var size = new Vector2(0.85f, 0.85f);
-                    var cropPos = new Vector3(pos.X + 0.5f, pos.Y + 0.425f, pos.Z + 0.5f);
-                    Color tint = ShadeColor(Color.White, light, cropPos);
-                    Raylib.DrawBillboardRec(_session.Camera, TextureAtlas.Atlas, src, cropPos, size, tint);
-                } else if (v.TypeId == GameData.BTallGrass.Id) {
-                    byte tile = (byte)TextureAtlas.TTallGrass;
-                    var src = new Rectangle(
-                        tile % TextureAtlas.Cols * TextureAtlas.TilePx,
-                        tile / TextureAtlas.Cols * TextureAtlas.TilePx,
-                        TextureAtlas.TilePx, TextureAtlas.TilePx);
-                    var size = new Vector2(0.9f, 0.9f);
-                    var grassPos = new Vector3(pos.X + 0.5f, pos.Y + 0.45f, pos.Z + 0.5f);
-                    Color tint = ShadeColor(Color.White, light, grassPos);
-                    Raylib.DrawBillboardRec(_session.Camera, TextureAtlas.Atlas, src, grassPos, size, tint);
                 }
             }
             foreach (var pos in _world.Fire.Burning.Keys) {

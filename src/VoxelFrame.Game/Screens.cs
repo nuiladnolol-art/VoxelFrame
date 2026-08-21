@@ -41,6 +41,7 @@ public static class Screens {
         "Вправо",
         "Прыжок",
         "Красться",
+        "Бег (Спринт)",
         "Выбросить",
         "Инвентарь",
         "Крафт",
@@ -54,10 +55,11 @@ public static class Screens {
         3 => KeyBinds.Right,
         4 => KeyBinds.Jump,
         5 => KeyBinds.Crouch,
-        6 => KeyBinds.Drop,
-        7 => KeyBinds.Inventory,
-        8 => KeyBinds.Crafting,
-        9 => KeyBinds.Pause,
+        6 => KeyBinds.Sprint,
+        7 => KeyBinds.Drop,
+        8 => KeyBinds.Inventory,
+        9 => KeyBinds.Crafting,
+        10 => KeyBinds.Pause,
         _ => KeyboardKey.Null
     };
 
@@ -69,10 +71,11 @@ public static class Screens {
             case 3: KeyBinds.Right = key; break;
             case 4: KeyBinds.Jump = key; break;
             case 5: KeyBinds.Crouch = key; break;
-            case 6: KeyBinds.Drop = key; break;
-            case 7: KeyBinds.Inventory = key; break;
-            case 8: KeyBinds.Crafting = key; break;
-            case 9: KeyBinds.Pause = key; break;
+            case 6: KeyBinds.Sprint = key; break;
+            case 7: KeyBinds.Drop = key; break;
+            case 8: KeyBinds.Inventory = key; break;
+            case 9: KeyBinds.Crafting = key; break;
+            case 10: KeyBinds.Pause = key; break;
         }
     }
 

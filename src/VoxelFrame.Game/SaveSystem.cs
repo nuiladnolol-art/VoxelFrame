@@ -347,6 +347,7 @@ public static class SaveSystem {
                 ["Right"] = (int)KeyBinds.Right,
                 ["Jump"] = (int)KeyBinds.Jump,
                 ["Crouch"] = (int)KeyBinds.Crouch,
+                ["Sprint"] = (int)KeyBinds.Sprint,
                 ["Drop"] = (int)KeyBinds.Drop,
                 ["Inventory"] = (int)KeyBinds.Inventory,
                 ["Crafting"] = (int)KeyBinds.Crafting,
@@ -376,6 +377,7 @@ public static class SaveSystem {
             R("Right", v => KeyBinds.Right = (Raylib_cs.KeyboardKey)v);
             R("Jump", v => KeyBinds.Jump = (Raylib_cs.KeyboardKey)v);
             R("Crouch", v => KeyBinds.Crouch = (Raylib_cs.KeyboardKey)v);
+            R("Sprint", v => KeyBinds.Sprint = (Raylib_cs.KeyboardKey)v);
             R("Drop", v => KeyBinds.Drop = (Raylib_cs.KeyboardKey)v);
             R("Inventory", v => KeyBinds.Inventory = (Raylib_cs.KeyboardKey)v);
             R("Crafting", v => KeyBinds.Crafting = (Raylib_cs.KeyboardKey)v);
