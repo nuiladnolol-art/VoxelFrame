@@ -412,48 +412,48 @@ public sealed class WorldGenerator {
                     int idx = Chunk.Index(lx, ly, lz);
                     if (chunk.Get(idx).TypeId != GameData.BStone.Id) continue;
 
-                    // Уголь (Coal) — компактные жилы (4-12 блоков) на высотах Y=5..75
+                    // Уголь (Coal) — компактные жилы (4-12 блоков) на высотах Y=4..80
                     float coalN = _oreNoise.Fractal(wx * 0.20f, wy * 0.20f, wz * 0.20f, 2, 0.5f);
-                    if (coalN > 0.74f) {
+                    if (coalN > 0.65f) {
                         var v = MakeVoxel(GameData.BCoalOre.Id);
                         chunk.SetVoxel(idx, in v);
                         continue;
                     }
 
-                    // Железо (Iron) — жилы на высотах Y=5..54
-                    if (wy <= 54) {
+                    // Железо (Iron) — жилы на высотах Y=4..60
+                    if (wy <= 60) {
                         float ironN = _ironNoise.Fractal(wx * 0.22f, wy * 0.22f + 300f, wz * 0.22f, 2, 0.5f);
-                        if (ironN > 0.76f) {
+                        if (ironN > 0.68f) {
                             var v = MakeVoxel(GameData.BIronOre.Id);
                             chunk.SetVoxel(idx, in v);
                             continue;
                         }
                     }
 
-                    // Золото (Gold) — жилы на глубине Y=5..30
-                    if (wy <= 30) {
+                    // Золото (Gold) — жилы на глубине Y=4..34
+                    if (wy <= 34) {
                         float goldN = _goldNoise.Fractal(wx * 0.25f + 700f, wy * 0.25f, wz * 0.25f, 2, 0.5f);
-                        if (goldN > 0.86f) {
+                        if (goldN > 0.77f) {
                             var v = MakeVoxel(GameData.BGoldOre.Id);
                             chunk.SetVoxel(idx, in v);
                             continue;
                         }
                     }
 
-                    // Редстоун (Redstone) — жилы на глубине Y=1..16
-                    if (wy <= 16) {
+                    // Редстоун (Redstone) — жилы на глубине Y=1..20
+                    if (wy <= 20) {
                         float redN = _oreNoise.Fractal(wx * 0.26f + 1200f, wy * 0.26f, wz * 0.26f, 2, 0.5f);
-                        if (redN > 0.87f) {
+                        if (redN > 0.78f) {
                             var v = MakeVoxel(GameData.BRedstoneOre.Id);
                             chunk.SetVoxel(idx, in v);
                             continue;
                         }
                     }
 
-                    // Алмазы (Diamond) — редкие жилы на глубине Y=1..14
-                    if (wy <= 14) {
+                    // Алмазы (Diamond) — жилы на глубине Y=1..16
+                    if (wy <= 16) {
                         float diaN = _diamondNoise.Fractal(wx * 0.28f + 5000f, wy * 0.28f, wz * 0.28f, 2, 0.5f);
-                        if (diaN > 0.89f) {
+                        if (diaN > 0.80f) {
                             var v = MakeVoxel(GameData.BDiamondOre.Id);
                             chunk.SetVoxel(idx, in v);
                             continue;
@@ -617,8 +617,15 @@ public sealed class WorldGenerator {
             SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ + 1, GameData.BFurnace.Id);
             SetVillageBlock(chunk, ox, oz, houseWX + 1, surface + 1, houseWZ + 1, GameData.BWorkbench.Id);
             SetVillageBlock(chunk, ox, oz, houseWX + 2, surface + 1, houseWZ + 1, GameData.BChest.Id);
-            SetVillageBlock(chunk, ox, oz, houseWX - 2, surface + 1, houseWZ - 1, GameData.BLava.Id); // лава кузницы
-            SetVillageBlock(chunk, ox, oz, houseWX, surface + 3, houseWZ, GameData.BTorch.Id);
+
+            // Емкость из булыжника для лавы в углу кузницы
+            SetVillageBlock(chunk, ox, oz, houseWX - 2, surface + 1, houseWZ - 2, GameData.BCobblestone.Id);
+            SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ - 2, GameData.BCobblestone.Id);
+            SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ - 1, GameData.BCobblestone.Id);
+            SetVillageBlock(chunk, ox, oz, houseWX - 2, surface + 1, houseWZ, GameData.BCobblestone.Id);
+            SetVillageBlock(chunk, ox, oz, houseWX - 2, surface, houseWZ - 1, GameData.BCobblestone.Id);
+            SetVillageBlock(chunk, ox, oz, houseWX - 2, surface + 1, houseWZ - 1, GameData.BLava.Id); // лава внутри каменной емкости
+            SetVillageBlock(chunk, ox, oz, houseWX, surface + 3, houseWZ + 1, GameData.BTorch.Id, 4); // настенный факел
             return;
         }
 
@@ -656,11 +663,11 @@ public sealed class WorldGenerator {
                     SetVillageBlock(chunk, ox, oz, wx, wy + H, wz, GameData.BLog.Id);
                 }
             }
-            // Кровать и сундук внутри (изголовье к задней стене)
-            SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ + 1, GameData.BBedHead.Id, 0);
-            SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ, GameData.BBed.Id, 0);
+            // Кровать и сундук внутри (изголовье у задней стены facing=2)
+            SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ + 1, GameData.BBedHead.Id, 2);
+            SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ, GameData.BBed.Id, 2);
             SetVillageBlock(chunk, ox, oz, houseWX + 1, surface + 1, houseWZ + 1, GameData.BChest.Id);
-            SetVillageBlock(chunk, ox, oz, houseWX, surface + 3, houseWZ, GameData.BTorch.Id);
+            SetVillageBlock(chunk, ox, oz, houseWX, surface + 3, houseWZ + 1, GameData.BTorch.Id, 4);
 
             // Огород рядом с домом (4x4)
             for (int fz = 0; fz < 4; fz++) {
@@ -723,9 +730,9 @@ public sealed class WorldGenerator {
             }
         }
 
-        // Кровать в углу (изголовье к задней стене, изножье вперед)
-        SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ + 1, GameData.BBedHead.Id, 0);
-        SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ, GameData.BBed.Id, 0);
+        // Кровать в углу (изголовье у задней стены facing=2)
+        SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ + 1, GameData.BBedHead.Id, 2);
+        SetVillageBlock(chunk, ox, oz, houseWX - 1, surface + 1, houseWZ, GameData.BBed.Id, 2);
 
         // Сундук и верстак
         SetVillageBlock(chunk, ox, oz, houseWX + 1, surface + 1, houseWZ + 1, GameData.BChest.Id);
@@ -733,9 +740,9 @@ public sealed class WorldGenerator {
             SetVillageBlock(chunk, ox, oz, houseWX + 1, surface + 1, houseWZ - 1, GameData.BWorkbench.Id);
         }
 
-        // Факел внутри дома и над входом
-        SetVillageBlock(chunk, ox, oz, houseWX, surface + 3, houseWZ, GameData.BTorch.Id);
-        SetVillageBlock(chunk, ox, oz, houseWX, surface + 3, houseWZ - houseD / 2 - 1, GameData.BTorch.Id);
+        // Настенный факел внутри дома и настенный факел над входом снаружи
+        SetVillageBlock(chunk, ox, oz, houseWX, surface + 3, houseWZ + houseD / 2 - 1, GameData.BTorch.Id, 4);
+        SetVillageBlock(chunk, ox, oz, houseWX, surface + 3, houseWZ - houseD / 2 - 1, GameData.BTorch.Id, 3);
     }
 
     private void PlaceRuinedPortals(Chunk chunk, int ox, int oy, int oz) {

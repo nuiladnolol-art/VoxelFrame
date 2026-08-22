@@ -127,7 +127,7 @@ internal static class Program {
                         session = SaveSystem.Load(SaveSystem.SavePath, headless: false);
                         renderer = new WorldRenderer(session);
                         session.Ui = UiState.Loading;
-                        session.LoadTotal = 1;
+                        session.LoadTotal = Math.Max(1, session.World.Chunks.Count);
                         session.LoadDone = 0;
                         session.AddMessage($"С возвращением, {PlayerName}!");
                     } catch (Exception ex) {

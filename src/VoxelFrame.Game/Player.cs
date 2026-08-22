@@ -177,6 +177,17 @@ public sealed class Player {
     public ItemDefinition? SelectedItem => SelectedEntry?.Item.Definition;
 
     public void Update(float dt, in PlayerInput input, GameWorld world, GameSession session) {
+        if (float.IsNaN(Position.X) || float.IsNaN(Position.Y) || float.IsNaN(Position.Z) ||
+            float.IsInfinity(Position.X) || float.IsInfinity(Position.Y) || float.IsInfinity(Position.Z)) {
+            Position = world.GetSafeRespawnPosition(world.SpawnBlock);
+            Velocity = Vector3.Zero;
+        }
+        if (float.IsNaN(Velocity.X) || float.IsNaN(Velocity.Y) || float.IsNaN(Velocity.Z)) {
+            Velocity = Vector3.Zero;
+        }
+        if (float.IsNaN(Yaw)) Yaw = 0f;
+        if (float.IsNaN(Pitch)) Pitch = 0f;
+
         // Взгляд.
         const float sensitivity = 0.0022f;
         Yaw -= input.MouseDX * sensitivity;

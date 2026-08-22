@@ -822,12 +822,12 @@ public sealed class GameWorld : IDisposable {
         }
     }
 
-    public const float CropGrowthInterval = 25f;
+    public const float CropGrowthInterval = 30f;
 
     public void TickCrops(float dt) {
         _cropTimer -= dt;
         if (_cropTimer > 0f) return;
-        _cropTimer = 1.0f;
+        _cropTimer = CropGrowthInterval;
 
         var decorCopy = DecorPositions.ToList();
         foreach (var pos in decorCopy) {
@@ -842,7 +842,7 @@ public sealed class GameWorld : IDisposable {
                     continue;
                 }
 
-                // Случайный рост на следующую стадию (0..3)
+                // Рост пшеницы: переход на следующую стадию каждые 30 секунд
                 int currentStage = vox.SubGridLayerMask; // 0..3
                 if (currentStage < 3) {
                     int nextStage = currentStage + 1;

@@ -245,7 +245,13 @@ public static class SaveSystem {
         session.World.Fire.TotalSmokeKg = smokeKg;
         session.World.SpawnBlock = spawn;
 
-        session.Player.Position = ReadVec3(br);
+        var loadedPos = ReadVec3(br);
+        if (float.IsNaN(loadedPos.X) || float.IsNaN(loadedPos.Y) || float.IsNaN(loadedPos.Z) ||
+            float.IsInfinity(loadedPos.X) || float.IsInfinity(loadedPos.Y) || float.IsInfinity(loadedPos.Z)) {
+            session.Player.Position = session.World.GetSafeRespawnPosition(spawn);
+        } else {
+            session.Player.Position = loadedPos;
+        }
         session.Player.Yaw = br.ReadSingle();
         session.Player.Pitch = br.ReadSingle();
         session.Player.Health = br.ReadSingle();
@@ -401,9 +407,9 @@ public static class SaveSystem {
     }
 
     private static void WriteVec3(BinaryWriter bw, Vector3 v) {
-        bw.Write(v.X);
-        bw.Write(v.Y);
-        bw.Write(v.Z);
+        bw.Write(float.IsNaN(v.X) || float.IsInfinity(v.X) ? 0f : v.X);
+        bw.Write(float.IsNaN(v.Y) || float.IsInfinity(v.Y) ? 64f : v.Y);
+        bw.Write(float.IsNaN(v.Z) || float.IsInfinity(v.Z) ? 0f : v.Z);
     }
 
     private static Vector3 ReadVec3(BinaryReader br) => new(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());

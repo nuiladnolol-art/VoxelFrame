@@ -168,11 +168,21 @@ public sealed class WorldRenderer : IDisposable {
     }
 
     public void ProcessMeshQueue() {
-        foreach (var gc in _world.DrainMeshDirty()) {
-            _rebuildQueue.Remove(gc);
-            _rebuildQueue.Insert(0, gc);
+        var dirtyList = _world.DrainMeshDirty().ToList();
+        if (dirtyList.Count > 0) {
+            foreach (var gc in dirtyList) {
+                if (!_rebuildQueue.Contains(gc)) _rebuildQueue.Add(gc);
+            }
+            var playerPos = _session.Player.Position;
+            int pcx = (int)MathF.Floor(playerPos.X / Chunk.SizeX);
+            int pcz = (int)MathF.Floor(playerPos.Z / Chunk.SizeZ);
+            _rebuildQueue.Sort((a, b) => {
+                int distA = Math.Abs(a.Coord.X - pcx) + Math.Abs(a.Coord.Z - pcz) + Math.Abs(a.Coord.Y - 1);
+                int distB = Math.Abs(b.Coord.X - pcx) + Math.Abs(b.Coord.Z - pcz) + Math.Abs(b.Coord.Y - 1);
+                return distA.CompareTo(distB);
+            });
         }
-        int budget = 3;
+        int budget = _session.Ui == UiState.Loading ? 16 : 4;
         while (_rebuildQueue.Count > 0 && budget-- > 0) {
             var gc = _rebuildQueue[0];
             _rebuildQueue.RemoveAt(0);
@@ -247,8 +257,25 @@ public sealed class WorldRenderer : IDisposable {
 
         unsafe {
             Rlgl.EnableBackfaceCulling();
+            var playerPos = _session.Player.Position;
+            int pcx = (int)MathF.Floor(playerPos.X / Chunk.SizeX);
+            int pcz = (int)MathF.Floor(playerPos.Z / Chunk.SizeZ);
+            int rDist = SaveSystem.RenderDistanceSetting;
+            int maxDistSq = (rDist + 1) * (rDist + 1);
+            int unloadDistSq = (rDist + 3) * (rDist + 3);
+
             foreach (var gc in _world.Chunks) {
-                if (!gc.MeshUploaded) continue;
+                int dx = gc.Coord.X - pcx;
+                int dz = gc.Coord.Z - pcz;
+                int dSq = dx * dx + dz * dz;
+
+                // Выгружаем меши далеких чанков из видеопамяти (VRAM cleanup)
+                if (dSq > unloadDistSq && gc.MeshUploaded) {
+                    gc.UnloadMesh();
+                    continue;
+                }
+
+                if (!gc.MeshUploaded || dSq > maxDistSq) continue;
                 foreach (var m in gc.Meshes)
                     Raylib.DrawMesh(m, _material, Matrix4x4.Identity);
             }

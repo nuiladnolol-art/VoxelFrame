@@ -216,10 +216,14 @@ public static class GameData {
     public static readonly BlockType BDiamondOre = Block(22, "Алмазная руда", Stone, drop: DiamondItem);
     public static readonly BlockType BRedstoneOre = Block(23, "Редстоун руда", Stone, drop: RedstoneItem);
     public static readonly BlockType BObsidian = Block(24, "Обсидиан", DiamondM, drop: ObsidianItem);
-    public static readonly BlockType BChest = Block(25, "Сундук", Oak, drop: ChestItem, flammable: true, burnTime: 8f);
-    public static readonly BlockType BBed = Block(26, "Кровать", Oak, drop: BedItem, flammable: true, burnTime: 6f);
-    public static readonly BlockType BBedHead = Block(27, "Кровать (изголовье)", Oak, drop: BedItem, flammable: true, burnTime: 6f);
-    public static readonly BlockType BFarmland = Block(28, "Грядка", DirtM, drop: DirtItem);
+    public static readonly BlockType BChest = Block(25, "Сундук", Oak, drop: ChestItem, flammable: true, burnTime: 8f)
+        .With(b => { b.IsOpaque = false; });
+    public static readonly BlockType BBed = Block(26, "Кровать", Oak, drop: BedItem, flammable: true, burnTime: 6f)
+        .With(b => { b.IsOpaque = false; });
+    public static readonly BlockType BBedHead = Block(27, "Кровать (изголовье)", Oak, drop: BedItem, flammable: true, burnTime: 6f)
+        .With(b => { b.IsOpaque = false; });
+    public static readonly BlockType BFarmland = Block(28, "Грядка", DirtM, drop: DirtItem)
+        .With(b => { b.IsOpaque = false; });
     public static readonly BlockType BWheatCrop = Block(29, "Посевы пшеницы", LeavesM, drop: WheatSeedsItem)
         .With(b => { b.IsSolid = false; b.IsOpaque = false; });
     public static readonly BlockType BTallGrass = Block(30, "Трава", LeavesM, drop: WheatSeedsItem)

@@ -198,12 +198,12 @@ namespace VoxelFrame.Game;
                             byte shadeDir = (byte)(255f * faceDir);
 
                             (float px, float py, float pz, float u, float v)[] faceVerts = df switch {
-                                0 => new[] { (x1, 0f, z0, u1, v1), (x1, 1f, z0, u1, v0), (x1, 1f, z1, u0, v0), (x1, 0f, z1, u0, v1) },
-                                1 => new[] { (x0, 0f, z1, u0, v1), (x0, 1f, z1, u0, v0), (x0, 1f, z0, u1, v0), (x0, 0f, z0, u1, v1) },
-                                2 => new[] { (x0, 1f, z1, u0, v1), (x1, 1f, z1, u1, v1), (x1, 1f, z0, u1, v0), (x0, 1f, z0, u0, v0) },
-                                3 => new[] { (x0, 0f, z0, u0, v0), (x1, 0f, z0, u1, v0), (x1, 0f, z1, u1, v1), (x0, 0f, z1, u0, v1) },
-                                4 => new[] { (x0, 0f, z1, u0, v1), (x1, 0f, z1, u1, v1), (x1, 1f, z1, u1, v0), (x0, 1f, z1, u0, v0) },
-                                _ => new[] { (x1, 0f, z0, u1, v1), (x0, 0f, z0, u0, v1), (x0, 1f, z0, u0, v0), (x1, 1f, z0, u1, v0) }
+                                0 => new[] { (x1, 0f, z0, 1f, 1f), (x1, 1f, z0, 1f, 0f), (x1, 1f, z1, 0f, 0f), (x1, 0f, z1, 0f, 1f) },
+                                1 => new[] { (x0, 0f, z1, 0f, 1f), (x0, 1f, z1, 0f, 0f), (x0, 1f, z0, 1f, 0f), (x0, 0f, z0, 1f, 1f) },
+                                2 => new[] { (x0, 1f, z1, 0f, 1f), (x1, 1f, z1, 1f, 1f), (x1, 1f, z0, 1f, 0f), (x0, 1f, z0, 0f, 0f) },
+                                3 => new[] { (x0, 0f, z0, 0f, 0f), (x1, 0f, z0, 1f, 0f), (x1, 0f, z1, 1f, 1f), (x0, 0f, z1, 0f, 1f) },
+                                4 => new[] { (x0, 0f, z1, 0f, 1f), (x1, 0f, z1, 1f, 1f), (x1, 1f, z1, 1f, 0f), (x0, 1f, z1, 0f, 0f) },
+                                _ => new[] { (x1, 0f, z0, 1f, 1f), (x0, 0f, z0, 0f, 1f), (x0, 1f, z0, 0f, 0f), (x1, 1f, z0, 1f, 0f) }
                             };
 
                             foreach (var (vx, vy, vz, vu, vv) in faceVerts) {
@@ -281,12 +281,23 @@ namespace VoxelFrame.Game;
                                 actualFy = 0.56f;
                             }
 
+                            float actualFu = fu, actualFv = fv;
+                            if (f == 2 && (v.TypeId == GameData.BBed.Id || v.TypeId == GameData.BBedHead.Id)) {
+                                byte facing = (byte)(v.SubGridLayerMask & 3);
+                                (actualFu, actualFv) = facing switch {
+                                    1 => (fv, 1f - fu),
+                                    2 => (1f - fu, 1f - fv),
+                                    3 => (1f - fv, fu),
+                                    _ => (fu, fv)
+                                };
+                            }
+
                             verts.Add(worldOffsetX + lx + fx);
                             verts.Add(worldOffsetY + ly + actualFy);
                             verts.Add(worldOffsetZ + lz + fz);
                             norms.Add(nx); norms.Add(ny); norms.Add(nz);
-                            uvs.Add(u0 + (u1 - u0) * fu);
-                            uvs.Add(v0 + (v1 - v0) * fv);
+                            uvs.Add(u0 + (u1 - u0) * actualFu);
+                            uvs.Add(v0 + (v1 - v0) * actualFv);
                             cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(shadeDir); cols.Add(isWater ? (byte)210 : (byte)255);
                         }
                         indices.Add((ushort)(baseVertex + 0));
