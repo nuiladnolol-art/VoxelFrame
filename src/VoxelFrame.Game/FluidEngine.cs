@@ -6,7 +6,7 @@ using VoxelFrame.Core.World;
 namespace VoxelFrame.Game;
 
 /// <summary>
-/// Аутентичная симуляция жидкостей по стандартам Minecraft (Вода и Лава):
+/// Воксельная симуляция жидкостей (Вода и Лава):
 /// 1. Ограничение дистанции течения (MaxWaterDistance = 7, MaxLavaDistance = 3).
 /// 2. Каскадное высыхание (receding): если источник удалён/перекрыт, поток исчезает.
 /// 3. Бесконечный источник воды: формируется ТОЛЬКО из >=2 соседних источников (level 0) на твердой опоре.
@@ -28,8 +28,11 @@ public sealed class FluidEngine {
     private readonly HashSet<Vec3i> _activeWater = new();
     private readonly HashSet<Vec3i> _activeLava = new();
     private readonly HashSet<Vec3i> _pendingUpdates = new();
+    private readonly List<Vec3i> _processBuf = new();
 
     public IReadOnlyCollection<Vec3i> ActiveLava => _activeLava;
+    public int ActiveWaterCount => _activeWater.Count;
+    public int PendingCount => _pendingUpdates.Count;
 
     public FluidEngine(GameWorld world) {
         _world = world;
@@ -55,46 +58,46 @@ public sealed class FluidEngine {
         }
 
         _waterTimer += dt;
-        if (_waterTimer >= 0.15f) {
-            _waterTimer = 0f;
+        while (_waterTimer >= 0.25f) {
+            _waterTimer -= 0.25f;
             TickFluidType(GameData.BWater.Id, _activeWater, MaxWaterDistance);
         }
 
         _lavaTimer += dt;
-        if (_lavaTimer >= 0.45f) {
-            _lavaTimer = 0f;
-            TickFluidType(GameData.BLava.Id, _activeLava, MaxLavaDistance);
+        float lavaInterval = _world.Dimension == Dimension.Nether ? 0.5f : 1.5f; // В Аду лава течет в 3 раза быстрее (10 тиков vs 30 тиков)
+        int lavaMaxDist = _world.Dimension == Dimension.Nether ? 7 : MaxLavaDistance;
+        while (_lavaTimer >= lavaInterval) {
+            _lavaTimer -= lavaInterval;
+            TickFluidType(GameData.BLava.Id, _activeLava, lavaMaxDist);
         }
     }
 
     private void TickFluidType(ushort fluidId, HashSet<Vec3i> activeSet, int maxDistance) {
         if (activeSet.Count == 0) return;
 
-        var toProcess = new List<Vec3i>(activeSet);
+        _processBuf.Clear();
+        _processBuf.AddRange(activeSet);
         activeSet.Clear();
 
-        int budget = 384;
-        foreach (var pos in toProcess) {
+        int budget = 4096;
+        for (int i = 0; i < _processBuf.Count; i++) {
             if (budget-- <= 0) {
-                activeSet.Add(pos);
+                // Остаток возвращается в набор и обрабатывается на следующем тике
+                for (int j = i; j < _processBuf.Count; j++) activeSet.Add(_processBuf[j]);
                 break;
             }
-            UpdateFluidAt(pos);
+            UpdateFluidAt(_processBuf[i]);
         }
     }
 
+    private static readonly Vec3i[] FluidNeighborOffsets = {
+        new(0, 1, 0), new(0, -1, 0), new(1, 0, 0), new(-1, 0, 0), new(0, 0, 1), new(0, 0, -1),
+    };
+
     private void CheckEmptyCellForFluids(Vec3i pos) {
         // Проверяем 6 соседей вокруг изменившейся ячейки
-        var neighbors = new Vec3i[] {
-            pos + new Vec3i(0, 1, 0),
-            pos + new Vec3i(0, -1, 0),
-            pos + new Vec3i(1, 0, 0),
-            pos + new Vec3i(-1, 0, 0),
-            pos + new Vec3i(0, 0, 1),
-            pos + new Vec3i(0, 0, -1)
-        };
-
-        foreach (var n in neighbors) {
+        foreach (var off in FluidNeighborOffsets) {
+            var n = pos + off;
             var nv = _world.GetVoxel(n);
             if (nv.TypeId == GameData.BWater.Id) _activeWater.Add(n);
             else if (nv.TypeId == GameData.BLava.Id) _activeLava.Add(n);
@@ -114,7 +117,7 @@ public sealed class FluidEngine {
         }
 
         byte currentLevel = vox.SubGridLayerMask;
-        int maxDistance = fluidId == GameData.BWater.Id ? MaxWaterDistance : MaxLavaDistance;
+        int maxDistance = fluidId == GameData.BWater.Id ? MaxWaterDistance : (WorldDimensionIsNether ? 7 : MaxLavaDistance);
 
         // ── 1. Взаимодействие Вода <-> Лава ─────────────────────────────────────
         if (fluidId == GameData.BLava.Id) {
@@ -122,10 +125,10 @@ public sealed class FluidEngine {
             if (HasAdjacentFluid(pos, GameData.BWater.Id, out _)) {
                 if (currentLevel == 0) {
                     // Источник лавы превращается в обсидиан
-                    _world.PlacePlacedBlock(pos, GameData.BObsidian, 1f);
+                    _world.PlacePlacedBlock(pos, GameData.BObsidian);
                 } else {
                     // Текущая лава превращается в булыжник
-                    _world.PlacePlacedBlock(pos, GameData.BCobblestone, 1f);
+                    _world.PlacePlacedBlock(pos, GameData.BCobblestone);
                 }
                 SoundSystem.PlaySplash();
                 NotifyNeighbors(pos);
@@ -147,10 +150,21 @@ public sealed class FluidEngine {
             // Если сверху на воду течет лава
             var up = pos + new Vec3i(0, 1, 0);
             if (_world.GetVoxel(up).TypeId == GameData.BLava.Id) {
-                _world.PlacePlacedBlock(pos, GameData.BStone, 1f);
+                _world.PlacePlacedBlock(pos, GameData.BStone);
                 SoundSystem.PlaySplash();
                 NotifyNeighbors(pos);
                 return;
+            }
+
+            // Если вода касается лавы сбоку: превращаем лаву в обсидиан (источник) или булыжник (поток)
+            if (HasAdjacentFluid(pos, GameData.BLava.Id, out var adjLavaPos, out var adjLavaLevel)) {
+                if (adjLavaLevel == 0) {
+                    _world.PlacePlacedBlock(adjLavaPos, GameData.BObsidian);
+                } else {
+                    _world.PlacePlacedBlock(adjLavaPos, GameData.BCobblestone);
+                }
+                SoundSystem.PlaySplash();
+                NotifyNeighbors(adjLavaPos);
             }
         }
 
@@ -158,7 +172,7 @@ public sealed class FluidEngine {
         if (currentLevel > 0) {
             // Текущий блок жидкости (не источник): вычисляем, питается ли он от родителя
             int newLevel = CalculateFlowLevel(pos, fluidId, maxDistance);
-            if (newLevel < 0 || newLevel > maxDistance) {
+            if (newLevel < 0 || (newLevel != FallingLevel && newLevel > maxDistance)) {
                 // Питающий источник исчез -> высыхаем обратно в воздух!
                 _world.RemoveBlock(pos);
                 NotifyNeighbors(pos);
@@ -167,7 +181,7 @@ public sealed class FluidEngine {
 
             if (newLevel != currentLevel) {
                 currentLevel = (byte)newLevel;
-                _world.PlacePlacedBlock(pos, GameData.GetBlock(fluidId), 1f, currentLevel);
+                _world.PlacePlacedBlock(pos, GameData.GetBlock(fluidId), currentLevel);
                 NotifyNeighbors(pos);
             }
         }
@@ -179,10 +193,10 @@ public sealed class FluidEngine {
 
         if (canFlowDown) {
             WashBlock(down, downVox.TypeId, fluidId);
-            _world.PlacePlacedBlock(down, GameData.GetBlock(fluidId), 1f, FallingLevel);
+            _world.PlacePlacedBlock(down, GameData.GetBlock(fluidId), FallingLevel);
             ScheduleFluid(down, fluidId);
             NotifyNeighbors(down);
-            // В Minecraft, если жидкость может свободно течь вниз, она течет вниз и не растекается в стороны
+            // Если жидкость может свободно падать вниз, она устремляется вниз без растекания в стороны
             return;
         }
 
@@ -203,14 +217,14 @@ public sealed class FluidEngine {
 
                 if (CanFlowInto(targetVox.TypeId)) {
                     WashBlock(targetPos, targetVox.TypeId, fluidId);
-                    _world.PlacePlacedBlock(targetPos, GameData.GetBlock(fluidId), 1f, nextLevel);
+                    _world.PlacePlacedBlock(targetPos, GameData.GetBlock(fluidId), nextLevel);
                     ScheduleFluid(targetPos, fluidId);
                     NotifyNeighbors(targetPos);
                 } else if (targetVox.TypeId == fluidId) {
                     // Если сосед уже жидкость, но с более слабым уровнем
                     byte targetLevel = targetVox.SubGridLayerMask;
                     if (targetLevel > nextLevel && targetLevel != FallingLevel && targetLevel != 0) {
-                        _world.PlacePlacedBlock(targetPos, GameData.GetBlock(fluidId), 1f, nextLevel);
+                        _world.PlacePlacedBlock(targetPos, GameData.GetBlock(fluidId), nextLevel);
                         ScheduleFluid(targetPos, fluidId);
                         NotifyNeighbors(targetPos);
                     }
@@ -288,7 +302,7 @@ public sealed class FluidEngine {
 
         // Если с двух или более сторон настоящие источники -> превращаемся в полноценный источник!
         if (sourceCount >= 2) {
-            _world.PlacePlacedBlock(pos, GameData.BWater, 1f, 0);
+            _world.PlacePlacedBlock(pos, GameData.BWater, 0);
             _activeWater.Add(pos);
             NotifyNeighbors(pos);
         }
@@ -326,7 +340,10 @@ public sealed class FluidEngine {
         }
     }
 
-    private bool HasAdjacentFluid(Vec3i pos, ushort targetFluidId, out byte neighborLevel) {
+    private bool WorldDimensionIsNether => _world.Dimension == Dimension.Nether;
+
+    private bool HasAdjacentFluid(Vec3i pos, ushort targetFluidId, out Vec3i neighborPos, out byte neighborLevel) {
+        neighborPos = default;
         neighborLevel = 0;
         var neighbors = new Vec3i[] {
             pos + new Vec3i(0, 1, 0),
@@ -340,12 +357,16 @@ public sealed class FluidEngine {
         foreach (var n in neighbors) {
             var nv = _world.GetVoxel(n);
             if (nv.TypeId == targetFluidId) {
+                neighborPos = n;
                 neighborLevel = nv.SubGridLayerMask;
                 return true;
             }
         }
         return false;
     }
+
+    private bool HasAdjacentFluid(Vec3i pos, ushort targetFluidId, out byte neighborLevel) =>
+        HasAdjacentFluid(pos, targetFluidId, out _, out neighborLevel);
 
     private void NotifyNeighbors(Vec3i pos) {
         var neighbors = new Vec3i[] {

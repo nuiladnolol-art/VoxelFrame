@@ -42,7 +42,7 @@ public static class Hud {
             Raylib.DrawRectangle(0, 0, w, h, new Color(220, 20, 20, redAlpha));
         }
 
-        // Индикатор перезарядки удара (Minecraft 1.9+ Attack Meter под прицелом)
+        // Индикатор перезарядки удара (Attack Meter под прицелом)
         ushort selectedId = player.SelectedItem?.Id ?? 0;
         float cd = GameData.GetWeaponCooldown(selectedId);
         float charge = Math.Clamp(player.AttackRechargeTimer / cd, 0f, 1f);
@@ -55,12 +55,32 @@ public static class Hud {
             Raylib.DrawRectangle(mx, my, (int)(meterW * charge), meterH, chargeCol);
         }
 
-        // Сообщения.
+        // Всплывающие уведомления (максимум 2 последних сообщения, компактно)
         float msgY = 14f;
-        foreach (var (text, age) in session.Messages.Reverse()) {
-            int alpha = (int)(255 * Math.Clamp(1f - age / 6f, 0f, 1f));
-            Fonts.DrawShadowed(text, 14f, msgY, 20f, new Color(255, 255, 255, alpha));
-            msgY += 24f;
+        int msgCount = 0;
+        foreach (var (text, age) in session.Messages) {
+            if (age >= 2.5f) continue;
+            if (msgCount >= 2) break;
+            int alpha = (int)(255 * Math.Clamp(1f - age / 2.5f, 0f, 1f));
+            Fonts.DrawShadowed(text, 14f, msgY, 17f, new Color(255, 255, 255, alpha));
+            msgY += 22f;
+            msgCount++;
+        }
+
+        // Босс-бар: Слизень Края (когда он жив и игрок в Энде)
+        if (session.World.Dimension == Dimension.End && session.World.EndBoss is { Alive: true } sb) {
+            float frac = Math.Clamp(sb.Health / EndSlime.MaxHealth, 0f, 1f);
+            int barW = Math.Min(360, w - 40);
+            const int barH = 14;
+            int bx = (w - barW) / 2;
+            const int by = 52;
+            Raylib.DrawRectangle(bx - 3, by - 3, barW + 6, barH + 6, new Color(0, 0, 0, 180));
+            Raylib.DrawRectangle(bx, by, barW, barH, new Color(40, 30, 50, 230));
+            var fillCol = frac > 0.5f ? new Color(70, 160, 140, 255)
+                : frac > 0.25f ? new Color(200, 160, 40, 255)
+                : new Color(200, 50, 50, 255);
+            Raylib.DrawRectangle(bx, by, (int)(barW * frac), barH, fillCol);
+            Fonts.DrawShadowed("Слизень Края", bx + 6, by - 26, 20f, new Color(255, 255, 255, 235));
         }
 
         // Инфо-панель: Координаты, Направление взгляда, Биом, Время, FPS
@@ -77,17 +97,6 @@ public static class Hud {
             facing = player.Forward.Z > 0 ? "Юг (+Z)" : "Север (-Z)";
         }
 
-        // Верхний правый угол: компактная инфо-панель координат и мира
-        float rightPanelX = w - 245f;
-        Raylib.DrawRectangleRounded(new Rectangle(rightPanelX - 8, 6, 240, 110), 0.12f, 4, new Color(15, 20, 30, 140));
-        Raylib.DrawRectangleRoundedLinesEx(new Rectangle(rightPanelX - 8, 6, 240, 110), 0.12f, 4, 1.0f, new Color(80, 100, 140, 100));
-
-        Fonts.DrawShadowed($"XYZ: {player.Position.X:F1} / {player.Position.Y:F1} / {player.Position.Z:F1}", rightPanelX, 10f, 16f, new Color(255, 240, 120, 255));
-        Fonts.DrawShadowed($"Блок: {px} {py} {pz}", rightPanelX, 30f, 15f, new Color(220, 225, 235, 255));
-        Fonts.DrawShadowed($"Взгляд: {facing}", rightPanelX, 48f, 15f, new Color(175, 215, 255, 255));
-        Fonts.DrawShadowed($"Биом: {biomeName}", rightPanelX, 66f, 15f, new Color(150, 235, 175, 255));
-        Fonts.DrawShadowed($"День: {session.DayNight.ClockText}  |  FPS: {Raylib.GetFPS()}", rightPanelX, 84f, 15f, Color.White);
-
         if (ShowDebugInfo) {
             DrawF3DebugOverlay(session, player, px, py, pz, biomeName, facing, w, h);
         }
@@ -97,7 +106,7 @@ public static class Hud {
         int hotbarW = 9 * SlotSize + 8 * SlotGap;
         int x0 = w / 2 - hotbarW / 2, y0 = h - SlotSize - 10;
 
-        // Слот второй руки (слева от хотбара, как в Minecraft Java Edition)
+        // Слот второй руки (слева от хотбара)
         var offhandRect = new Rectangle(x0 - SlotSize - 14, y0, SlotSize, SlotSize);
         Raylib.DrawRectangleRounded(offhandRect, 0.15f, 6, new Color(45, 45, 60, 200));
         Raylib.DrawRectangleRoundedLinesEx(offhandRect, 0.15f, 6, 1.5f, new Color(80, 90, 115, 255));
@@ -130,13 +139,6 @@ public static class Hud {
                 if (entry.Value.Quantity > 1) {
                     Fonts.DrawShadowed($"×{entry.Value.Quantity}", rect.X + 3f, rect.Y + rect.Height - 20f, 15f, Color.White);
                 }
-                if (entry.Value.Item.Condition < 0.999) {
-                    float dur = (float)entry.Value.Item.Condition;
-                    var barRec = new Rectangle(rect.X + 6f, rect.Y + rect.Height - 6f, 40f, 3f);
-                    Raylib.DrawRectangleRec(barRec, new Color(20, 20, 20, 220));
-                    var color = dur > 0.5f ? new Color(50, 220, 50, 255) : dur > 0.2f ? new Color(240, 200, 30, 255) : new Color(240, 40, 40, 255);
-                    Raylib.DrawRectangleRec(new Rectangle(rect.X + 6f, rect.Y + rect.Height - 6f, 40f * dur, 3f), color);
-                }
             }
         }
 
@@ -160,7 +162,7 @@ public static class Hud {
             DrawHandHeldItem(player.OffhandItem, leftRect, 1f, offhandRot);
         }
 
-        // Предмет в правой руке (правый нижний угол, классический Minecraft-вид от первого лица)
+        // Предмет в правой руке (вид от первого лица)
         if (player.SelectedEntry is { } held) {
             float handSize = 140f;
             float bob = player.BobOffset * 70f;
@@ -188,25 +190,27 @@ public static class Hud {
             DrawHandHeldItem(held.Item.Definition, handRect, 1f, swing);
         }
 
-        // Здоровье (сердечки слева) и Сытость (окорочка справа) над хотбаром
-        float vitalsY = h - 84f;
-        float iconSize = 20f;
-        float spacing = 15f;
-        bool isHurt = player.HurtTimer > 0f;
-        bool isLowHealth = player.Health <= 4f;
-        DrawStatusRow(TextureAtlas.THeart, TextureAtlas.THeartEmpty, w / 2f - 165f, vitalsY, iconSize, spacing, player.Health, isHurt || isLowHealth);
+        // Здоровье (сердечки слева), Сытость (окорочка справа) и Кислород (в режиме Выживания)
+        if (session.GameMode != GameMode.Creative) {
+            float vitalsY = h - 84f;
+            float iconSize = 20f;
+            float spacing = 15f;
+            bool isHurt = player.HurtTimer > 0f;
+            bool isLowHealth = player.Health <= 4f;
+            DrawStatusRow(TextureAtlas.THeart, TextureAtlas.THeartEmpty, w / 2f - 165f, vitalsY, iconSize, spacing, player.Health, isHurt || isLowHealth);
 
-        bool isStarving = player.Hunger <= 6f;
-        DrawStatusRow(TextureAtlas.TFood, TextureAtlas.TFoodEmpty, w / 2f + 15f, vitalsY, iconSize, spacing, player.Hunger, isStarving);
+            bool isStarving = player.Hunger <= 6f;
+            DrawStatusRow(TextureAtlas.TFood, TextureAtlas.TFoodEmpty, w / 2f + 15f, vitalsY, iconSize, spacing, player.Hunger, isStarving);
 
-        // Индикатор воздуха под водой (пузырьки над полосой сытости)
-        if (player.AirSupply < 10f) {
-            int bubbles = (int)MathF.Ceiling(player.AirSupply);
-            for (int b = 0; b < 10; b++) {
-                float bx = w / 2f + 150f - b * 13f;
-                var bColor = b < bubbles ? new Color(60, 180, 255, 230) : new Color(30, 60, 90, 120);
-                Raylib.DrawCircle((int)bx, (int)(vitalsY - 14f), 5f, bColor);
-                Raylib.DrawCircleLines((int)bx, (int)(vitalsY - 14f), 5f, new Color(20, 30, 50, 180));
+            // Индикатор воздуха под водой (пузырьки над полосой сытости)
+            if (player.AirSupply < 10f) {
+                int bubbles = (int)MathF.Ceiling(player.AirSupply);
+                for (int b = 0; b < 10; b++) {
+                    float bx = w / 2f + 150f - b * 13f;
+                    var bColor = b < bubbles ? new Color(60, 180, 255, 230) : new Color(30, 60, 90, 120);
+                    Raylib.DrawCircle((int)bx, (int)(vitalsY - 14f), 5f, bColor);
+                    Raylib.DrawCircleLines((int)bx, (int)(vitalsY - 14f), 5f, new Color(20, 30, 50, 180));
+                }
             }
         }
 
@@ -244,6 +248,38 @@ public static class Hud {
             string sleepText = "Сон... Пропуск ночи";
             float tw = Fonts.Measure(sleepText, 28f);
             Fonts.DrawShadowed(sleepText, w / 2f - tw / 2f, h / 2f - 14f, 28f, new Color((byte)255, (byte)255, (byte)255, overlayAlpha));
+        }
+
+        // ── ЧАТ И КОМАНДЫ ────────────────────────────────────────────────────
+        bool inChat = session.Ui == UiState.Chat;
+        float chatBaseY = inChat ? h - 42f : h - 90f;
+        int drawnLines = 0;
+        int maxLines = inChat ? 14 : 8;
+
+        for (int i = session.ChatLog.Count - 1; i >= 0 && drawnLines < maxLines; i--) {
+            var (text, col, timer) = session.ChatLog[i];
+            float remaining = inChat ? 1.0f : Math.Clamp(timer / 1.5f, 0f, 1f);
+            if (!inChat && timer <= 0f) continue;
+
+            byte alpha = inChat ? (byte)255 : (byte)(255 * remaining);
+            byte bgAlpha = inChat ? (byte)150 : (byte)(110 * remaining);
+
+            float lineY = chatBaseY - drawnLines * 22f;
+            float textWidth = Fonts.Measure(text, 18f);
+
+            Raylib.DrawRectangle(6, (int)lineY - 2, (int)textWidth + 12, 20, new Color((byte)0, (byte)0, (byte)0, bgAlpha));
+            Fonts.DrawShadowed(text, 10f, lineY, 18f, new Color(col.R, col.G, col.B, alpha));
+            drawnLines++;
+        }
+
+        // Строка ввода чата
+        if (inChat) {
+            bool cursorBlink = ((int)(Raylib.GetTime() * 2.5)) % 2 == 0;
+            Raylib.DrawRectangle(6, h - 34, w - 12, 28, new Color(0, 0, 0, 190));
+            Raylib.DrawRectangleLines(6, h - 34, w - 12, 28, new Color(180, 180, 180, 220));
+            
+            string displayText = "> " + session.ChatInput + (cursorBlink ? "_" : "");
+            Fonts.DrawShadowed(displayText, 12f, h - 30, 20f, Color.White);
         }
     }
 
@@ -299,13 +335,13 @@ public static class Hud {
         }
     }
 
-    /// <summary>Отрисовка 3D блока или объемного экструдированного 3D предмета в руке (как в Minecraft).</summary>
+    /// <summary>Отрисовка 3D блока или объемного экструдированного 3D предмета в руке.</summary>
     private static void DrawHandHeldItem(VoxelFrame.Core.Inventory.ItemDefinition def, Rectangle slot, float scale, float rotation) {
         if (GameData.TryGetBlockByItem(def.Id, out var block) && block != null && block.Id != GameData.BTorch.Id && block.Id != GameData.BWheatCrop.Id && block.Id != GameData.BTallGrass.Id && !GameData.IsDoor(block.Id)) {
             // ── 3D Изометрический куб блока в руке ─────────────────────────
-            float cx = slot.X + slot.Width / 2f;
-            float cy = slot.Y + slot.Height / 2f;
-            float sz = MathF.Min(slot.Width, slot.Height) * scale * 0.72f;
+            float cx = slot.X + slot.Width * 0.45f;
+            float cy = slot.Y + slot.Height * 0.45f;
+            float sz = MathF.Min(slot.Width, slot.Height) * scale * 0.85f;
 
             var tiles = TextureAtlas.BlockTiles(block.Id);
             var topUv = TextureAtlas.TileUv(tiles.PosY);
@@ -344,34 +380,31 @@ public static class Hud {
             Rlgl.PopMatrix();
             Rlgl.SetTexture(0);
         } else {
-            // ── 3D Объемный экструдированный предмет (толщина в несколько пикселей) ─────
+            // ── 2D/3D Предмет в руке ──────────────────────────────────────────
             byte tile = TextureAtlas.ItemTile(def.Id);
             var src = new Rectangle(
                 tile % TextureAtlas.Cols * TextureAtlas.TilePx,
                 tile / TextureAtlas.Cols * TextureAtlas.TilePx,
                 TextureAtlas.TilePx, TextureAtlas.TilePx);
-            float size = MathF.Min(slot.Width, slot.Height) * scale;
+            float size = MathF.Min(slot.Width, slot.Height) * scale * 1.15f;
             var origin = new System.Numerics.Vector2(size / 2f, size / 2f);
+            float rotDeg = rotation * (180f / MathF.PI);
 
-            // Отрисовка нескольких слоев толщины (экструзия в 3D) с теневым градиентом
-            for (int layer = 3; layer >= 1; layer--) {
-                float off = layer * 1.5f;
-                var layerDest = new Rectangle(slot.X + slot.Width / 2f - off, slot.Y + slot.Height / 2f + off, size, size);
-                byte shade = (byte)(80 + layer * 35);
-                unsafe {
-                    Raylib.DrawTexturePro(TextureAtlas.Atlas, src, layerDest, origin, rotation, new Color(shade, shade, shade, (byte)255));
-                }
+            // Мягкая динамическая тень, строго синхронизированная с поворотом предмета
+            var shadowDest = new Rectangle(slot.X + slot.Width / 2f + 3f, slot.Y + slot.Height / 2f + 3f, size, size);
+            unsafe {
+                Raylib.DrawTexturePro(TextureAtlas.Atlas, src, shadowDest, origin, rotDeg, new Color((byte)30, (byte)30, (byte)30, (byte)120));
             }
 
-            // Лицевой слой предмета
+            // Основной лицевой слой предмета
             var frontDest = new Rectangle(slot.X + slot.Width / 2f, slot.Y + slot.Height / 2f, size, size);
             unsafe {
-                Raylib.DrawTexturePro(TextureAtlas.Atlas, src, frontDest, origin, rotation, Color.White);
+                Raylib.DrawTexturePro(TextureAtlas.Atlas, src, frontDest, origin, rotDeg, Color.White);
             }
         }
     }
 
-    /// <summary>Расширенный экран отладки Minecraft F3.</summary>
+    /// <summary>Расширенный экран отладки F3.</summary>
     private static void DrawF3DebugOverlay(GameSession session, Player player, int px, int py, int pz, string biomeName, string facing, int w, int h) {
         // Левая панель F3
         float y = 10f;
@@ -382,7 +415,7 @@ public static class Hud {
             y += 20f;
         }
 
-        LineL($"VoxelFrame 0.9.0 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
+        LineL($"VoxelFrame 0.9.2 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
         LineL($"XYZ: {player.Position.X:F3} / {player.Position.Y:F5} / {player.Position.Z:F3}", new Color(255, 240, 120, 255));
         LineL($"Block: {px} {py} {pz} [{(px & 15)} {(py & 15)} {(pz & 15)} in sub-chunk]");
         LineL($"Chunk: {px >> 4} {py >> 4} {pz >> 4} in chunk [{px >> 4}, {pz >> 4}]");

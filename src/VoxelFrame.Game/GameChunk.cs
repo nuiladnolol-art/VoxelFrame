@@ -17,6 +17,7 @@ public sealed class GameChunk {
     public readonly int[] Surface = new int[Chunk.SizeX * Chunk.SizeZ];
 
     public readonly List<Mesh> Meshes = new();
+    public readonly List<Mesh> TranslucentMeshes = new();
     public bool MeshUploaded;
     public bool MeshDirty = true;
     public bool LightDirty = true;
@@ -54,8 +55,11 @@ public sealed class GameChunk {
     public void UnloadMesh() {
         if (MeshUploaded) {
             foreach (var m in Meshes) Raylib.UnloadMesh(m);
+            foreach (var m in TranslucentMeshes) Raylib.UnloadMesh(m);
             MeshUploaded = false;
         }
         Meshes.Clear();
+        TranslucentMeshes.Clear();
     }
 }
+

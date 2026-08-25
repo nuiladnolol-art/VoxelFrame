@@ -5,13 +5,13 @@ using VoxelFrame.Core.World;
 
 namespace VoxelFrame.Game;
 
-public enum HostileType { Zombie, Creeper, Skeleton, Spider, ZombiePigman, Blaze }
+public enum HostileType { Zombie, Creeper, Skeleton, Spider, ZombiePigman, Blaze, Enderman }
 
 /// <summary>
-/// Враждебные мобы: Zombie, Creeper, Skeleton, Spider, ZombiePigman, Blaze.
-/// - Спавн в темноте ночью, в пещерах и в Нижнем мире.
-/// - Аутентичный дроп (Зомби -> перья/плоть, Крипер -> порох, Скелет -> стрелы/кости, Паук -> нить, Свинозомби -> золото/плоть, Ифрит -> стержни ифрита).
-/// - Зомби и скелеты горят на солнце; Свинозомби и Ифриты неуязвимы к огню/лаве.
+/// Враждебные мобы: Zombie, Creeper, Skeleton, Spider, ZombiePigman, Blaze, Enderman.
+/// - Спавн в темноте ночью, в пещерах, в Нижнем и в Энде.
+/// - Аутентичный дроп (Зомби -> гнилая плоть, Крипер -> порох, Скелет -> стрелы/кости, Паук -> нить, Свинозомби -> золото/плоть, Ифрит -> стержни ифрита, Эндэрмен -> жемчуг Эндера).
+/// - Зомби и скелеты горят на солнце; Свинозомби и Ифриты неуязвимы к огню/лаве; Эндэрмен повреждается водой.
 /// </summary>
 public sealed class HostileMob {
     public const float HalfSize = 0.45f;
@@ -21,24 +21,34 @@ public sealed class HostileMob {
     public Vector3 Velocity;
     public float Health = 20f;
     public bool Alive = true;
+    public bool IsAngry = false;
     public float FuseTimer;   // для Крипера (1.5с отсчет до взрыва)
+    public float TeleportCooldown; // для Эндэрмена
     public float AttackCooldown;
     public float HurtTime;
     public Vector2 WanderDir;
     private readonly Random _random = new();
 
-    public float HalfSizeX => Type == HostileType.Spider ? 0.65f : 0.4f;
-    public float HalfSizeY => Type == HostileType.Spider ? 0.35f : 0.85f;
-    public float HalfSizeZ => Type == HostileType.Spider ? 0.65f : 0.4f;
+    public float HalfSizeX => GetHalfSize(Type).X;
+    public float HalfSizeY => GetHalfSize(Type).Y;
+    public float HalfSizeZ => GetHalfSize(Type).Z;
+
+    /// <summary>Габариты хитбокса по типу. Эндэрмен — высокий и тонкий.</summary>
+    public static Vector3 GetHalfSize(HostileType type) => type switch {
+        HostileType.Spider => new Vector3(0.65f, 0.35f, 0.65f),
+        HostileType.Enderman => new Vector3(0.35f, 1.15f, 0.35f),
+        _ => new Vector3(0.4f, 0.85f, 0.4f)
+    };
 
     public HostileMob(HostileType type, Vector3 position) {
         Type = type;
         Position = position;
         Health = type switch {
             HostileType.Spider => 16f,
+            HostileType.Enderman => 40f, // Каноничные 40 HP
             HostileType.Skeleton => 20f,
             HostileType.Creeper => 20f,
-            HostileType.ZombiePigman => 24f,
+            HostileType.ZombiePigman => 20f, // Каноничные 20 HP
             HostileType.Blaze => 20f,
             _ => 20f
         };
@@ -49,6 +59,24 @@ public sealed class HostileMob {
         Health -= damage;
         HurtTime = 0.4f;
         SoundSystem.PlayHit();
+        if (Type == HostileType.ZombiePigman) {
+            IsAngry = true;
+            foreach (var other in world.HostileMobs) {
+                if (other.Alive && other.Type == HostileType.ZombiePigman && Vector3.Distance(other.Position, Position) < 32f) {
+                    other.IsAngry = true;
+                }
+            }
+        }
+        if (Type == HostileType.Enderman) {
+            // Эндэрмен агрегед на удар и телепортируется, раздражая соседей
+            IsAngry = true;
+            TryTeleport(world);
+            foreach (var other in world.HostileMobs) {
+                if (other.Alive && other.Type == HostileType.Enderman && Vector3.Distance(other.Position, Position) < 16f) {
+                    other.IsAngry = true;
+                }
+            }
+        }
         if (Health <= 0f) {
             Die(world, session);
         }
@@ -61,7 +89,7 @@ public sealed class HostileMob {
         HurtTime -= dt;
         AttackCooldown -= dt;
 
-        // Зомби и Скелеты горят при ярком солнечном свете днём
+        // Зомби и Скелеты горят при ярком солнечном свете днём (если над ними нет блоков и они не в воде)
         var feetPos = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y - HalfSizeY + 0.1f), (int)MathF.Floor(Position.Z));
         var feetVox = world.GetVoxel(feetPos);
         if (feetVox.TypeId == GameData.BLava.Id && Type != HostileType.ZombiePigman && Type != HostileType.Blaze) {
@@ -72,15 +100,49 @@ public sealed class HostileMob {
                 return;
             }
         }
+        // Эндэрмен повреждается водой и телепортируется прочь
+        if (feetVox.TypeId == GameData.BWater.Id && Type == HostileType.Enderman) {
+            Health -= 3f * dt;
+            HurtTime = 0.3f;
+            TryTeleport(world);
+            if (Health <= 0f) {
+                Die(world, session);
+                return;
+            }
+        }
 
         byte sun = world.GetSunLight(feetPos);
         float sky = session.DayNight.SkyFactor;
         if ((Type == HostileType.Zombie || Type == HostileType.Skeleton) && sun >= 12 && sky > 0.70f) {
-            Health -= 4f * dt;
-            HurtTime = 0.3f;
-            if (Health <= 0f) {
-                Die(world, session);
-                return;
+            // Проверка отсутствия блоков над головой
+            int px = feetPos.X, py = feetPos.Y + 2, pz = feetPos.Z;
+            bool hasCeiling = false;
+            for (int y = py; y < py + 16; y++) {
+                if (world.IsSolidAt(new Vec3i(px, y, pz))) { hasCeiling = true; break; }
+            }
+            if (!hasCeiling && feetVox.TypeId != GameData.BWater.Id) {
+                Health -= 4f * dt;
+                HurtTime = 0.3f;
+                if (Health <= 0f) {
+                    Die(world, session);
+                    return;
+                }
+            }
+        }
+
+        TeleportCooldown -= dt;
+
+        // Эндэрмен: агрог при взгляде игрока на его глаза (конус зрения, до 16м)
+        if (Type == HostileType.Enderman && !IsAngry && session.GameMode != GameMode.Creative) {
+            var mobEye = Position + new Vector3(0f, HalfSizeY * 0.85f, 0f);
+            var toMob = mobEye - player.Eye;
+            float lookDist = toMob.Length();
+            if (lookDist > 0.01f && lookDist < 16f) {
+                var dirToMob = toMob / lookDist;
+                if (Vector3.Dot(player.Forward, dirToMob) > 0.92f && HasLineOfSight(world, player.Eye, mobEye)) {
+                    IsAngry = true;
+                    SoundSystem.PlayHit();
+                }
             }
         }
 
@@ -90,8 +152,15 @@ public sealed class HostileMob {
 
         Vector3 moveDir = Vector3.Zero;
         float speed = 2.0f;
+        bool canTarget = session.GameMode != GameMode.Creative;
+        if (Type == HostileType.ZombiePigman && !IsAngry) {
+            canTarget = false;
+        }
+        if (Type == HostileType.Enderman && !IsAngry) {
+            canTarget = false;
+        }
 
-        if (dist < 20f) { // Агр на игрока
+        if (canTarget && dist < 20f) { // Агр на игрока в режиме Выживания
             var dir = Vector3.Normalize(new Vector3(toPlayer.X, 0f, toPlayer.Z));
             moveDir = dir;
 
@@ -104,22 +173,23 @@ public sealed class HostileMob {
                 }
             } else if (Type == HostileType.Creeper) {
                 speed = 2.4f;
-                var mobCenter = Position + new Vector3(0f, 0.45f, 0f);
-                var playerCenter = player.Position + new Vector3(0f, 0.60f, 0f);
-                bool canSeePlayer = HasLineOfSight(world, mobCenter, playerCenter) || HasLineOfSight(world, mobCenter, player.Eye);
-                // Начинает шипеть и взводиться на расстоянии до 3.8 блоков (не вплотную)
+                var mobEye = Position + new Vector3(0f, 0.65f, 0f);
+                var playerCenter = player.Position + new Vector3(0f, 0.45f, 0f);
+                var playerEye = player.Eye;
+                bool canSeePlayer = HasLineOfSight(world, mobEye, playerCenter) && HasLineOfSight(world, mobEye, playerEye);
+                // Начинает шипеть и взводиться на расстоянии до 3.8 блоков при прямой видимости
                 if (dist < 3.8f && canSeePlayer) {
                     if (FuseTimer <= 0f) {
                         SoundSystem.PlayCreeperHiss();
                     }
-                    speed = 0.4f; // Замедляется при раздувании
+                    speed = 0.35f; // Замедляется при раздувании
                     FuseTimer += dt;
-                    if (FuseTimer >= 1.3f) {
+                    if (FuseTimer >= 1.5f) {
                         Explode(world, session);
                         Alive = false;
                         return;
                     }
-                } else if (dist > 5.5f || !canSeePlayer) {
+                } else if (dist > 5.0f || !canSeePlayer) {
                     FuseTimer = MathF.Max(0f, FuseTimer - dt * 1.5f);
                 }
             } else if (Type == HostileType.Skeleton) {
@@ -136,6 +206,13 @@ public sealed class HostileMob {
                 }
             } else if (Type == HostileType.ZombiePigman) {
                 speed = 2.8f; // Быстрый свинозомби
+            } else if (Type == HostileType.Enderman) {
+                speed = 2.6f;
+                // Враждебный эндэрмен периодически телепортируется, чтобы перепозиционироваться
+                if (dist > 3.5f && TeleportCooldown <= 0f) {
+                    TeleportCooldown = 3.2f + (float)_random.NextDouble() * 2.5f;
+                    TryTeleport(world);
+                }
             } else if (Type == HostileType.Blaze) {
                 speed = 1.5f;
                 Velocity.Y = MathF.Sin((float)session.TotalPlaySeconds * 3.0f) * 1.2f;
@@ -178,9 +255,19 @@ public sealed class HostileMob {
                 }
             }
 
+            // Атака Эндэрмена: высокий разряд (7 HP)
+            if (Type == HostileType.Enderman && dist < 1.8f && AttackCooldown <= 0f) {
+                var mobCenter = Position + new Vector3(0f, 0.6f, 0f);
+                var playerCenter = player.Position + new Vector3(0f, 0.60f, 0f);
+                if (HasLineOfSight(world, mobCenter, playerCenter) || HasLineOfSight(world, mobCenter, player.Eye)) {
+                    AttackCooldown = 1.2f;
+                    player.ApplyDamage(7f, session, Position);
+                }
+            }
+
             // Атака Скелета
             if (Type == HostileType.Skeleton && dist < 20f && dist > 1.8f && AttackCooldown <= 0f) {
-                var eyePos = Position + new Vector3(0f, 0.65f, 0f);
+                var eyePos = Position + new Vector3(0f, 0.70f, 0f);
                 var targetPos = player.Position + new Vector3(0f, Player.EyeHeight * 0.6f, 0f);
                 if (HasLineOfSight(world, eyePos, targetPos)) {
                     AttackCooldown = 2.0f;
@@ -188,11 +275,12 @@ public sealed class HostileMob {
                     float toDist = toTarget.Length();
                     var arrowDir = Vector3.Normalize(toTarget);
                     var arrowVel = arrowDir * 18f + new Vector3(0f, MathF.Min(2.5f, toDist * 0.12f), 0f);
-                    world.Arrows.Add(new ArrowProjectile(eyePos + arrowDir * 0.6f, arrowVel, this));
+                    world.Arrows.Add(new ArrowProjectile(eyePos + arrowDir * 0.7f, arrowVel, this));
+                    SoundSystem.PlayBowShoot();
                 }
             }
 
-            // Атака Ифрита (Blaze): огненные снаряды
+            // Атака Ифрита (Blaze): огненные шары
             if (Type == HostileType.Blaze && dist < 22f && AttackCooldown <= 0f) {
                 var eyePos = Position + new Vector3(0f, 0.65f, 0f);
                 var targetPos = player.Position + new Vector3(0f, Player.EyeHeight * 0.5f, 0f);
@@ -201,7 +289,7 @@ public sealed class HostileMob {
                     var toTarget = targetPos - eyePos;
                     var shotDir = Vector3.Normalize(toTarget);
                     var shotVel = shotDir * 20f;
-                    world.Arrows.Add(new ArrowProjectile(eyePos + shotDir * 0.6f, shotVel, this) { Damage = 5f });
+                    world.Arrows.Add(new ArrowProjectile(eyePos + shotDir * 0.6f, shotVel, this) { Damage = 5f, IsFire = true });
                     SoundSystem.PlayBowShoot();
                 }
             }
@@ -256,14 +344,17 @@ public sealed class HostileMob {
     public static bool HasLineOfSight(GameWorld world, Vector3 from, Vector3 to) {
         var delta = to - from;
         float dist = delta.Length();
-        if (dist < 0.3f) return true;
-        var step = delta / dist * 0.4f;
-        int steps = (int)(dist / 0.4f);
+        if (dist < 0.2f) return true;
+        float stepLen = 0.15f;
+        var step = delta / dist * stepLen;
+        int steps = (int)(dist / stepLen);
         var cur = from;
         for (int i = 0; i < steps; i++) {
             cur += step;
             var cell = new Vec3i((int)MathF.Floor(cur.X), (int)MathF.Floor(cur.Y), (int)MathF.Floor(cur.Z));
             if (world.IsSolidAt(cell)) return false;
+            var v = world.GetVoxel(cell);
+            if (v.TypeId != 0 && (GameData.GetBlock(v.TypeId).IsOpaque || GameData.IsDoor(v.TypeId))) return false;
         }
         return true;
     }
@@ -288,12 +379,64 @@ public sealed class HostileMob {
                 break;
             case HostileType.ZombiePigman:
                 world.SpawnPickup(GameData.RottenFleshItem.Id, _random.Next(1, 3), pos);
-                if (_random.NextDouble() < 0.50) world.SpawnPickup(GameData.GoldIngotItem.Id, 1, pos);
+                if (_random.NextDouble() < 0.025) world.SpawnPickup(GameData.GoldIngotItem.Id, 1, pos); // Каноничный редкий дроп 2.5%
                 break;
             case HostileType.Blaze:
                 world.SpawnPickup(GameData.BlazeRodItem.Id, _random.Next(1, 3), pos);
                 break;
+            case HostileType.Enderman:
+                world.SpawnPickup(GameData.EnderPearlItem.Id, _random.Next(1, 3), pos);
+                break;
         }
+    }
+
+    /// <summary>
+    /// Эндэрмен исчезает и появляется в соседней безопасной точке (пол + голова свободны).
+    /// Возвращает true, если удалось телепортироваться.
+    /// </summary>
+    public bool TryTeleport(GameWorld world) {
+        var half = GetHalfSize(Type);
+        for (int attempt = 0; attempt < 12; attempt++) {
+            float angle = (float)_random.NextDouble() * MathF.Tau;
+            float r = 6f + (float)_random.NextDouble() * 14f;
+            float dx = MathF.Cos(angle) * r;
+            float dz = MathF.Sin(angle) * r;
+            int tx = (int)MathF.Floor(Position.X + dx);
+            int tz = (int)MathF.Floor(Position.Z + dz);
+            int baseY = (int)MathF.Floor(Position.Y);
+
+            // Ищем твёрдый пол в небольшом вертикальном диапазоне вокруг текущей высоты
+            for (int dy = 0; dy <= 5; dy++) {
+                int by = baseY + dy;
+                var floor = new Vec3i(tx, by, tz);
+                var foot = new Vec3i(tx, by + 1, tz);
+                var head = new Vec3i(tx, by + 2, tz);
+                if (!world.IsSolidAt(floor)) continue;
+                if (world.IsSolidAt(foot) || world.IsSolidAt(head)) continue;
+                var pos = new Vector3(tx + 0.5f, by + 1.0f + half.Y, tz + 0.5f);
+                if (!Collision.IntersectsSolid(world, pos - half, pos + half)) {
+                    Position = pos;
+                    Velocity = Vector3.Zero;
+                    return true;
+                }
+            }
+            // И чуть ниже
+            for (int dy = -1; dy >= -5; dy--) {
+                int by = baseY + dy;
+                var floor = new Vec3i(tx, by, tz);
+                var foot = new Vec3i(tx, by + 1, tz);
+                var head = new Vec3i(tx, by + 2, tz);
+                if (!world.IsSolidAt(floor)) continue;
+                if (world.IsSolidAt(foot) || world.IsSolidAt(head)) continue;
+                var pos = new Vector3(tx + 0.5f, by + 1.0f + half.Y, tz + 0.5f);
+                if (!Collision.IntersectsSolid(world, pos - half, pos + half)) {
+                    Position = pos;
+                    Velocity = Vector3.Zero;
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private void Explode(GameWorld world, GameSession session) {
@@ -333,7 +476,7 @@ public sealed class HostileMob {
 }
 
 /// <summary>
-/// Летящая стрела: баллистическая траектория, столкновение с блоками, игроком и мобами.
+/// Летящая стрела / огненный шар: баллистическая траектория, столкновение с блоками, игроком и мобами.
 /// </summary>
 public sealed class ArrowProjectile {
     public Vector3 Position;
@@ -342,6 +485,7 @@ public sealed class ArrowProjectile {
     public float LifeTime = 6.0f;
     public HostileMob? Shooter;
     public bool FromPlayer;
+    public bool IsFire;
     public float Damage = 4f;
 
     public ArrowProjectile(Vector3 position, Vector3 velocity, HostileMob? shooter = null) {
@@ -355,7 +499,9 @@ public sealed class ArrowProjectile {
         LifeTime -= dt;
         if (LifeTime <= 0f) { Alive = false; return; }
 
-        Velocity.Y -= 12.0f * dt;
+        if (!IsFire) {
+            Velocity.Y -= 12.0f * dt;
+        }
         var nextPos = Position + Velocity * dt;
 
         if (FromPlayer) {
@@ -381,13 +527,31 @@ public sealed class ArrowProjectile {
                     return;
                 }
             }
+            // Стрела игрока поражает Слизня Края
+            if (world.EndBoss is { Alive: true } boss) {
+                var bossCent = boss.Position;
+                var toBoss = bossCent - Position;
+                if (MathF.Abs(toBoss.X) < EndSlime.HalfSizeXZ + 0.4f &&
+                    MathF.Abs(toBoss.Y) < EndSlime.HalfSizeY + 0.4f &&
+                    MathF.Abs(toBoss.Z) < EndSlime.HalfSizeXZ + 0.4f) {
+                    Alive = false;
+                    boss.TakeDamage(Damage, world, session);
+                    SoundSystem.PlayArrowHit();
+                    return;
+                }
+            }
         } else {
-            // Стрела моба поражает игрока
+            // Снаряд моба поражает игрока
             var toPlayer = (player.Position + new Vector3(0f, Player.EyeHeight * 0.5f, 0f)) - Position;
             if (toPlayer.Length() < 0.85f) {
                 Alive = false;
                 player.ApplyDamage(Damage, session, Position);
-                session.AddMessage($"В вас попала стрела! -{Damage:F0} HP");
+                if (IsFire) {
+                    player.FireTicks = MathF.Max(player.FireTicks, 5.0f);
+                    session.AddMessage($"Огненный шар ифрита обжёг вас! -{Damage:F0} HP");
+                } else {
+                    session.AddMessage($"В вас попала стрела! -{Damage:F0} HP");
+                }
                 return;
             }
 

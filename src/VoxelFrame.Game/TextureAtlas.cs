@@ -8,7 +8,7 @@ namespace VoxelFrame.Game;
 /// </summary>
 public static class TextureAtlas {
     public const int TilePx = 16;
-    public const int Cols = 8, Rows = 16;
+    public const int Cols = 8, Rows = 20;
     public const int AtlasW = Cols * TilePx, AtlasH = Rows * TilePx;
 
     public const int TGrassTop = 0, TGrassSide = 1, TDirt = 2, TStone = 3,
@@ -42,7 +42,11 @@ public static class TextureAtlas {
                      TMossyCobble = 105, TMobSpawner = 106, TWeb = 107, TRail = 108, TPressurePlate = 109,
                      TChiseledSandstone = 110, TNetherrack = 111, TSoulSand = 112, TGlowstone = 113,
                      TNetherQuartzOre = 114, TNetherBrick = 115, TNetherPortal = 116,
-                     TDoorLower = 117, TDoorUpper = 118, TDoorItem = 119;
+                     TDoorLower = 117, TDoorUpper = 118, TDoorItem = 119,
+                     TBucket = 121, TWaterBucket = 122, TLavaBucket = 123,
+                     TEndStone = 124, TEndPortalFrame = 125, TEndPortal = 126, TEnderCrystal = 127,
+                     TChorusPlant = 128, TChorusFlower = 129,
+                     TEnderPearl = 130, TEyeOfEnder = 131, TBlazePowder = 132, TChorusFruit = 133, TEndSlime = 134;
 
     public record struct BlockFaceTiles(byte PosX, byte NegX, byte PosY, byte NegY, byte PosZ, byte NegZ);
 
@@ -190,6 +194,21 @@ public static class TextureAtlas {
         [TNetherQuartzOre] = "blocks/quartz_ore.png",
         [TNetherBrick] = "blocks/nether_brick.png",
         [TNetherPortal] = "blocks/portal.png",
+        [TBucket] = "items/bucket.png",
+        [TWaterBucket] = "items/bucket_water.png",
+        [TLavaBucket] = "items/bucket_lava.png",
+        // Энд (124..134)
+        [TEndStone] = "blocks/end_stone.png",
+        [TEndPortalFrame] = "blocks/end_portal_frame.png",
+        [TEndPortal] = "blocks/end_portal.png",
+        [TEnderCrystal] = "blocks/ender_crystal.png",
+        [TChorusPlant] = "blocks/chorus_plant.png",
+        [TChorusFlower] = "blocks/chorus_flower.png",
+        [TEnderPearl] = "items/ender_pearl.png",
+        [TEyeOfEnder] = "items/eye_of_ender.png",
+        [TBlazePowder] = "items/blaze_powder.png",
+        [TChorusFruit] = "items/chorus_fruit.png",
+        [TEndSlime] = "items/end_slime.png",
     };
 
     public static Texture2D Atlas => _atlas;
@@ -219,7 +238,7 @@ public static class TextureAtlas {
             bool shouldWrite = forceOverwrite || !File.Exists(fullPath);
             if (!shouldWrite && File.Exists(fullPath)) {
                 var existing = Raylib.LoadImage(fullPath);
-                if (IsCompletelyBlackImage(existing)) shouldWrite = true;
+                if (IsCompletelyBlackImage(existing) || tile == TWater || tile == TLava) shouldWrite = true;
                 unsafe { Raylib.UnloadImage(existing); }
             }
             if (shouldWrite) {
@@ -291,6 +310,8 @@ public static class TextureAtlas {
 
         _atlas = Raylib.LoadTextureFromImage(atlasImage);
         unsafe { Raylib.UnloadImage(atlasImage); }
+        Raylib.GenTextureMipmaps(ref _atlas);
+        Raylib.SetTextureFilter(_atlas, TextureFilter.Point);
         _ready = true;
     }
 
@@ -400,6 +421,11 @@ public static class TextureAtlas {
         palette[TDoorLower] = (new Color(145, 105, 60, 255), false);
         palette[TDoorUpper] = (new Color(145, 105, 60, 255), false);
         palette[TDoorItem] = (new Color(145, 105, 60, 255), false);
+        // Энд: блоки
+        palette[TEndStone] = (new Color(224, 224, 200, 255), true);
+        palette[TEndPortalFrame] = (new Color(72, 92, 62, 255), true);
+        palette[TChorusPlant] = (new Color(126, 68, 140, 255), true);
+        palette[TChorusFlower] = (new Color(176, 112, 188, 255), true);
 
         var rng = new Random(20260812);
         for (int tile = 0; tile < palette.Length; tile++) {
@@ -464,16 +490,18 @@ public static class TextureAtlas {
                             a = 0;
                         }
                     } else if (tile == TWater) {
-                        int wave = ((px * 3 + py * 5 + (px ^ py)) % 7);
-                        r = 38 + wave * 4;
-                        g = 85 + wave * 9;
-                        b = 215 + wave * 5;
-                        a = 160; // Полупрозрачная вода по канону
+                        float wave = MathF.Sin(px * 0.45f) * MathF.Cos(py * 0.45f) + MathF.Sin((px + py) * 0.35f) * 0.5f;
+                        int dw = (int)(wave * 8f);
+                        r = Math.Clamp(36 + dw, 25, 60);
+                        g = Math.Clamp(92 + dw * 2, 70, 130);
+                        b = Math.Clamp(224 + dw, 195, 255);
+                        a = 180; // Чистая полупрозрачная вода
                     } else if (tile == TLava) {
-                        int lavaWave = ((px * 2 + py * 7) % 6);
-                        r = 235 + lavaWave * 3;
-                        g = 70 + lavaWave * 15;
-                        b = 10;
+                        float wave = MathF.Sin(px * 0.5f) * MathF.Cos(py * 0.5f);
+                        int dw = (int)(wave * 12f);
+                        r = Math.Clamp(235 + dw, 200, 255);
+                        g = Math.Clamp(85 + dw * 3, 50, 140);
+                        b = 15;
                         a = 255;
                     } else if (tile == TChestTop || tile == TChestSide) {
                         bool isBorder = px <= 1 || px >= 14 || py <= 1 || py >= 14;
@@ -1068,6 +1096,83 @@ public static class TextureAtlas {
                             else if (handle) { r = 40; g = 40; b = 45; a = 255; }
                             else if (px == 3 || px == 12 || py == 1 || py == 14) { r = 110; g = 75; b = 40; a = 255; }
                             else { r = 145; g = 105; b = 60; a = 255; }
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == TBucket || tile == TWaterBucket || tile == TLavaBucket) {
+                        bool isHandle = (py == 2 && (px == 7 || px == 8)) || (py == 3 && (px == 5 || px == 6 || px == 9 || px == 10));
+                        int widthAtY = 12 - (py - 4) / 2;
+                        int minX = 7 - widthAtY / 2;
+                        int maxX = 8 + widthAtY / 2;
+                        bool insideBucket = py >= 4 && py <= 13 && px >= minX && px <= maxX;
+                        bool isRim = insideBucket && (px == minX || px == maxX || py == 13 || py == 4);
+
+                        if (isHandle) {
+                            r = 130; g = 130; b = 135; a = 255;
+                        } else if (isRim) {
+                            bool highlight = px == minX || py == 4;
+                            r = highlight ? 220 : 160;
+                            g = highlight ? 220 : 160;
+                            b = highlight ? 230 : 170;
+                            a = 255;
+                        } else if (insideBucket) {
+                            if (tile == TWaterBucket) {
+                                r = 38 + ((px + py) % 3) * 15;
+                                g = 95 + ((px + py) % 4) * 20;
+                                b = 225;
+                                a = 255;
+                            } else if (tile == TLavaBucket) {
+                                r = 245;
+                                g = 80 + ((px * 2 + py) % 4) * 25;
+                                b = 15;
+                                a = 255;
+                            } else {
+                                r = 70; g = 70; b = 75; a = 255;
+                            }
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == TEndPortal) {
+                        // Портал в Энд: тёмная звёздная пурпурная воронка
+                        int wave = (int)(MathF.Sin(px * 0.7f + py * 0.9f) * 30f);
+                        r = Math.Clamp(55 + wave, 20, 120);
+                        g = Math.Clamp(25 + wave / 2, 10, 70);
+                        b = Math.Clamp(95 + wave, 40, 160);
+                        a = 215;
+                    } else if (tile == TEnderCrystal) {
+                        // Хрустальный эндер-кристалл
+                        float dxc = (px - 8f) / 5.5f, dyc = (py - 8f) / 6.5f;
+                        bool inGem = dxc * dxc + dyc * dyc <= 1f && py >= 2 && py <= 14;
+                        bool shine = inGem && px >= 6 && px <= 7 && py >= 5 && py <= 7;
+                        if (shine) { r = 230; g = 255; b = 255; a = 255; }
+                        else if (inGem) { r = 150; g = 225; b = 240; a = 235; }
+                        else { a = 0; }
+                    } else if (tile >= TEnderPearl && tile <= TEndSlime) {
+                        // Энд: предметы (жемчуг, око, порох, плод, слизь) — объект с прозрачным фоном
+                        float cx = 8f, cy = 8f;
+                        bool inObj = tile switch {
+                            TEnderPearl => (px - cx) * (px - cx) + (py - cy) * (py - cy) <= 24,
+                            TEyeOfEnder => (px - cx) * (px - cx) + (py - cy) * (py - cy) <= 26,
+                            TBlazePowder => (px - cx) * (px - cx) + (py - 10) * (py - 10) <= 18 && px >= 3 && px <= 13 && py >= 6,
+                            TChorusFruit => (px - cx) * (px - cx) * 0.8f + (py - cy) * (py - cy) * 1.1f <= 20,
+                            _ => (px - cx) * (px - cx) + (py - cy) * (py - cy) <= 30,
+                        };
+                        if (inObj) {
+                            (int mr, int mg, int mb) = tile switch {
+                                TEnderPearl => (40, 180, 185),
+                                TEyeOfEnder => (35, 175, 150),
+                                TBlazePowder => (235, 150, 40),
+                                TChorusFruit => (155, 85, 165),
+                                _ => (55, 40, 70),
+                            };
+                            r = mr; g = mg; b = mb; a = 255;
+                            if (tile == TEyeOfEnder) {
+                                bool pupil = (px - 8) * (px - 8) + (py - 8) * (py - 8) <= 4;
+                                if (pupil) { r = 220; g = 235; b = 255; }
+                            } else if (tile == TEndSlime) {
+                                bool shine = (px - 8) * (px - 8) + (py - 6) * (py - 6) <= 4;
+                                if (shine) { r = 120; g = 95; b = 140; }
+                            }
                         } else {
                             a = 0;
                         }

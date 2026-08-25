@@ -1,8 +1,6 @@
 using System.Numerics;
 using VoxelFrame.Core;
 using VoxelFrame.Core.Inventory;
-using VoxelFrame.Core.Materials;
-using VoxelFrame.Core.Physics;
 using VoxelFrame.Core.World;
 
 namespace VoxelFrame.Game;
@@ -31,9 +29,14 @@ internal static class SmokeTest {
             TestAnimals();
             TestDayNight();
             TestSaveLoad();
+            TestSunPropagation();
+            TestSaveBackupRecovery();
             TestCollapse();
             TestAlphaMobsAndFluids();
             TestBiomesAnimalsCharcoalTools();
+            TestEndSlime();
+            TestEndSaveLoad();
+            TestMultiWorldSaveLoad();
         } catch (Exception ex) {
             Fail($"необработанное исключение: {ex}");
         }
@@ -220,7 +223,7 @@ internal static class SmokeTest {
         var planksPos = new Vec3i((int)MathF.Floor(s.Player.Position.X) + 2, s.World.SpawnBlock.Y + 1, (int)MathF.Floor(s.Player.Position.Z));
 
         // Детерминированное поджигание досок.
-        w.PlacePlacedBlock(planksPos, GameData.BPlanks, 1.0f);
+        w.PlacePlacedBlock(planksPos, GameData.BPlanks);
         w.Fire.Ignite(planksPos);
         Check(w.Fire.Burning.ContainsKey(planksPos), "доски горят");
         for (int i = 0; i < 120; i++) w.Fire.Tick(0.1f);
@@ -299,8 +302,8 @@ internal static class SmokeTest {
         s.Player.AttackRechargeTimer = 1.0f;
         s.Player.AttackAnimal(w, s);
         Check(!pig.Alive, "свинья убита мечом за 3 удара");
-        Check(w.Pickups.Any(p => p.Definition == GameData.RawPorkItem), "выпала свинина");
-        Check(w.Pickups.Sum(p => p.Definition == GameData.RawPorkItem ? p.Quantity : 0) >= 1, "выпало корректное количество свинины");
+        Check(w.Pickups.Any(p => p.Item.Definition == GameData.RawPorkItem), "выпала свинина");
+        Check(w.Pickups.Sum(p => p.Item.Definition == GameData.RawPorkItem ? p.Quantity : 0) >= 1, "выпало корректное количество свинины");
     }
 
     // ── 8. День и ночь ───────────────────────────────────────────────────────
@@ -327,7 +330,7 @@ internal static class SmokeTest {
         Tick(s, 3f);
         s.Player.Inventory.TryInsert(GameData.NewItem(GameData.LogItem), 1);
         s.Player.Inventory.TryInsert(GameData.NewItem(GameData.CookedPorkItem), 2);
-        s.World.PlacePlacedBlock(new Vec3i(3, s.World.SpawnBlock.Y + 1, 0), GameData.BPlanks, 1.0f);
+        s.World.PlacePlacedBlock(new Vec3i(3, s.World.SpawnBlock.Y + 1, 0), GameData.BPlanks);
         var fPos = new Vec3i(4, s.World.SpawnBlock.Y + 1, 0);
         var fn = s.World.GetOrCreateFurnace(fPos);
         fn.Input = new ItemEntry(GameData.NewItem(GameData.IronOreItem), 5);
@@ -354,7 +357,7 @@ internal static class SmokeTest {
               loaded.Player.Inventory.CountOf(GameData.CookedPorkItem) == 2, "инвентарь сохранён");
         var chunkCoord = Chunk.CoordOf(new Vec3i(3, s.World.SpawnBlock.Y + 1, 0));
         Check(loaded.World.TryGetChunk(chunkCoord) != null, "чанк загружен");
-        Check(loaded.World.Pickups.Count == 1 && loaded.World.Pickups[0].Definition == GameData.AppleItem,
+        Check(loaded.World.Pickups.Count == 1 && loaded.World.Pickups[0].Item.Definition == GameData.AppleItem,
               "пикапы сохранены");
         Check(loaded.World.Animals.Count == animalsBefore, "животные сохранены");
         var planksLoaded = loaded.World.GetBlockType(new Vec3i(3, s.World.SpawnBlock.Y + 1, 0));
@@ -380,17 +383,17 @@ internal static class SmokeTest {
         Tick(s, 1f);
         var w = s.World;
 
-        // 1. Обычные блоки (доски, камень) висят в воздухе без опор (Minecraft-стандарт)
+        // 1. Обычные блоки (доски, камень) висят в воздухе без опор
         var top = new Vec3i(0, w.SpawnBlock.Y + 5, 0);
-        w.PlacePlacedBlock(top, GameData.BPlanks, 1.0f);
+        w.PlacePlacedBlock(top, GameData.BPlanks);
         Tick(s, 0.5f);
-        Check(w.GetBlockType(top)?.Id == GameData.BPlanks.Id, "доски висят в воздухе без опор (Minecraft floating blocks)");
+        Check(w.GetBlockType(top)?.Id == GameData.BPlanks.Id, "доски висят в воздухе без опор (floating blocks)");
         Check(w.FallingBlocks.Count == 0, "обрушение отсутствует");
 
         // 2. Песок падает под действием гравитации
         var sandPos = new Vec3i(5, w.SpawnBlock.Y + 20, 5);
         w.RemoveBlock(sandPos - new Vec3i(0, 1, 0));
-        w.PlacePlacedBlock(sandPos, GameData.BSand, 1.0f);
+        w.PlacePlacedBlock(sandPos, GameData.BSand);
         w.CheckGravityBlocksAbove(sandPos - new Vec3i(0, 1, 0));
         Check(w.FallingBlocks.Count > 0, "песок в воздухе превращается в падающий блок (Sand Gravity)");
         Tick(s, 1.5f);
@@ -413,29 +416,56 @@ internal static class SmokeTest {
         w.HostileMobs.Add(zombie);
         zombie.TakeDamage(100f, w, s);
         Check(!zombie.Alive, "зомби погиб");
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.RottenFleshItem.Id), "с зомби выпала гнилая плоть");
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.RottenFleshItem.Id), "с зомби выпала гнилая плоть");
 
         // 2. Дроп Крипера: порох
         var creeper = new HostileMob(HostileType.Creeper, s.Player.Eye + s.Player.Forward * 2f);
         w.HostileMobs.Add(creeper);
         creeper.TakeDamage(100f, w, s);
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.GunpowderItem.Id), "с крипера выпал порох");
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.GunpowderItem.Id), "с крипера выпал порох");
 
         // 3. Дроп Скелета: стрелы и кости
         var skeleton = new HostileMob(HostileType.Skeleton, s.Player.Eye + s.Player.Forward * 2f);
         w.HostileMobs.Add(skeleton);
         skeleton.TakeDamage(100f, w, s);
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.ArrowItem.Id || p.Definition.Id == GameData.BoneItem.Id), "со скелета выпали стрелы/кости");
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.ArrowItem.Id || p.Item.Definition.Id == GameData.BoneItem.Id), "со скелета выпали стрелы/кости");
 
         // 4. Дроп Паука: нить
         var spider = new HostileMob(HostileType.Spider, s.Player.Eye + s.Player.Forward * 2f);
         w.HostileMobs.Add(spider);
         spider.TakeDamage(100f, w, s);
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.StringItem.Id), "с паука выпали нити");
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.StringItem.Id), "с паука выпали нити");
+
+        // 4.3 Эндэрмен: 40 HP, дроп жемчуга Эндера, агро на удар
+        var enderman = new HostileMob(HostileType.Enderman, s.Player.Eye + s.Player.Forward * 2.5f);
+        Check(MathF.Abs(enderman.Health - 40f) < 0.01f, "у эндэрмена 40 HP");
+        enderman.TakeDamage(1f, w, s);
+        Check(enderman.IsAngry, "эндэрмен агрится при уроне");
+        enderman.TakeDamage(100f, w, s);
+        Check(!enderman.Alive, "эндэрмен погиб от большого урона");
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.EnderPearlItem.Id), "с эндэрмена выпал жемчуг Эндера");
+
+        // 4.4 Портал Энда: 12 рамок по кольцу + око -> активация проёма 2×2
+        int pY = 55, pX = 20, pZ = 20;
+        var pFrames = new List<Vec3i>();
+        for (int i = 0; i <= 3; i++) pFrames.Add(new Vec3i(pX + i, pY, pZ));          // верх
+        for (int i = 0; i <= 3; i++) pFrames.Add(new Vec3i(pX + i, pY, pZ + 3));      // низ
+        for (int i = 1; i <= 2; i++) { pFrames.Add(new Vec3i(pX, pY, pZ + i)); pFrames.Add(new Vec3i(pX + 3, pY, pZ + i)); } // боковины
+        Check(pFrames.Count == 12, "кольцо рамок портала состоит из 12 блоков");
+        for (int i = 1; i <= 2; i++) for (int j = 1; j <= 2; j++) w.RemoveBlock(new Vec3i(pX + i, pY, pZ + j));
+        foreach (var f in pFrames) {
+            w.PlacePlacedBlock(f, GameData.BEndPortalFrame);
+            var fv = w.GetVoxel(f);
+            fv.SubGridLayerMask |= 1;
+            w.SetVoxelRaw(f, in fv);
+        }
+        // Это ровно 12 рамок (не притягиваем лишние из окрестности) — проём пуст
+        Check(Player.TryActivateEndPortal(w, pFrames[0]), "со всеми оками портал Энда открывается");
+        Check(w.GetVoxel(new Vec3i(pX + 1, pY, pZ + 1)).TypeId == GameData.BEndPortal.Id, "в проёме появился портал в Энд");
 
         // 4.1 Лазание паука по вертикальной стене
         var spiderClimbPos = new Vector3(0.3f, 50.0f, 0.5f);
-        w.PlacePlacedBlock(new Vec3i(1, 50, 0), GameData.BStone, 1f);
+        w.PlacePlacedBlock(new Vec3i(1, 50, 0), GameData.BStone);
         var climbingSpider = new HostileMob(HostileType.Spider, spiderClimbPos);
         climbingSpider.Velocity = Vector3.Zero;
         // Симулируем шаг движения в сторону стены (игрок наверху стены)
@@ -458,26 +488,31 @@ internal static class SmokeTest {
         // 5. Жидкости: вода течет вниз и горизонтально с ограничением дистанции
         var waterPos = new Vec3i(px + 4, py + 8, pz + 4);
         w.RemoveBlock(waterPos + new Vec3i(0, -1, 0));
-        w.PlacePlacedBlock(waterPos, GameData.BWater, 1.0f);
+        w.PlacePlacedBlock(waterPos, GameData.BWater);
         Tick(s, 1.5f);
         Check(w.GetVoxel(waterPos + new Vec3i(0, -1, 0)).TypeId == GameData.BWater.Id, "вода стекает вниз под действием гравитации");
 
         // 5.1 Лимит растекания воды (ровно 7 блоков по горизонтали на плоском основании)
         var trenchBase = new Vec3i(px + 20, w.SpawnBlock.Y + 2, pz + 20);
-        for (int i = 0; i <= 10; i++) {
-            w.PlacePlacedBlock(trenchBase + new Vec3i(i, 0, 0), GameData.BStone, 1f);
+        for (int i = -1; i <= 11; i++) {
+            w.PlacePlacedBlock(trenchBase + new Vec3i(i, 0, 0), GameData.BStone);
+            w.PlacePlacedBlock(trenchBase + new Vec3i(i, 1, 1), GameData.BStone);
+            w.PlacePlacedBlock(trenchBase + new Vec3i(i, 1, -1), GameData.BStone);
             w.RemoveBlock(trenchBase + new Vec3i(i, 1, 0));
         }
+        w.PlacePlacedBlock(trenchBase + new Vec3i(-1, 1, 0), GameData.BStone);
+        w.PlacePlacedBlock(trenchBase + new Vec3i(11, 1, 0), GameData.BStone);
+
         var waterSrcPos = trenchBase + new Vec3i(0, 1, 0);
-        w.PlacePlacedBlock(waterSrcPos, GameData.BWater, 1f, 0);
-        for (int t = 0; t < 20; t++) w.Fluids.Tick(0.2f);
+        w.PlacePlacedBlock(waterSrcPos, GameData.BWater, 0);
+        for (int t = 0; t < 20; t++) w.Fluids.Tick(0.25f);
 
         Check(w.GetVoxel(trenchBase + new Vec3i(7, 1, 0)).TypeId == GameData.BWater.Id, "вода растекается по горизонтали до 7 блоков");
         Check(w.GetVoxel(trenchBase + new Vec3i(8, 1, 0)).TypeId == 0, "вода останавливается на 7 блоках и не заливает мир бесконечно");
 
         // 5.2 Высыхание потока при удалении источника
         w.RemoveBlock(waterSrcPos);
-        for (int t = 0; t < 25; t++) w.Fluids.Tick(0.2f);
+        for (int t = 0; t < 30; t++) w.Fluids.Tick(0.25f);
         bool allDried = true;
         for (int i = 1; i <= 7; i++) {
             if (w.GetVoxel(trenchBase + new Vec3i(i, 1, 0)).TypeId != 0) allDried = false;
@@ -488,16 +523,16 @@ internal static class SmokeTest {
         var wellBase = new Vec3i(px + 35, w.SpawnBlock.Y + 2, pz + 35);
         for (int dx = 0; dx < 2; dx++) {
             for (int dz = 0; dz < 2; dz++) {
-                w.PlacePlacedBlock(wellBase + new Vec3i(dx, 0, dz), GameData.BStone, 1f);
+                w.PlacePlacedBlock(wellBase + new Vec3i(dx, 0, dz), GameData.BStone);
                 w.RemoveBlock(wellBase + new Vec3i(dx, 1, dz));
             }
         }
         // Ставим 2 источника по диагонали
-        w.PlacePlacedBlock(wellBase + new Vec3i(0, 1, 0), GameData.BWater, 1f, 0);
-        w.PlacePlacedBlock(wellBase + new Vec3i(1, 1, 1), GameData.BWater, 1f, 0);
+        w.PlacePlacedBlock(wellBase + new Vec3i(0, 1, 0), GameData.BWater, 0);
+        w.PlacePlacedBlock(wellBase + new Vec3i(1, 1, 1), GameData.BWater, 0);
         w.Fluids.ScheduleUpdate(wellBase + new Vec3i(1, 1, 0));
         w.Fluids.ScheduleUpdate(wellBase + new Vec3i(0, 1, 1));
-        for (int t = 0; t < 10; t++) w.Fluids.Tick(0.2f);
+        for (int t = 0; t < 10; t++) w.Fluids.Tick(0.25f);
 
         bool infiniteWellFormed = w.GetVoxel(wellBase + new Vec3i(1, 1, 0)).TypeId == GameData.BWater.Id &&
                                   w.GetVoxel(wellBase + new Vec3i(1, 1, 0)).SubGridLayerMask == 0 &&
@@ -508,20 +543,20 @@ internal static class SmokeTest {
         // 5.4 Смыв травы и факелов водой
         var washPos = trenchBase + new Vec3i(0, 1, 0);
         var grassWashPos = washPos + new Vec3i(1, 0, 0);
-        w.PlacePlacedBlock(trenchBase + new Vec3i(0, 0, 0), GameData.BStone, 1f);
-        w.PlacePlacedBlock(trenchBase + new Vec3i(1, 0, 0), GameData.BStone, 1f);
-        w.PlacePlacedBlock(grassWashPos, GameData.BTallGrass, 1f);
-        w.PlacePlacedBlock(washPos, GameData.BWater, 1f, 0);
-        for (int t = 0; t < 5; t++) w.Fluids.Tick(0.2f);
+        w.PlacePlacedBlock(trenchBase + new Vec3i(0, 0, 0), GameData.BStone);
+        w.PlacePlacedBlock(trenchBase + new Vec3i(1, 0, 0), GameData.BStone);
+        w.PlacePlacedBlock(grassWashPos, GameData.BTallGrass);
+        w.PlacePlacedBlock(washPos, GameData.BWater, 0);
+        for (int t = 0; t < 8; t++) w.Fluids.Tick(0.25f);
         Check(w.GetVoxel(grassWashPos).TypeId == GameData.BWater.Id, "вода смывает траву и занимает её клетку");
 
         // 6. Реакция жидкостей: Вода + Лава = Булыжник / Обсидиан
         var lavaPos = new Vec3i(px + 4, py + 5, pz);
         var waterReactPos = lavaPos + new Vec3i(1, 0, 0);
-        w.PlacePlacedBlock(lavaPos + new Vec3i(0, -1, 0), GameData.BStone, 1.0f);
-        w.PlacePlacedBlock(waterReactPos + new Vec3i(0, -1, 0), GameData.BStone, 1.0f);
-        w.PlacePlacedBlock(lavaPos, GameData.BLava, 1.0f, 0);
-        w.PlacePlacedBlock(waterReactPos, GameData.BWater, 1.0f, 0);
+        w.PlacePlacedBlock(lavaPos + new Vec3i(0, -1, 0), GameData.BStone);
+        w.PlacePlacedBlock(waterReactPos + new Vec3i(0, -1, 0), GameData.BStone);
+        w.PlacePlacedBlock(lavaPos, GameData.BLava, 0);
+        w.PlacePlacedBlock(waterReactPos, GameData.BWater, 0);
         w.Fluids.ScheduleUpdate(lavaPos);
         w.Fluids.ScheduleUpdate(waterReactPos);
         for (int t = 0; t < 5; t++) w.Fluids.Tick(0.2f);
@@ -540,6 +575,103 @@ internal static class SmokeTest {
             }
         }
         Check(foundCaveAir || true, "3D шум пещер сгенерирован");
+    }
+
+    // ── 13. Энд: Слизень Края (босс) ─────────────────────────────────────────
+
+    private static void TestEndSlime() {
+        Console.WriteLine("[13] Энд: Слизень Края (босс)");
+        var s = NewSession();
+        var end = new GameWorld(s.World.Seed ^ 0x2E1D0FF) { Dimension = Dimension.End };
+        end.EnsureLoadedAroundSync(new Vector3(0.5f, 60f, 0.5f), 2);
+        int crystals = end.CountAliveEndCrystals();
+        Check(crystals > 0, $"в Энде сгенерированы эндер-кристаллы ({crystals})");
+
+        var center = new Vector3(0.5f, end.Generator.EndSurfaceHeight(0, 0), 0.5f);
+        var boss = new EndSlime(new Vector3(30f, 90f, 0f), center, s.World.Seed);
+        end.EndBoss = boss;
+
+        // Самолечение, пока живы кристаллы (игрок далеко, босс не просыпается)
+        boss.Health = 100f;
+        s.Player.Position = new Vector3(2000f, 2000f, 2000f);
+        for (int t = 0; t < 120; t++) boss.Tick(0.05f, end, s.Player, s, center, center.Y);
+        Check(boss.Health > 100.5f, $"Слизень Края лечится кристаллами (HP={boss.Health:F0})");
+
+        // Смерть и награда
+        boss.TakeDamage(2000f, end, s);
+        Check(!boss.Alive, "Слизень Края умирает от большого урона");
+        Check(end.EndBossDefeated, "босс помечен побеждённым");
+        Check(end.Pickups.Any(p => p.Item.Definition.Id == GameData.EndSlimeItem.Id), "с босса выпала эндер-слизь");
+    }
+
+    // ── 13. Энд: сохранение/загрузка мира и босса ─────────────────────────────
+
+    private static void TestEndSaveLoad() {
+        Console.WriteLine("[13] Энд: сохранение/загрузка мира и босса");
+        var s = NewSession(4242);
+        s.SwitchDimension(Dimension.End);
+        var end = s.EndWorld!;
+        end.EnsureLoadedAroundSync(new Vector3(0.5f, 60f, 0.5f), 2);
+        Check(end.CountAliveEndCrystals() > 0, "в Энде сгенерированы эндер-кристаллы");
+
+        var center = new Vector3(0.5f, end.Generator.EndSurfaceHeight(0, 0), 0.5f);
+        var boss = new EndSlime(new Vector3(20f, 80f, 10f), center, end.Seed) { Health = 150f };
+        end.EndBoss = boss;
+
+        string path = Path.Combine(Path.GetTempPath(), $"voxelframe_end_{Guid.NewGuid():N}.dat");
+        s.SaveTo(path);
+        Check(File.Exists(path), "сохранение Энда записано");
+
+        var loaded = SaveSystem.Load(path, headless: true);
+        Check(loaded.Dimension == Dimension.End, "загружено измерение Энд");
+        Check(loaded.EndWorld != null, "EndWorld создан при загрузке");
+        Check(loaded.World.EndBoss is { Alive: true } loadedBoss && Math.Abs(loadedBoss.Health - 150f) < 1e-3f,
+              "босс Энда сохранён и загружен с корректным HP");
+        Check(!loaded.World.EndBossDefeated, "флаг победы босса загружен");
+        Check(loaded.World.CountAliveEndCrystals() > 0, "эндер-кристаллы восстановлены из чанков");
+
+        File.Delete(path);
+    }
+
+    // ── 14. Все три измерения сохраняются одновременно ────────────────────────
+
+    private static void TestMultiWorldSaveLoad() {
+        Console.WriteLine("[14] Сохранение всех трёх измерений");
+        var s = NewSession(9917);
+        var overworld = s.World;
+        var owY = overworld.SpawnBlock.Y + 1;
+        overworld.PlacePlacedBlock(new Vec3i(3, owY, 0), GameData.BPlanks);
+
+        s.SwitchDimension(Dimension.Nether);
+        var nether = s.World;
+        nether.PlacePlacedBlock(new Vec3i(3, 64, 0), GameData.BStone);
+
+        s.SwitchDimension(Dimension.End);
+        var endw = s.World;
+        endw.EnsureLoadedAroundSync(new Vector3(0.5f, 60f, 0.5f), 2);
+        endw.PlacePlacedBlock(new Vec3i(3, 64, 0), GameData.BEndStone);
+        var center = new Vector3(0.5f, endw.Generator.EndSurfaceHeight(0, 0), 0.5f);
+        endw.EndBoss = new EndSlime(new Vector3(20f, 80f, 10f), center, endw.Seed) { Health = 90f };
+
+        string path = Path.Combine(Path.GetTempPath(), $"voxelframe_mw_{Guid.NewGuid():N}.dat");
+        s.SaveTo(path);
+        Check(File.Exists(path), "сохранение всех миров записано");
+
+        var loaded = SaveSystem.Load(path, headless: true);
+        Check(loaded.Dimension == Dimension.End, "загружено измерение Энд (в котором сохранялись)");
+        Check(loaded.OverworldWorld != null, "Обычный мир восстановлен");
+        Check(loaded.NetherWorld != null, "Нижний мир восстановлен");
+        Check(loaded.EndWorld != null, "Энд восстановлен");
+        Check(loaded.OverworldWorld!.GetBlockType(new Vec3i(3, owY, 0))?.Id == GameData.BPlanks.Id,
+              "блок в Обычном мире сохранён");
+        Check(loaded.NetherWorld!.GetBlockType(new Vec3i(3, 64, 0))?.Id == GameData.BStone.Id,
+              "блок в Нижнем мире сохранён");
+        Check(loaded.EndWorld!.GetBlockType(new Vec3i(3, 64, 0))?.Id == GameData.BEndStone.Id,
+              "блок в Энде сохранён");
+        Check(loaded.EndWorld.EndBoss is { Alive: true } lb && Math.Abs(lb.Health - 90f) < 1e-3f,
+              "босс Энда сохранён при сохранении из Энда");
+
+        File.Delete(path);
     }
 
     // ── 12. Биомы, Коровы, Овцы, Древесный уголь и Инструменты ───────────────
@@ -605,15 +737,15 @@ internal static class SmokeTest {
         w.Animals.Add(cow);
         cow.Die(w, s);
         Check(!cow.Alive, "корова побеждена");
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.RawBeefItem.Id), "с коровы выпала сырая говядина");
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.RawBeefItem.Id), "с коровы выпала сырая говядина");
 
         var sheep = new Animal(AnimalType.Sheep, s.Player.Position + new Vector3(0f, 0f, 2f));
         w.Animals.Add(sheep);
         sheep.Die(w, s);
         Check(!sheep.Alive, "овца побеждена");
-        var woolPickup = w.Pickups.FirstOrDefault(p => p.Definition.Id == GameData.WhiteWoolItem.Id);
+        var woolPickup = w.Pickups.FirstOrDefault(p => p.Item.Definition.Id == GameData.WhiteWoolItem.Id);
         Check(woolPickup != null && woolPickup.Quantity == 1, "с овцы понерфлен дроп до ровно 1 шерсти");
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.RawMuttonItem.Id), "с овцы выпала сырая баранина");
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.RawMuttonItem.Id), "с овцы выпала сырая баранина");
 
         // 6.1 Баранина: плавка и еда
         Check(GameData.SmeltingRecipes.TryGetValue(GameData.RawMuttonItem.Id, out var smeltMutton) &&
@@ -632,7 +764,7 @@ internal static class SmokeTest {
 
         // 8. Дроп содержимого печки при разрушении
         var furnPos = new Vec3i(15, w.SpawnBlock.Y + 2, 15);
-        w.PlacePlacedBlock(furnPos, GameData.BFurnace, 1f);
+        w.PlacePlacedBlock(furnPos, GameData.BFurnace);
         var furnace = w.GetOrCreateFurnace(furnPos);
         furnace.Input = new ItemEntry(GameData.NewItem(GameData.IronOreItem), 3);
         furnace.Fuel = new ItemEntry(GameData.NewItem(GameData.CoalItem), 2);
@@ -640,13 +772,13 @@ internal static class SmokeTest {
         int pickupsBefore = w.Pickups.Count;
         w.RemoveBlock(furnPos);
         Check(!w.Furnaces.ContainsKey(furnPos), "печка удалена из мира");
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.IronOreItem.Id && p.Quantity == 3), "руда выпала из сломанной печки");
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.CoalItem.Id && p.Quantity == 2), "уголь выпал из сломанной печки");
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.IronIngotItem.Id && p.Quantity == 1), "выплавленный слиток выпал из сломанной печки");
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.IronOreItem.Id && p.Quantity == 3), "руда выпала из сломанной печки");
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.CoalItem.Id && p.Quantity == 2), "уголь выпал из сломанной печки");
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.IronIngotItem.Id && p.Quantity == 1), "выплавленный слиток выпал из сломанной печки");
 
         // 9. Блокировка ударов по мобам сквозь сплошную стену
         var wallPos = new Vec3i(0, w.SpawnBlock.Y + 1, 2);
-        w.PlacePlacedBlock(wallPos, GameData.BStone, 1f);
+        w.PlacePlacedBlock(wallPos, GameData.BStone);
         var mobBehindWall = new HostileMob(HostileType.Zombie, new Vector3(0.5f, w.SpawnBlock.Y + 1.5f, 3.5f));
         w.HostileMobs.Add(mobBehindWall);
         bool hasLos = HostileMob.HasLineOfSight(w, new Vector3(0.5f, w.SpawnBlock.Y + 1.5f, 0.5f), mobBehindWall.Position);
@@ -662,8 +794,8 @@ internal static class SmokeTest {
         var bedHeadPos = bedFootPos + new Vec3i(0, 0, 1);
         w.RemoveBlock(bedFootPos);
         w.RemoveBlock(bedHeadPos);
-        w.PlacePlacedBlock(bedFootPos + new Vec3i(0, -1, 0), GameData.BStone, 1f);
-        w.PlacePlacedBlock(bedHeadPos + new Vec3i(0, -1, 0), GameData.BStone, 1f);
+        w.PlacePlacedBlock(bedFootPos + new Vec3i(0, -1, 0), GameData.BStone);
+        w.PlacePlacedBlock(bedHeadPos + new Vec3i(0, -1, 0), GameData.BStone);
         s.Player.Position = new Vector3(20.5f, w.SpawnBlock.Y + 1.9f, 18.5f);
         s.Player.Yaw = 0f;
         s.Player.Pitch = 0f;
@@ -676,7 +808,7 @@ internal static class SmokeTest {
         s.Player.BreakBlock(w, s, bedFootPos, GameData.BBed);
         Tick(s, 0.6f);
         Check(w.GetVoxel(bedFootPos).TypeId == 0 && w.GetVoxel(bedHeadPos).TypeId == 0, "разрушение одной половины удаляет обе");
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.BedItem.Id) || inv.CountOf(GameData.BedItem) == 1, "с кровати выпал предмет кровати");
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.BedItem.Id) || inv.CountOf(GameData.BedItem) == 1, "с кровати выпал предмет кровати");
 
         // 12. Гравитация песка при установке в воздухе
         var airPos = new Vec3i(30, w.SpawnBlock.Y + 10, 30);
@@ -688,13 +820,19 @@ internal static class SmokeTest {
         Check(s.Player.TryPlaceBlock(w, s, airPos, GameData.BSand, GameData.SandItem), "песок установлен в воздухе");
         Check(w.FallingBlocks.Any(fb => fb.Block.Id == GameData.BSand.Id), "песок превратился в падающий блок");
 
-        // 13. Сон: пропуск ночи и переход к рассвету
+        // 13. Сон: пропуск ночи и переход к рассвету (6:00, 0.25)
         s.DayNight.TimeOfDay = 0.85f; // Ночь
         s.StartSleep(bedFootPos);
         Check(s.IsSleeping, "игрок уснул");
         Tick(s, 3.0f);
         Check(!s.IsSleeping, "игрок проснулся");
-        Check(Math.Abs(s.DayNight.TimeOfDay - 0.32f) < 0.05f, "наступил рассвет");
+        Check(Math.Abs(s.DayNight.TimeOfDay - 0.25f) < 0.05f, "наступил рассвет");
+
+        // 13.1 Проверка неканоничных стаков предметов
+        Check(GameData.TotemItem.MaxStack == 1, "тотем бессмертия стакается строго по 1");
+        Check(GameData.BedItem.MaxStack == 1, "кровать стакается строго по 1");
+        Check(GameData.BucketItem.MaxStack == 16, "пустые вёдра стакаются до 16");
+        Check(GameData.WaterBucketItem.MaxStack == 1, "ведро воды не стакается (стак 1)");
 
         // 14. Смерть, экран смерти и выпадение вещей
         inv.Slots[0] = new ItemEntry(GameData.NewItem(GameData.DiamondItem), 5);
@@ -702,13 +840,13 @@ internal static class SmokeTest {
         s.Player.Update(0.1f, PlayerInput.Idle, w, s);
         Check(s.Ui == UiState.Death, "при смерти активируется экран смерти (UiState.Death)");
         Check(inv.CountOf(GameData.DiamondItem) == 0, "вещи безоговорочно выпадают из инвентаря при смерти");
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.DiamondItem.Id), "выпавшие алмазы лежат на месте гибели");
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.DiamondItem.Id), "выпавшие алмазы лежат на месте гибели");
         s.RespawnPlayer();
         Check(s.Ui == UiState.Playing && s.Player.Health == s.Player.MaxHealth, "возрождение восстанавливает здоровье");
 
         // 15. Установка блоков в воду
         var waterPos = new Vec3i(40, w.SpawnBlock.Y, 40);
-        w.PlacePlacedBlock(waterPos, GameData.BWater, 1f);
+        w.PlacePlacedBlock(waterPos, GameData.BWater);
         inv.Slots[0] = new ItemEntry(GameData.NewItem(GameData.DirtItem), 1);
         s.Player.SelectedSlot = 0;
         s.Player.Position = new Vector3(40.5f, w.SpawnBlock.Y + 3f, 40.5f);
@@ -717,8 +855,8 @@ internal static class SmokeTest {
 
         // 16. Сгорание предметов в лаве
         var lavaPos = new Vec3i(50, w.SpawnBlock.Y, 50);
-        w.PlacePlacedBlock(lavaPos, GameData.BLava, 1f);
-        var lavaItem = new ItemPickup(GameData.LogItem, 3, new Vector3(50.5f, w.SpawnBlock.Y + 0.5f, 50.5f));
+        w.PlacePlacedBlock(lavaPos, GameData.BLava);
+        var lavaItem = new ItemPickup(GameData.NewItem(GameData.LogItem), 3, new Vector3(50.5f, w.SpawnBlock.Y + 0.5f, 50.5f));
         w.Pickups.Add(lavaItem);
         lavaItem.Tick(0.1f, w, s.Player);
         Check(lavaItem.Quantity == 0, "предмет сгорел при попадании в лаву");
@@ -740,15 +878,15 @@ internal static class SmokeTest {
         Screens.InSettingsScreen = false;
 
         // 18. Детерминированные сиды (FNV-1a)
-        int seed1 = GameData.ParseSeed("MyMinecraftWorld123");
-        int seed2 = GameData.ParseSeed("MyMinecraftWorld123");
+        int seed1 = GameData.ParseSeed("MyVoxelWorld123");
+        int seed2 = GameData.ParseSeed("MyVoxelWorld123");
         int seedNum = GameData.ParseSeed("42891");
         Check(seed1 == seed2 && seed1 != 0, "одинаковый текстовый сид дает одинаковый детерминированный int");
         Check(seedNum == 42891, "числовой сид парсится напрямую");
 
         // 19. Мотыги, вспашка грядок, посадка семян и сбор пшеницы
         var farmPos = new Vec3i(60, w.SpawnBlock.Y, 60);
-        w.PlacePlacedBlock(farmPos, GameData.BGrass, 1f);
+        w.PlacePlacedBlock(farmPos, GameData.BGrass);
         w.RemoveBlock(farmPos + new Vec3i(0, 1, 0));
         s.Player.Position = new Vector3(60.5f, w.SpawnBlock.Y + 1.0f, 60.5f);
         s.Player.Pitch = -1.5f;
@@ -777,19 +915,19 @@ internal static class SmokeTest {
 
         // Сбор урожая
         s.Player.BreakBlock(w, s, cropPos, GameData.BWheatCrop);
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.WheatItem.Id), "со сбора зрелой пшеницы выпала пшеница");
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.WheatSeedsItem.Id), "со сбора зрелой пшеницы выпали семена");
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.WheatItem.Id), "со сбора зрелой пшеницы выпала пшеница");
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.WheatSeedsItem.Id), "со сбора зрелой пшеницы выпали семена");
 
         // 20. 2D Трава (кустики) и разрушение при срубе нижнего блока
         var dirtBasePos = new Vec3i(65, w.SpawnBlock.Y, 65);
         var grassPos = dirtBasePos + new Vec3i(0, 1, 0);
-        w.PlacePlacedBlock(dirtBasePos, GameData.BDirt, 1f);
-        w.PlacePlacedBlock(grassPos, GameData.BTallGrass, 1f);
+        w.PlacePlacedBlock(dirtBasePos, GameData.BDirt);
+        w.PlacePlacedBlock(grassPos, GameData.BTallGrass);
         Check(w.GetVoxel(grassPos).TypeId == GameData.BTallGrass.Id, "2D трава установлена в мире");
         w.RemoveBlock(dirtBasePos);
         Check(w.GetVoxel(grassPos).TypeId == 0, "трава автоматически разрушается при удалении блока под ней (не висит в воздухе)");
 
-        // 21. Боевая система MC 1.9+ с перезарядкой ударов
+        // 21. Боевая система с перезарядкой ударов
         var dummyZombie = new HostileMob(HostileType.Zombie, new Vector3(70.5f, w.SpawnBlock.Y + 1f, 70.5f));
         w.HostileMobs.Add(dummyZombie);
         s.Player.Position = new Vector3(70.5f, w.SpawnBlock.Y + 1f, 68.5f);
@@ -815,16 +953,15 @@ internal static class SmokeTest {
 
         // 22. Тотем в левой руке и спасение от гибели
         var newWorldSession = GameSession.NewGame(12345, true);
-        Check(newWorldSession.Player.OffhandItem == null, "при создании мира игрок начинает с пустыми руками (тотем не выдается)");
+        Check(newWorldSession.Player.OffhandEntry == null, "при создании мира игрок начинает с пустыми руками (тотем не выдается)");
 
-        newWorldSession.Player.OffhandItem = GameData.TotemItem;
-        newWorldSession.Player.OffhandCount = 1;
+        newWorldSession.Player.OffhandEntry = new ItemEntry(GameData.NewItem(GameData.TotemItem), 1);
 
         // Проверка смены рук (SwapMainAndOffhand)
         newWorldSession.Player.SelectedSlot = 0;
         newWorldSession.Player.Inventory.Slots[0] = new ItemEntry(GameData.NewItem(GameData.DiamondPickaxeItem), 1);
         newWorldSession.Player.SwapMainAndOffhand();
-        Check(newWorldSession.Player.OffhandItem?.Id == GameData.DiamondPickaxeItem.Id, "кирка перешла в левую руку");
+        Check(newWorldSession.Player.OffhandEntry?.Item.Definition.Id == GameData.DiamondPickaxeItem.Id, "кирка перешла в левую руку");
         Check(newWorldSession.Player.Inventory.Slots[0]?.Item.Definition.Id == GameData.TotemItem.Id, "тотем перешел в хотбар");
 
         // Спасение тотемом от смертельного урона
@@ -832,12 +969,12 @@ internal static class SmokeTest {
         newWorldSession.Player.ApplyDamage(10f, newWorldSession);
         Check(newWorldSession.Player.Health == 4f && newWorldSession.Ui == UiState.Playing, "тотем бессмертия предотвратил гибель и восстановил здоровье до 4 HP");
         Check(newWorldSession.Player.TotemAnimationTimer > 0f, "активировалась анимация тотема бессмертия");
-        Check(newWorldSession.Player.InvulnerabilityTimer == 5.0f, "тотем дает 5 секунд полной неуязвимости");
-        Check(newWorldSession.Player.TotemFreezeTimer == 3.0f, "тотем замораживает передвижение игрока на 3 секунды");
+        Check(newWorldSession.Player.InvulnerabilityTimer == 2.0f, "тотем дает 2 секунды неуязвимости (40 тиков)");
+        Check(newWorldSession.Player.TotemFreezeTimer == 0f, "тотем не замораживает игрока");
 
         // 23. Костная мука (BoneMeal)
         var cropTestPos = new Vec3i(80, w.SpawnBlock.Y, 80);
-        w.PlacePlacedBlock(cropTestPos, GameData.BWheatCrop, 1f, 0);
+        w.PlacePlacedBlock(cropTestPos, GameData.BWheatCrop, 0);
         s.Player.Position = new Vector3(80.5f, w.SpawnBlock.Y + 1f, 80.5f);
         s.Player.Pitch = -1.5f;
         s.Player.Yaw = 0f;
@@ -848,32 +985,30 @@ internal static class SmokeTest {
         var fertilizedCrop = w.GetVoxel(cropTestPos);
         Check(fertilizedCrop.SubGridLayerMask > 0, "костная мука мгновенно ускорила рост пшеницы");
 
-        // 24. Опилки и Каша из опилок
+        // 24. Рубка дерева
         var logBreakPos = new Vec3i(85, w.SpawnBlock.Y, 85);
-        w.PlacePlacedBlock(logBreakPos, GameData.BLog, 1f);
+        w.PlacePlacedBlock(logBreakPos, GameData.BLog);
         s.Player.BreakBlock(w, s, logBreakPos, GameData.BLog);
-        Check(w.Pickups.Any(p => p.Definition.Id == GameData.LogItem.Id), "срубленное дерево дропнуло бревно");
-
-        Check(GameData.FoodValue.TryGetValue(GameData.SawdustPorridgeItem.Id, out float porridgeFood) && porridgeFood == 4f, "каша из опилок восстанавливает 4 ед. сытости");
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.LogItem.Id), "срубленное дерево дропнуло бревно");
 
         // 25. Таргетинг сквозь воду (жидкости не мешают копать дно)
         var sandUnderWater = new Vec3i(90, w.SpawnBlock.Y, 90);
         for (int dy = 1; dy <= 6; dy++) w.RemoveBlock(sandUnderWater + new Vec3i(0, dy, 0));
-        w.PlacePlacedBlock(sandUnderWater + new Vec3i(0, 2, 0), GameData.BWater, 1f);
-        w.PlacePlacedBlock(sandUnderWater + new Vec3i(0, 1, 0), GameData.BWater, 1f);
-        w.PlacePlacedBlock(sandUnderWater, GameData.BSand, 1f);
+        w.PlacePlacedBlock(sandUnderWater + new Vec3i(0, 2, 0), GameData.BWater);
+        w.PlacePlacedBlock(sandUnderWater + new Vec3i(0, 1, 0), GameData.BWater);
+        w.PlacePlacedBlock(sandUnderWater, GameData.BSand);
 
         bool rayHit = w.RaycastBlock(new Vector3(90.5f, w.SpawnBlock.Y + 5.5f, 90.5f), -Vector3.UnitY, 8f, out var hitCell, out _, out _);
         Check(rayHit && hitCell == sandUnderWater, "луч прицела проходит сквозь воду и попадает в твердый блок под ней");
 
-        // 26. Рецепт каши из опилок: 2 опилок + 1 доска + 1 семена пшеницы
-        var porridgeGrid = new ItemDefinition?[] {
-            GameData.SawdustItem, GameData.SawdustItem, null,
-            GameData.PlankItem,   GameData.WheatSeedsItem, null,
-            null,                 null,                 null
+        // 26. Рецепт хлеба: 3 пшеницы в ряд
+        var breadGrid = new ItemDefinition?[] {
+            GameData.WheatItem, GameData.WheatItem, GameData.WheatItem,
+            null,               null,               null,
+            null,               null,               null
         };
-        string porridgeKey = GameData.NormalizeGrid(porridgeGrid);
-        Check(GameData.ShapeRecipes.TryGetValue(porridgeKey, out var porridgeRes) && porridgeRes.Item.Id == GameData.SawdustPorridgeItem.Id, "крафт каши из опилок требует 2 опилок, 1 доску и семена пшеницы");
+        string breadKey = GameData.NormalizeGrid(breadGrid);
+        Check(GameData.ShapeRecipes.TryGetValue(breadKey, out var breadRes) && breadRes.Item.Id == GameData.BreadItem.Id, "крафт хлеба требует 3 пшеницы в ряд");
 
         // 27. Стрела скелета не наносит урон самому стрелку
         var shooterSkel = new HostileMob(HostileType.Skeleton, new Vector3(100f, w.SpawnBlock.Y + 10f, 100f));
@@ -918,8 +1053,8 @@ internal static class SmokeTest {
         // 30. Распространение травы на землю и отмирание под твердыми блоками
         var grassSource = new Vec3i(120, w.SpawnBlock.Y, 120);
         var dirtTarget = new Vec3i(121, w.SpawnBlock.Y, 120);
-        w.PlacePlacedBlock(grassSource, GameData.BGrass, 1f);
-        w.PlacePlacedBlock(dirtTarget, GameData.BDirt, 1f);
+        w.PlacePlacedBlock(grassSource, GameData.BGrass);
+        w.PlacePlacedBlock(dirtTarget, GameData.BDirt);
         w.RemoveBlock(grassSource + new Vec3i(0, 1, 0));
         w.RemoveBlock(dirtTarget + new Vec3i(0, 1, 0));
 
@@ -929,17 +1064,17 @@ internal static class SmokeTest {
             if (w.GetVoxel(dirtTarget).TypeId == GameData.BGrass.Id) break;
         }
         // Если случайный тик не попал в 100 итераций, гарантируем распространение
-        w.PlacePlacedBlock(dirtTarget, GameData.BGrass, 1f);
+        w.PlacePlacedBlock(dirtTarget, GameData.BGrass);
         Check(w.GetVoxel(dirtTarget).TypeId == GameData.BGrass.Id, "трава прорастает на соседние блоки земли на открытом воздухе");
 
         // Отмирание травы под сплошным блоком камня
         var coveredGrass = new Vec3i(125, w.SpawnBlock.Y, 125);
-        w.PlacePlacedBlock(coveredGrass, GameData.BGrass, 1f);
-        w.PlacePlacedBlock(coveredGrass + new Vec3i(0, 1, 0), GameData.BStone, 1f);
+        w.PlacePlacedBlock(coveredGrass, GameData.BGrass);
+        w.PlacePlacedBlock(coveredGrass + new Vec3i(0, 1, 0), GameData.BStone);
         // Непосредственный вызов тика травы
         var aboveBlock = GameData.GetBlock(w.GetVoxel(coveredGrass + new Vec3i(0, 1, 0)).TypeId);
         if (aboveBlock != null && aboveBlock.IsSolid && aboveBlock.IsOpaque) {
-            w.PlacePlacedBlock(coveredGrass, GameData.BDirt, 1f);
+            w.PlacePlacedBlock(coveredGrass, GameData.BDirt);
         }
         Check(w.GetVoxel(coveredGrass).TypeId == GameData.BDirt.Id, "трава под сплошным непрозрачным блоком отмирает и превращается в землю");
 
@@ -953,7 +1088,7 @@ internal static class SmokeTest {
         Check(GameData.ShapeRecipes.TryGetValue(doorKey, out var doorRes) && doorRes.Item.Id == GameData.DoorItem.Id && doorRes.Count == 3, "крафт деревянной двери (6 досок -> 3 двери)");
 
         var doorPos = new Vec3i(130, w.SpawnBlock.Y, 130);
-        w.PlacePlacedBlock(doorPos + new Vec3i(0, -1, 0), GameData.BStone, 1f);
+        w.PlacePlacedBlock(doorPos + new Vec3i(0, -1, 0), GameData.BStone);
         w.RemoveBlock(doorPos);
         w.RemoveBlock(doorPos + new Vec3i(0, 1, 0));
         s.Player.Inventory.Slots[0] = new ItemEntry(GameData.NewItem(GameData.DoorItem), 1);
@@ -978,9 +1113,87 @@ internal static class SmokeTest {
 
         // 34. Безоговорочное выпадение вещей при смерти
         s.Player.Inventory.Slots[0] = new ItemEntry(GameData.NewItem(GameData.DiamondItem), 5);
-        s.Player.OffhandItem = GameData.TorchItem;
-        s.Player.OffhandCount = 10;
+        s.Player.OffhandEntry = new ItemEntry(GameData.NewItem(GameData.TorchItem), 10);
         s.DiePlayer();
-        Check(s.Player.Inventory.Slots.All(s => s == null) && s.Player.OffhandItem == null, "при смерти игрока весь инвентарь и вторая рука выпадают на землю без исключений");
+        Check(s.Player.Inventory.Slots.All(s => s == null) && s.Player.OffhandEntry == null, "при смерти игрока весь инвентарь и вторая рука выпадают на землю без исключений");
+    }
+
+    // ── Распространение солнечного света ─────────────────────────────────────
+
+    private static void TestSunPropagation() {
+        Console.WriteLine("[13] Распространение солнечного света (BFS)");
+        var s = NewSession(777);
+        Tick(s, 0.5f);
+
+        // Плавающая плита 5×5 высоко в небе: под ней раньше было 0 (тень-столбик),
+        // теперь свет должен затекать сбоку и снизу с затуханием.
+        const int slabY = 100;
+        int bx = s.World.SpawnBlock.X, bz = s.World.SpawnBlock.Z;
+        for (int dx = -2; dx <= 2; dx++)
+            for (int dz = -2; dz <= 2; dz++)
+                s.World.PlacePlacedBlock(new Vec3i(bx + dx, slabY, bz + dz), GameData.BStone);
+        Tick(s, 0.5f);
+
+        byte under = s.World.GetSunLight(new Vec3i(bx, slabY - 1, bz));
+        Check(under > 0, $"свет затекает под навес ({under}/15, раньше было 0)");
+        Check(under < 15, "под навесом нет прямого неба");
+
+        // Глубоко внутри сплошного грунта света быть не должно. Ищем колонку с
+        // непрерывным монолитом породы: отдельные пещеры под поверхностью
+        // легитимно освещаются снаружи — проверяем именно монолит.
+        int solidY = -1, sx2 = 0, sz2 = 0;
+        for (int dx = -16; dx <= 16 && solidY < 0; dx++) {
+            for (int dz = -16; dz <= 16 && solidY < 0; dz++) {
+                int cx = bx + dx, cz = bz + dz;
+                int top = s.World.Generator.SurfaceHeight(cx, cz);
+                int run = 0;
+                for (int y = top - 1; y >= 5; y--) {
+                    var v = s.World.GetVoxel(new Vec3i(cx, y, cz));
+                    if (v.TypeId != 0 && GameData.GetBlock(v.TypeId).IsOpaque) {
+                        if (++run >= 8) { solidY = y + 4; sx2 = cx; sz2 = cz; break; }
+                    } else {
+                        run = 0;
+                    }
+                }
+            }
+        }
+        Check(solidY > 0, "найден монолит породы для проверки темноты");
+        Check(solidY <= 0 || s.World.GetSunLight(new Vec3i(sx2, solidY, sz2)) == 0,
+              "в толще грунта темно");
+        // Информативно: стоимость пересчёта солнечного света на чанк.
+        var benchChunk = s.World.TryGetChunk(new Vec3i(bx >> 5, slabY >> 5, bz >> 5));
+        if (benchChunk != null) {
+            const int iters = 200;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 0; i < iters; i++) LightEngine.RecomputeSun(benchChunk, s.World);
+            sw.Stop();
+            Console.WriteLine($"    INFO  RecomputeSun: {sw.Elapsed.TotalMilliseconds / iters * 1000:F0} мкс/чанк");
+        }
+    }
+
+    // ── Автосейв-бэкапы и восстановление ─────────────────────────────────────
+
+    private static void TestSaveBackupRecovery() {
+        Console.WriteLine("[14] Бэкапы сейвов и восстановление");
+        var s = NewSession(4242);
+        Tick(s, 0.5f);
+        string path = Path.Combine(Path.GetTempPath(), $"voxelframe_bak_{Guid.NewGuid():N}.dat");
+        try {
+            s.SaveTo(path);                       // первый сейв: .bak ещё нет
+            Tick(s, 0.5f);
+            s.SaveTo(path);                       // второй: предыдущий уходит в .bak
+            Check(File.Exists(path + ".bak"), "предыдущий сейв сохранён в .bak");
+
+            File.WriteAllText(path, "garbage");   // портим основной файл
+            var (loaded, fromBackup) = SaveSystem.LoadWithRecovery(path, headless: true);
+            Check(fromBackup, "повреждённый сейв восстановлен из резервной копии");
+            Check(loaded.World.Seed == 4242, "восстановленный мир соответствует сиду");
+        } finally {
+            try { if (File.Exists(path)) File.Delete(path); } catch { }
+            try { if (File.Exists(path + ".bak")) File.Delete(path + ".bak"); } catch { }
+        }
     }
 }
+
+
+

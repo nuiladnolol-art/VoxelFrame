@@ -11,8 +11,10 @@ namespace VoxelFrame.Game;
 /// </summary>
 public sealed class WorldRenderer : IDisposable {
     private readonly GameSession _session;
-    private readonly GameWorld _world;
+    private GameWorld _world => _session.World;
+    private Dimension _lastDimension = Dimension.Overworld;
     private readonly List<GameChunk> _rebuildQueue = new();
+    private readonly List<GameChunk> _drainBuf = new();
     private Material _material;
     private bool _materialReady;
 
@@ -79,7 +81,7 @@ public sealed class WorldRenderer : IDisposable {
                 }
             }
 
-            // Нелинейная кривая освещенности Minecraft (Alpha / Modern)
+            // Нелинейная кривая освещенности (гамма-коррекция)
             float sunCurve = pow(sun * max(skyFactor, 0.04), 1.35);
             float blockCurve = pow(block, 1.25);
 
@@ -125,6 +127,7 @@ public sealed class WorldRenderer : IDisposable {
     }
 
     private readonly List<VoxelParticle> _particles = new();
+    private readonly List<(GameChunk Chunk, int DistSq)> _translucentChunks = new();
 
     private static Vector3[] GenerateStarField(int count) {
         var stars = new Vector3[count];
@@ -141,7 +144,7 @@ public sealed class WorldRenderer : IDisposable {
 
     public WorldRenderer(GameSession session) {
         _session = session;
-        _world = session.World;
+        _lastDimension = session.Dimension;
         _material = Raylib.LoadMaterialDefault();
         unsafe {
             _material.Maps[(int)MaterialMapIndex.Albedo].Texture = TextureAtlas.Atlas;
@@ -162,17 +165,35 @@ public sealed class WorldRenderer : IDisposable {
         }
         _materialReady = true;
 
-        _world.OnBlockRemoved += SpawnBlockParticles;
-        _world.OnDustSpawned += SpawnDustParticles;
-        _world.OnCritSpawned += SpawnCritParticles;
+        HookWorldEvents(_world);
     }
 
+    private void HookWorldEvents(GameWorld world) {
+        world.OnBlockRemoved += SpawnBlockParticles;
+        world.OnDustSpawned += SpawnDustParticles;
+        world.OnCritSpawned += SpawnCritParticles;
+    }
+
+    public int MeshQueueCount => _rebuildQueue.Count;
+
     public void ProcessMeshQueue() {
-        var dirtyList = _world.DrainMeshDirty().ToList();
-        if (dirtyList.Count > 0) {
-            foreach (var gc in dirtyList) {
+        if (_lastDimension != _world.Dimension) {
+            _lastDimension = _world.Dimension;
+            _rebuildQueue.Clear();
+            _drainBuf.Clear();
+            HookWorldEvents(_world);
+            foreach (var gc in _world.Chunks) {
+                gc.MeshDirty = true;
+                _rebuildQueue.Add(gc);
+            }
+        }
+
+        _world.CollectMeshDirty(_drainBuf);
+        if (_drainBuf.Count > 0) {
+            foreach (var gc in _drainBuf) {
                 if (!_rebuildQueue.Contains(gc)) _rebuildQueue.Add(gc);
             }
+            _drainBuf.Clear();
             var playerPos = _session.Player.Position;
             int pcx = (int)MathF.Floor(playerPos.X / Chunk.SizeX);
             int pcz = (int)MathF.Floor(playerPos.Z / Chunk.SizeZ);
@@ -187,8 +208,10 @@ public sealed class WorldRenderer : IDisposable {
             var gc = _rebuildQueue[0];
             _rebuildQueue.RemoveAt(0);
             gc.UnloadMesh();
-            gc.Meshes.AddRange(ChunkMesher.Build(gc, _world));
-            gc.MeshUploaded = gc.Meshes.Count > 0;
+            var (opaque, trans) = ChunkMesher.Build(gc, _world);
+            gc.Meshes.AddRange(opaque);
+            gc.TranslucentMeshes.AddRange(trans);
+            gc.MeshUploaded = gc.Meshes.Count > 0 || gc.TranslucentMeshes.Count > 0;
             if (!gc.MeshUploaded) gc.UnloadMesh();
         }
     }
@@ -208,7 +231,7 @@ public sealed class WorldRenderer : IDisposable {
 
         bool holdingTorch = _session.Player.SelectedEntry?.Item.Definition.Id == GameData.TorchItem.Id || _session.Player.OffhandItem?.Id == GameData.TorchItem.Id;
         Vector3 lightPos = _session.Player.Eye;
-        float lightRadius = holdingTorch ? 14.0f : 0f;
+        float lightRadius = (SaveSystem.DynamicLighting && holdingTorch) ? 14.0f : 0f;
         if (_playerLightPosLoc != -1) {
             unsafe { Raylib.SetShaderValue(_material.Shader, _playerLightPosLoc, &lightPos, ShaderUniformDataType.Vec3); }
         }
@@ -219,12 +242,14 @@ public sealed class WorldRenderer : IDisposable {
         // Динамический свет раздувающегося белого крипера перед взрывом
         Vector3 creeperLightPos = Vector3.Zero;
         float creeperLightRadius = 0f;
-        foreach (var h in _world.HostileMobs) {
-            if (h.Type == HostileType.Creeper && h.FuseTimer > 0f && h.Alive) {
-                float rad = 6.0f + (h.FuseTimer / 1.3f) * 6.5f; // Свечение от 6 до 12.5 блоков
-                if (rad > creeperLightRadius) {
-                    creeperLightRadius = rad;
-                    creeperLightPos = h.Position + new Vector3(0f, 0.5f, 0f);
+        if (SaveSystem.DynamicLighting) {
+            foreach (var h in _world.HostileMobs) {
+                if (h.Type == HostileType.Creeper && h.FuseTimer > 0f && h.Alive) {
+                    float rad = 6.0f + (h.FuseTimer / 1.3f) * 6.5f; // Свечение от 6 до 12.5 блоков
+                    if (rad > creeperLightRadius) {
+                        creeperLightRadius = rad;
+                        creeperLightPos = h.Position + new Vector3(0f, 0.5f, 0f);
+                    }
                 }
             }
         }
@@ -236,18 +261,39 @@ public sealed class WorldRenderer : IDisposable {
             unsafe { Raylib.SetShaderValue(_material.Shader, _creeperLightRadiusLoc, &creeperLightRadius, ShaderUniformDataType.Float); }
         }
 
+        var camPos = _session.Camera.Position;
         if (_cameraPosLoc != -1) {
-            var camPos = _session.Camera.Position;
             unsafe { Raylib.SetShaderValue(_material.Shader, _cameraPosLoc, &camPos, ShaderUniformDataType.Vec3); }
         }
-        if (_fogColorLoc != -1) {
+
+        // Подводный / лавовый / атмосферный туман
+        var camCell = new Vec3i((int)MathF.Floor(camPos.X), (int)MathF.Floor(camPos.Y), (int)MathF.Floor(camPos.Z));
+        var camVoxel = _world.GetVoxel(camCell);
+        bool isWater = camVoxel.TypeId == GameData.BWater.Id;
+        bool isLava = camVoxel.TypeId == GameData.BLava.Id;
+
+        Vector3 fogVec;
+        float fogStart, fogEnd;
+
+        if (isWater) {
+            fogVec = new Vector3(0.04f, 0.16f, 0.36f); // Глубокий лазурно-синий подводный туман
+            fogStart = 1.0f;
+            fogEnd = (SaveSystem.GraphicsQuality == SaveSystem.GraphicsPreset.Fast) ? 12.0f : 20.0f;
+        } else if (isLava) {
+            fogVec = new Vector3(0.65f, 0.10f, 0.02f); // Густой раскалённо-красный туман лавы
+            fogStart = 0.1f;
+            fogEnd = 3.5f;
+        } else {
             Color fogC = GetFogColor();
-            var fogVec = new Vector3(fogC.R / 255f, fogC.G / 255f, fogC.B / 255f);
+            fogVec = new Vector3(fogC.R / 255f, fogC.G / 255f, fogC.B / 255f);
+            float maxRenderDist = SaveSystem.RenderDistanceSetting * (float)Chunk.SizeX;
+            fogStart = (_world.Dimension == Dimension.Nether) ? 20.0f : MathF.Max(15.0f, maxRenderDist * 0.55f);
+            fogEnd = (_world.Dimension == Dimension.Nether) ? 68.0f : MathF.Max(28.0f, maxRenderDist * 0.96f);
+        }
+
+        if (_fogColorLoc != -1) {
             unsafe { Raylib.SetShaderValue(_material.Shader, _fogColorLoc, &fogVec, ShaderUniformDataType.Vec3); }
         }
-        float maxRenderDist = SaveSystem.RenderDistanceSetting * 16.0f;
-        float fogStart = (_world.Dimension == Dimension.Nether) ? 20.0f : MathF.Max(25.0f, maxRenderDist * 0.55f);
-        float fogEnd = (_world.Dimension == Dimension.Nether) ? 68.0f : MathF.Max(40.0f, maxRenderDist * 0.95f);
         if (_fogStartLoc != -1) {
             unsafe { Raylib.SetShaderValue(_material.Shader, _fogStartLoc, &fogStart, ShaderUniformDataType.Float); }
         }
@@ -264,6 +310,11 @@ public sealed class WorldRenderer : IDisposable {
             int maxDistSq = (rDist + 1) * (rDist + 1);
             int unloadDistSq = (rDist + 3) * (rDist + 3);
 
+            const float chunkRadius = 27.8f; // Радиус описанной сферы для 32×32×32 чанка
+            var camFwd = _session.Player.Forward;
+            const float tanFov = 1.55f; // Запас конуса для широких мониторов
+
+            _translucentChunks.Clear();
             foreach (var gc in _world.Chunks) {
                 int dx = gc.Coord.X - pcx;
                 int dz = gc.Coord.Z - pcz;
@@ -276,7 +327,33 @@ public sealed class WorldRenderer : IDisposable {
                 }
 
                 if (!gc.MeshUploaded || dSq > maxDistSq) continue;
+
+                // Математически точный Frustum Culling по описанной сфере чанка (без мерцания по краям)
+                if (dSq > 4) {
+                    var chunkCenter = new Vector3((gc.Coord.X + 0.5f) * Chunk.SizeX, (gc.Coord.Y + 0.5f) * Chunk.SizeY, (gc.Coord.Z + 0.5f) * Chunk.SizeZ);
+                    var toChunk = chunkCenter - camPos;
+                    float proj = Vector3.Dot(toChunk, camFwd);
+                    if (proj < -chunkRadius) continue; // Чанк полностью позади камеры
+
+                    float perpDistSq = toChunk.LengthSquared() - (proj * proj);
+                    float maxConeRadius = MathF.Max(0f, proj) * tanFov + chunkRadius;
+                    if (perpDistSq > maxConeRadius * maxConeRadius) continue; // Чанк вне сектора обзора
+                }
+
                 foreach (var m in gc.Meshes)
+                    Raylib.DrawMesh(m, _material, Matrix4x4.Identity);
+
+                if (gc.TranslucentMeshes.Count > 0) {
+                    _translucentChunks.Add((gc, dSq));
+                }
+            }
+
+            // Сортировка полупрозрачных мешей (вода, лёд, стекло) от дальних к ближним
+            if (_translucentChunks.Count > 1) {
+                _translucentChunks.Sort(static (a, b) => b.DistSq.CompareTo(a.DistSq));
+            }
+            foreach (var (gc, _) in _translucentChunks) {
+                foreach (var m in gc.TranslucentMeshes)
                     Raylib.DrawMesh(m, _material, Matrix4x4.Identity);
             }
         }
@@ -348,13 +425,15 @@ public sealed class WorldRenderer : IDisposable {
 
     /// <summary>Воксельные облака в небе (Alpha 1.2.6 style, оптимизированные).</summary>
     public void DrawClouds(Camera3D camera) {
+        if (SaveSystem.CloudsMode == 0) return;
+
         float time = (float)Raylib.GetTime();
         float cloudY = 108f;
         var pPos = _session.Player.Position;
 
         int step = 20;
-        bool fancy = SaveSystem.FancyGraphics;
-        int gridR = fancy ? 12 : 8; // Круговой радиус вместо тяжёлой квадратной матрицы
+        bool fancy = SaveSystem.CloudsMode == 2;
+        int gridR = fancy ? (SaveSystem.GraphicsQuality == SaveSystem.GraphicsPreset.Fabulous ? 14 : 10) : 6;
         int baseX = (int)MathF.Floor(pPos.X / step) * step;
         int baseZ = (int)MathF.Floor(pPos.Z / step) * step;
 
@@ -395,13 +474,17 @@ public sealed class WorldRenderer : IDisposable {
 
         var pPos = _session.Player.Position;
         int px = (int)MathF.Floor(pPos.X), py = (int)MathF.Floor(pPos.Y), pz = (int)MathF.Floor(pPos.Z);
+        int playerSurface = _world.Generator.SurfaceHeight(px, pz);
+        // Если игрок находится глубоко в пещере под землей, осадки перед глазами не рисуются
+        if (py < playerSurface - 3 && _world.IsSolidAt(new Vec3i(px, py + 2, pz))) return;
+
         bool isSnow = py >= 85; // Снег на горных вершинах
         float time = (float)Raylib.GetTime();
 
         var rainColor = new Color(130, 160, 240, 160);
         var snowColor = new Color(245, 245, 255, 200);
 
-        int count = 64;
+        int count = SaveSystem.ParticlesMode == 0 ? 16 : (SaveSystem.ParticlesMode == 1 ? 36 : 64);
         for (int i = 0; i < count; i++) {
             float offX = ((i * 17 + (int)(time * 12f)) % 32) - 16;
             float offZ = ((i * 23 + (int)(time * 15f)) % 32) - 16;
@@ -409,6 +492,10 @@ public sealed class WorldRenderer : IDisposable {
             float offY = 14f - fall;
 
             var dropPos = camera.Position + new Vector3(offX, offY, offZ);
+            int dx = (int)MathF.Floor(dropPos.X), dy = (int)MathF.Floor(dropPos.Y), dz = (int)MathF.Floor(dropPos.Z);
+            int surf = _world.Generator.SurfaceHeight(dx, dz);
+            if (dy < surf) continue; // Капли не проходят сквозь землю и крыши
+
             if (isSnow) {
                 Raylib.DrawCube(dropPos, 0.18f, 0.18f, 0.18f, snowColor);
             } else {
@@ -506,8 +593,11 @@ public sealed class WorldRenderer : IDisposable {
         }
         if (_session.HasTarget) {
             var t = _session.TargetBlock;
-            var p = new Vector3(t.X + 0.5f, t.Y + 0.5f, t.Z + 0.5f);
-            Raylib.DrawCubeWires(p, 1.005f, 1.005f, 1.005f, Color.Black);
+            var v = _world.GetVoxel(t);
+            if (v.TypeId != 0) {
+                var p = new Vector3(t.X + 0.5f, t.Y + 0.5f, t.Z + 0.5f);
+                Raylib.DrawCubeWires(p, 1.005f, 1.005f, 1.005f, Color.Black);
+            }
         }
         DrawParticles(dt);
     }
@@ -566,9 +656,9 @@ public sealed class WorldRenderer : IDisposable {
 
     public float GetFogFactor(Vector3 pos) {
         float dist = Vector3.Distance(_session.Camera.Position, pos);
-        float maxRenderDist = SaveSystem.RenderDistanceSetting * 16.0f;
-        float fogStart = (_world.Dimension == Dimension.Nether) ? 20.0f : MathF.Max(25.0f, maxRenderDist * 0.55f);
-        float fogEnd = (_world.Dimension == Dimension.Nether) ? 68.0f : MathF.Max(40.0f, maxRenderDist * 0.95f);
+        float maxRenderDist = SaveSystem.RenderDistanceSetting * (float)Chunk.SizeX;
+        float fogStart = (_world.Dimension == Dimension.Nether) ? 20.0f : MathF.Max(15.0f, maxRenderDist * 0.60f);
+        float fogEnd = (_world.Dimension == Dimension.Nether) ? 68.0f : MathF.Max(28.0f, maxRenderDist * 0.96f);
         float fogFactor = Math.Clamp((dist - fogStart) / (fogEnd - fogStart), 0.0f, 1.0f);
         return MathF.Pow(fogFactor, 1.35f);
     }
@@ -930,9 +1020,158 @@ public sealed class WorldRenderer : IDisposable {
                 Raylib.DrawCubeWires(legBL, legW + 0.002f, legH + 0.002f, legD + 0.002f, outlineColor);
                 Raylib.DrawCube(legBR, legW, legH, legD, creeperGreen);
                 Raylib.DrawCubeWires(legBR, legW + 0.002f, legH + 0.002f, legD + 0.002f, outlineColor);
+            } else if (h.Type == HostileType.ZombiePigman) {
+                // ── ZOMBIE PIGMAN (СВИНОЗОМБИ) MODEL ───────────────────────
+                var pigSkin = ShadeColor(h.HurtTime > 0f ? new Color(240, 70, 70, 255) : new Color(230, 150, 160, 255), light, hPos);
+                var rotGreen = ShadeColor(h.HurtTime > 0f ? new Color(200, 50, 50, 255) : new Color(60, 110, 50, 255), light, hPos);
+                var goldSword = ShadeColor(new Color(255, 215, 30, 255), light, hPos);
+                var outlineColor = ShadeColor(new Color(30, 20, 20, 180), light, hPos);
+
+                // Body (половина свиная кожа, половина гнилая плоть)
+                Raylib.DrawCube(new Vector3(-0.15f, 0.15f, 0f), 0.3f, 0.70f, 0.35f, pigSkin);
+                Raylib.DrawCube(new Vector3(0.15f, 0.15f, 0f), 0.3f, 0.70f, 0.35f, rotGreen);
+                Raylib.DrawCubeWires(new Vector3(0f, 0.15f, 0f), 0.602f, 0.702f, 0.352f, outlineColor);
+
+                // Head
+                var headPos = new Vector3(0f, 0.74f, 0f);
+                Raylib.DrawCube(headPos + new Vector3(-0.12f, 0f, 0f), 0.24f, 0.48f, 0.48f, pigSkin);
+                Raylib.DrawCube(headPos + new Vector3(0.12f, 0f, 0f), 0.24f, 0.48f, 0.48f, rotGreen);
+                Raylib.DrawCubeWires(headPos, 0.482f, 0.482f, 0.482f, outlineColor);
+
+                // Пятачок (свиное рыло)
+                Raylib.DrawCube(headPos + new Vector3(0f, -0.06f, 0.26f), 0.22f, 0.14f, 0.08f, pigSkin);
+                Raylib.DrawCube(headPos + new Vector3(-0.05f, -0.06f, 0.305f), 0.04f, 0.05f, 0.01f, ShadeColor(Color.Black, light, hPos));
+                Raylib.DrawCube(headPos + new Vector3(0.05f, -0.06f, 0.305f), 0.04f, 0.05f, 0.01f, ShadeColor(Color.Black, light, hPos));
+
+                // Уши
+                Raylib.DrawCube(headPos + new Vector3(-0.25f, -0.02f, 0f), 0.04f, 0.18f, 0.12f, pigSkin);
+                Raylib.DrawCube(headPos + new Vector3(0.25f, -0.02f, 0f), 0.04f, 0.18f, 0.12f, rotGreen);
+
+                // Глаза
+                Raylib.DrawCube(headPos + new Vector3(-0.12f, 0.08f, 0.245f), 0.08f, 0.07f, 0.01f, ShadeColor(Color.White, light, hPos));
+                Raylib.DrawCube(headPos + new Vector3(-0.12f, 0.08f, 0.250f), 0.04f, 0.04f, 0.01f, ShadeColor(new Color(160, 20, 20, 255), light, hPos));
+                Raylib.DrawCube(headPos + new Vector3(0.12f, 0.08f, 0.245f), 0.08f, 0.07f, 0.01f, ShadeColor(new Color(220, 20, 20, 255), light, hPos));
+
+                // Arms (руки вытянуты вперед как у зомби)
+                var leftArm = new Vector3(-0.42f, 0.35f, 0.25f);
+                var rightArm = new Vector3(0.42f, 0.35f, 0.25f);
+                Raylib.DrawCube(leftArm, 0.2f, 0.2f, 0.55f, pigSkin);
+                Raylib.DrawCubeWires(leftArm, 0.202f, 0.202f, 0.552f, outlineColor);
+                Raylib.DrawCube(rightArm, 0.2f, 0.2f, 0.55f, rotGreen);
+                Raylib.DrawCubeWires(rightArm, 0.202f, 0.202f, 0.552f, outlineColor);
+
+                // Золотой меч в правой руке
+                var swordPos = rightArm + new Vector3(0f, 0.10f, 0.28f);
+                Raylib.DrawCube(swordPos, 0.06f, 0.55f, 0.06f, goldSword);
+                Raylib.DrawCube(swordPos + new Vector3(0f, -0.15f, 0f), 0.16f, 0.05f, 0.06f, ShadeColor(new Color(140, 100, 30, 255), light, hPos));
+
+                // Legs
+                var leftLeg = new Vector3(-0.16f, -0.525f, walkSwing * 0.3f);
+                var rightLeg = new Vector3(0.16f, -0.525f, -walkSwing * 0.3f);
+                Raylib.DrawCube(leftLeg, 0.22f, 0.65f, 0.22f, pigSkin);
+                Raylib.DrawCubeWires(leftLeg, 0.222f, 0.652f, 0.222f, outlineColor);
+                Raylib.DrawCube(rightLeg, 0.22f, 0.65f, 0.22f, rotGreen);
+                Raylib.DrawCubeWires(rightLeg, 0.222f, 0.652f, 0.222f, outlineColor);
+
+            } else if (h.Type == HostileType.Blaze) {
+                // ── BLAZE (ИФРИТ) MODEL ─────────────────────────────────────
+                var blazeYellow = ShadeColor(h.HurtTime > 0f ? new Color(255, 100, 100, 255) : new Color(255, 210, 40, 255), Vector3.One, hPos);
+                var blazeOrange = ShadeColor(h.HurtTime > 0f ? new Color(255, 60, 60, 255) : new Color(240, 110, 20, 255), Vector3.One, hPos);
+                var blazeDark = ShadeColor(new Color(90, 30, 10, 255), Vector3.One, hPos);
+
+                float bob = MathF.Sin(time * 3f) * 0.10f;
+
+                // Burning Core Head
+                var headPos = new Vector3(0f, 0.35f + bob, 0f);
+                Raylib.DrawCube(headPos, 0.46f, 0.46f, 0.46f, blazeYellow);
+                Raylib.DrawCube(headPos + new Vector3(-0.11f, 0.04f, 0.235f), 0.08f, 0.08f, 0.01f, blazeDark);
+                Raylib.DrawCube(headPos + new Vector3(0.11f, 0.04f, 0.235f), 0.08f, 0.08f, 0.01f, blazeDark);
+
+                // 3 яруса парящих огненных стержней ифрита (Blaze Rods)
+                float rot1 = time * 2.5f;
+                float rot2 = -time * 2.0f + 0.5f;
+                float rot3 = time * 1.8f + 1.2f;
+
+                // Верхний ярус (4 стержня)
+                for (int i = 0; i < 4; i++) {
+                    float a = rot1 + i * (MathF.Tau / 4f);
+                    var rodPos = new Vector3(MathF.Cos(a) * 0.45f, 0.22f + bob, MathF.Sin(a) * 0.45f);
+                    Raylib.DrawCube(rodPos, 0.10f, 0.38f, 0.10f, blazeOrange);
+                }
+                // Средний ярус (4 стержня)
+                for (int i = 0; i < 4; i++) {
+                    float a = rot2 + i * (MathF.Tau / 4f);
+                    var rodPos = new Vector3(MathF.Cos(a) * 0.40f, -0.15f + bob, MathF.Sin(a) * 0.40f);
+                    Raylib.DrawCube(rodPos, 0.10f, 0.38f, 0.10f, blazeOrange);
+                }
+                // Нижний ярус (4 стержня)
+                for (int i = 0; i < 4; i++) {
+                    float a = rot3 + i * (MathF.Tau / 4f);
+                    var rodPos = new Vector3(MathF.Cos(a) * 0.30f, -0.50f + bob, MathF.Sin(a) * 0.30f);
+                    Raylib.DrawCube(rodPos, 0.10f, 0.38f, 0.10f, blazeOrange);
+                }
+            } else if (h.Type == HostileType.Enderman) {
+                // ── ENDERMAN MODEL (высокий тонкий с фиолетовыми глазами) ─────
+                var skinColor = ShadeColor(h.HurtTime > 0f ? new Color(80, 20, 90, 255) : new Color(28, 18, 40, 255), light, hPos);
+                var headColor = ShadeColor(h.HurtTime > 0f ? new Color(80, 20, 90, 255) : new Color(22, 14, 32, 255), light, hPos);
+                var eyeColor = ShadeColor(new Color(200, 90, 255, 255), light, hPos);
+                var outlineColor = ShadeColor(new Color(5, 5, 10, 200), light, hPos);
+
+                // Длинные тонкие ноги
+                Raylib.DrawCube(new Vector3(-0.13f, -0.68f, walkSwing * 0.3f), 0.16f, 0.95f, 0.16f, skinColor);
+                Raylib.DrawCube(new Vector3(0.13f, -0.68f, -walkSwing * 0.3f), 0.16f, 0.95f, 0.16f, skinColor);
+
+                // Тонкое высокое туловище
+                Raylib.DrawCube(new Vector3(0f, 0.18f, 0f), 0.42f, 0.72f, 0.24f, skinColor);
+                Raylib.DrawCubeWires(new Vector3(0f, 0.18f, 0f), 0.422f, 0.722f, 0.242f, outlineColor);
+
+                // Длинные висячие руки
+                float armSwing = isMoving ? MathF.Sin(time * 8f) * 0.4f : 0f;
+                var leftArm = new Vector3(-0.31f, 0.06f, armSwing * 0.3f);
+                var rightArm = new Vector3(0.31f, 0.06f, -armSwing * 0.3f);
+                Raylib.DrawCube(leftArm, 0.12f, 1.05f, 0.12f, skinColor);
+                Raylib.DrawCubeWires(leftArm, 0.122f, 1.052f, 0.122f, outlineColor);
+                Raylib.DrawCube(rightArm, 0.12f, 1.05f, 0.12f, skinColor);
+                Raylib.DrawCubeWires(rightArm, 0.122f, 1.052f, 0.122f, outlineColor);
+
+                // Голова
+                var headPos = new Vector3(0f, 0.92f, 0f);
+                Raylib.DrawCube(headPos, 0.42f, 0.44f, 0.42f, headColor);
+                Raylib.DrawCubeWires(headPos, 0.422f, 0.442f, 0.422f, outlineColor);
+
+                // Светящиеся фиолетовые глаза
+                Raylib.DrawCube(headPos + new Vector3(-0.11f, 0.06f, 0.215f), 0.08f, 0.08f, 0.012f, eyeColor);
+                Raylib.DrawCube(headPos + new Vector3(0.11f, 0.06f, 0.215f), 0.08f, 0.08f, 0.012f, eyeColor);
             }
 
             Rlgl.PopMatrix();
+        }
+
+        // 3.1 Draw End Slime boss (Слизень Края)
+        if (_world.EndBoss is { Alive: true } boss) {
+            var bl = GetLightFactor(boss.Position);
+            float squish = 1f + MathF.Sin(time * 6f) * 0.12f;
+            float bodyW = EndSlime.HalfSizeXZ * 2f;
+            float bodyH = EndSlime.HalfSizeY * 2f * squish;
+            var baseCenter = boss.Position - new Vector3(0f, EndSlime.HalfSizeY, 0f);
+            var bodyPos = baseCenter + new Vector3(0f, bodyH * 0.5f, 0f);
+            bool hurt = boss.HurtTime > 0f;
+            var green = hurt ? new Color(220, 70, 70, 235) : new Color(70, 160, 140, 240);
+            var greenDark = hurt ? new Color(170, 40, 40, 235) : new Color(45, 110, 95, 240);
+            var eyeColor = ShadeColor(new Color(200, 90, 255, 255), bl, boss.Position);
+
+            DrawSoftShadow(baseCenter, bodyW * 0.6f);
+
+            // Внешняя оболочка
+            Raylib.DrawCube(bodyPos, bodyW, bodyH, bodyW, ShadeColor(green, bl, boss.Position));
+            // Внутренний гель (полупрозрачнее, светлее)
+            Raylib.DrawCube(bodyPos, bodyW * 0.72f, bodyH * 0.72f, bodyW * 0.72f, ShadeColor(greenDark, bl, boss.Position));
+
+            // Фиолетовые глаза на лицевой стороне
+            float eyeY = boss.Position.Y + EndSlime.HalfSizeY * 0.15f;
+            float eyeFz = bodyW * 0.55f;
+            Raylib.DrawCube(boss.Position + new Vector3(-bodyW * 0.25f, 0.25f, eyeFz), 0.5f, 0.5f, 0.12f, eyeColor);
+            Raylib.DrawCube(boss.Position + new Vector3(bodyW * 0.25f, 0.25f, eyeFz), 0.5f, 0.5f, 0.12f, eyeColor);
         }
 
         // 4. Draw Flying Arrows (стрелы скелетов) with lighting and fog
@@ -956,6 +1195,7 @@ public sealed class WorldRenderer : IDisposable {
     }
 
     private void DrawSoftShadow(Vector3 pos, float baseRadius) {
+        if (!SaveSystem.EntityShadows) return;
         float fogFactor = GetFogFactor(pos);
         if (fogFactor >= 0.95f) return;
         float maxDistSq = (SaveSystem.RenderDistanceSetting * 16f) * (SaveSystem.RenderDistanceSetting * 16f);
@@ -985,9 +1225,10 @@ public sealed class WorldRenderer : IDisposable {
     }
 
     public void SpawnBlockParticles(Vec3i pos, ushort blockId) {
+        int count = SaveSystem.ParticlesMode == 0 ? 4 : (SaveSystem.ParticlesMode == 1 ? 8 : 16);
         Color baseCol = BlockTint(blockId);
         var center = new Vector3(pos.X + 0.5f, pos.Y + 0.5f, pos.Z + 0.5f);
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < count; i++) {
             float ox = (ParticleRng.NextSingle() - 0.5f) * 0.7f;
             float oy = (ParticleRng.NextSingle() - 0.5f) * 0.7f;
             float oz = (ParticleRng.NextSingle() - 0.5f) * 0.7f;

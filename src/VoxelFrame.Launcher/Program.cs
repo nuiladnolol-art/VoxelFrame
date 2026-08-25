@@ -86,7 +86,7 @@ public class LauncherForm : Form {
         headerPanel.Controls.Add(lblTitle);
 
         Label lblBadge = new Label {
-            Text = "ALPHA 0.9.0",
+            Text = "ALPHA 0.9.2",
             Font = new Font("Segoe UI", 9, FontStyle.Bold),
             ForeColor = Color.FromArgb(100, 220, 120),
             BackColor = Color.FromArgb(30, 60, 40),
@@ -279,20 +279,31 @@ public class LauncherForm : Form {
 
         string? gameDir = FindGameDir();
         string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-        string localExe = Path.Combine(baseDir, "VoxelFrame.Game.exe");
+        string? newestExe = null;
 
-        if (File.Exists(localExe)) {
+        if (gameDir != null) {
+            string debugExe = Path.Combine(gameDir, "bin", "Debug", "net10.0", "VoxelFrame.Game.exe");
+            string releaseExe = Path.Combine(gameDir, "bin", "Release", "net10.0", "VoxelFrame.Game.exe");
+            if (File.Exists(debugExe)) newestExe = debugExe;
+            else if (File.Exists(releaseExe)) newestExe = releaseExe;
+        }
+        if (newestExe == null) {
+            string localExe = Path.Combine(baseDir, "VoxelFrame.Game.exe");
+            if (File.Exists(localExe)) newestExe = localExe;
+        }
+
+        if (newestExe != null) {
             _versions.Add(new GameReleaseItem {
                 DisplayName = "⚡ VoxelFrame (Актуальная версия)",
-                Tag = "v0.5.0",
+                Tag = "v0.9.2",
                 IsInstalled = true,
-                InstallPath = baseDir,
-                ExePath = localExe
+                InstallPath = Path.GetDirectoryName(newestExe)!,
+                ExePath = newestExe
             });
         } else if (gameDir != null) {
             _versions.Add(new GameReleaseItem {
                 DisplayName = "⚡ VoxelFrame (Актуальная версия)",
-                Tag = "v0.5.0",
+                Tag = "v0.9.2",
                 IsLocalDev = true,
                 IsInstalled = true,
                 InstallPath = gameDir
@@ -858,3 +869,4 @@ public static class IconHelper {
         File.WriteAllBytes(filePath, ms.ToArray());
     }
 }
+

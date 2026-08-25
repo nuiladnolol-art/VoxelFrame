@@ -8,8 +8,34 @@ internal static class Program {
     public const int WindowW = 1280, WindowH = 720;
     public static string PlayerName = "Player";
 
+    // Кольцевой буфер диагностики в памяти: кадр больше НЕ пишет на диск
+    // (раньше было ~11 синхронных записей файла за кадр — источник статтеров).
+    // Файл пишется один раз — при падении или аварийном исключении.
+    private static readonly string[] _diagRing = new string[256];
+    private static int _diagCount;
+
+    private static void CrashDiag(string tag) {
+        _diagRing[_diagCount++ % _diagRing.Length] = tag;
+    }
+
+    private static void FlushCrashLog(Exception? crash = null) {
+        try {
+            if (_diagCount == 0 && crash == null) return;
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VoxelFrame");
+            Directory.CreateDirectory(dir);
+            using var w = new StreamWriter(Path.Combine(dir, "crash_diag.txt"), append: true);
+            w.WriteLine($"---- {DateTime.Now:yyyy-MM-dd HH:mm:ss} ----");
+            if (crash != null) w.WriteLine(crash.ToString());
+            int total = Math.Min(_diagCount, _diagRing.Length);
+            int start = _diagCount <= _diagRing.Length ? 0 : _diagCount % _diagRing.Length;
+            for (int i = 0; i < total; i++) w.WriteLine(_diagRing[(start + i) % _diagRing.Length]);
+            _diagCount = 0;
+        } catch { }
+    }
+
     private static int Main(string[] args) {
         if (args.Contains("--smoke")) return SmokeTest.Run();
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => FlushCrashLog(e.ExceptionObject as Exception);
 
         string? autoshotFile = null;
         int autoshotFrames = 0;
@@ -118,18 +144,20 @@ internal static class Program {
                     session = GameSession.NewGame(seed, headless: false);
                     renderer = new WorldRenderer(session);
                     session.Ui = UiState.Loading;
-                    session.LoadTotal = 1;
+                    session.LoadTotal = 32;
                     session.LoadDone = 0;
-                    session.AddMessage($"Привет, {PlayerName}!");
                 } else if (action == MenuAction.Continue) {
                     try {
                         Screens.Reset();
-                        session = SaveSystem.Load(SaveSystem.SavePath, headless: false);
+                        var (loaded, fromBackup) = SaveSystem.LoadWithRecovery(SaveSystem.SavePath, headless: false);
+                        session = loaded;
                         renderer = new WorldRenderer(session);
                         session.Ui = UiState.Loading;
-                        session.LoadTotal = Math.Max(1, session.World.Chunks.Count);
+                        session.LoadTotal = Math.Min(32, Math.Max(1, session.World.Chunks.Count));
                         session.LoadDone = 0;
-                        session.AddMessage($"С возвращением, {PlayerName}!");
+                        if (fromBackup) {
+                            session.AddMessage("Основной сейв был повреждён — мир восстановлен из резервной копии.");
+                        }
                     } catch (Exception ex) {
                         Screens.MenuError = $"Не удалось загрузить: {ex.Message}";
                         session = null;
@@ -140,15 +168,13 @@ internal static class Program {
                 continue;
             }
 
-            // Экран загрузки: рисуем + строим меши
+            // Экран загрузки: рисуем + строим первые меши видимых чанков
             if (session.Ui == UiState.Loading) {
-                // Строим меши пока не появится хотя бы один видимый чанк
                 renderer!.ProcessMeshQueue();
-                session.LoadDone = Math.Min(session.LoadDone + 3, session.LoadTotal);
+                session.LoadDone = Math.Min(session.LoadDone + 4, session.LoadTotal);
                 Raylib.BeginDrawing();
                 Screens.DrawLoading(session);
                 Raylib.EndDrawing();
-                // После построения нескольких мешей — переходим в игру
                 if (session.LoadDone >= session.LoadTotal) {
                     session.Ui = UiState.Playing;
                 }
@@ -214,23 +240,38 @@ internal static class Program {
                 Hud.ShowDebugInfo = !Hud.ShowDebugInfo;
             }
 
-            var input = ReadInput(session.Ui == UiState.Playing, pauseDebounce);
+            var input = ReadInput(session.Ui, pauseDebounce);
             if (input.Pause) pauseDebounce = 0.25f;
+            CrashDiag("01_pre_tick");
             session.Tick(dt, input);
+            CrashDiag("02_post_tick");
+            // Автосейв раз в AutosaveInterval секунд игрового времени.
+            session.AutosaveTimer -= dt;
+            if (session.AutosaveTimer <= 0f) {
+                session.AutosaveTimer = GameSession.AutosaveInterval;
+                try { session.SaveTo(SaveSystem.SavePath); } catch { /* повторим на следующем тике */ }
+            }
 
             Raylib.BeginDrawing();
             Raylib.ClearBackground(new Color(10, 12, 20, 255));
 
+            CrashDiag("03_pre_mesh");
             renderer!.ProcessMeshQueue();
+            CrashDiag("04_post_mesh");
             renderer.DrawSky();
             Raylib.BeginMode3D(session.Camera);
             renderer.Draw3DSky(session.Camera);
+            CrashDiag("05_pre_drawworld");
             renderer.DrawWorld();
+            CrashDiag("06_post_drawworld");
             renderer.DrawEntities(session.Camera);
+            CrashDiag("07_pre_decos");
             renderer.DrawDecorations(dt);
+            CrashDiag("08_post_decos");
             renderer.DrawClouds(session.Camera);
             renderer.DrawWeather(session.Camera);
             Raylib.EndMode3D();
+            CrashDiag("09_post_endmode3d");
 
             // Защита от X-Ray (если камера внутри непрозрачного блока — черная заглушка)
             var camCell = new VoxelFrame.Core.Vec3i((int)MathF.Floor(session.Camera.Position.X), (int)MathF.Floor(session.Camera.Position.Y), (int)MathF.Floor(session.Camera.Position.Z));
@@ -240,14 +281,53 @@ internal static class Program {
 
             switch (session.Ui) {
                 case UiState.Playing:
+                    if (Raylib.IsKeyPressed(KeyboardKey.T)) {
+                        session.Ui = UiState.Chat;
+                        session.ChatInput = "";
+                        if (cursorCaptured) { Raylib.EnableCursor(); cursorCaptured = false; }
+                    } else if (Raylib.IsKeyPressed(KeyboardKey.Slash)) {
+                        session.Ui = UiState.Chat;
+                        session.ChatInput = "/";
+                        if (cursorCaptured) { Raylib.EnableCursor(); cursorCaptured = false; }
+                    }
+
                     // Курсор прячем только при фокусе окна: иначе он «зависает»
                     // отдельно от прицела, а мышь не вращает камеру.
-                    if (Raylib.IsWindowFocused() && !cursorCaptured) {
-                        Raylib.DisableCursor();
-                        cursorCaptured = true;
-                    } else if (!Raylib.IsWindowFocused() && cursorCaptured) {
+                    if (session.Ui == UiState.Playing) {
+                        if (Raylib.IsWindowFocused() && !cursorCaptured) {
+                            Raylib.DisableCursor();
+                            cursorCaptured = true;
+                        } else if (!Raylib.IsWindowFocused() && cursorCaptured) {
+                            Raylib.EnableCursor();
+                            cursorCaptured = false;
+                        }
+                    }
+                    CrashDiag("10_pre_hud");
+                    Hud.Draw(session, dt);
+                    CrashDiag("11_post_hud");
+                    break;
+                case UiState.Chat:
+                    if (cursorCaptured) {
                         Raylib.EnableCursor();
                         cursorCaptured = false;
+                    }
+                    int charCode = Raylib.GetCharPressed();
+                    while (charCode > 0) {
+                        if (charCode >= 32 && session.ChatInput.Length < 120) {
+                            session.ChatInput += (char)charCode;
+                        }
+                        charCode = Raylib.GetCharPressed();
+                    }
+                    if (Raylib.IsKeyPressed(KeyboardKey.Backspace) && session.ChatInput.Length > 0) {
+                        session.ChatInput = session.ChatInput[..^1];
+                    }
+                    if (Raylib.IsKeyPressed(KeyboardKey.Enter) || Raylib.IsKeyPressed(KeyboardKey.KpEnter)) {
+                        session.ExecuteChatCommand(session.ChatInput);
+                        session.ChatInput = "";
+                        session.Ui = UiState.Playing;
+                    } else if (Raylib.IsKeyPressed(KeyboardKey.Escape)) {
+                        session.ChatInput = "";
+                        session.Ui = UiState.Playing;
                     }
                     Hud.Draw(session, dt);
                     break;
@@ -312,8 +392,11 @@ internal static class Program {
             }
         }
 
-        // Не вызываем Dispose() на renderer/world — это вызывает зависание
-        // OpenGL при завершении. Ресурсы освобождаются ОС при закрытии процесса.
+        // Освобождаем GPU-ресурсы ДО CloseWindow: контекст OpenGL ещё текущий,
+        // удаление шейдеров и мешей корректно. Раньше Dispose пропускали из-за
+        // зависания — ресурсы текли до смерти процесса.
+        try { renderer?.Dispose(); renderer = null; } catch (Exception ex) { FlushCrashLog(ex); }
+        try { session?.World.Dispose(); session = null; } catch (Exception ex) { FlushCrashLog(ex); }
         SaveSystem.SaveSettings();
         SoundSystem.Shutdown();
         TextureAtlas.Unload();
@@ -325,7 +408,19 @@ internal static class Program {
     private static float _lastForwardPressTime = -10f;
     private static bool _doubleTapSprint = false;
 
-    private static PlayerInput ReadInput(bool cursorCaptured, float pauseDebounce) {
+    private static PlayerInput ReadInput(UiState uiState, float pauseDebounce) {
+        if (uiState == UiState.Chat) {
+            return new PlayerInput();
+        }
+
+        if (uiState != UiState.Playing) {
+            return new PlayerInput {
+                OpenInventory = Raylib.IsKeyPressed(KeyBinds.Inventory),
+                OpenCrafting = Raylib.IsKeyPressed(KeyBinds.Crafting),
+                Pause = pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause),
+            };
+        }
+
         float now = (float)Raylib.GetTime();
         if (Raylib.IsKeyPressed(KeyBinds.Forward)) {
             if (now - _lastForwardPressTime < 0.28f) {
@@ -341,6 +436,7 @@ internal static class Program {
             MoveX = (Raylib.IsKeyDown(KeyBinds.Right) ? 1f : 0f) - (Raylib.IsKeyDown(KeyBinds.Left) ? 1f : 0f),
             MoveZ = (Raylib.IsKeyDown(KeyBinds.Forward) ? 1f : 0f) - (Raylib.IsKeyDown(KeyBinds.Backward) ? 1f : 0f),
             Jump = Raylib.IsKeyDown(KeyBinds.Jump),
+            JumpPressed = Raylib.IsKeyPressed(KeyBinds.Jump),
             Crouch = Raylib.IsKeyDown(KeyBinds.Crouch),
             Sprint = Raylib.IsKeyDown(KeyBinds.Sprint) || Raylib.IsKeyDown(KeyboardKey.LeftControl) || _doubleTapSprint,
             Drop = Raylib.IsKeyPressed(KeyBinds.Drop),
@@ -354,11 +450,9 @@ internal static class Program {
             Scroll = (int)Raylib.GetMouseWheelMove(),
             HotbarSlot = HotbarKey(),
         };
-        if (cursorCaptured) {
-            var delta = Raylib.GetMouseDelta();
-            input.MouseDX = delta.X;
-            input.MouseDY = delta.Y;
-        }
+        var delta = Raylib.GetMouseDelta();
+        input.MouseDX = delta.X;
+        input.MouseDY = delta.Y;
         return input;
     }
 
@@ -494,6 +588,9 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.MossyCobblestoneItem.Id, TextureAtlas.TMossyCobble);
         TextureAtlas.SetItemTile(GameData.ChiseledSandstoneItem.Id, TextureAtlas.TChiseledSandstone);
         TextureAtlas.SetItemTile(GameData.RailItem.Id, TextureAtlas.TRail);
+        TextureAtlas.SetItemTile(GameData.BucketItem.Id, TextureAtlas.TBucket);
+        TextureAtlas.SetItemTile(GameData.WaterBucketItem.Id, TextureAtlas.TWaterBucket);
+        TextureAtlas.SetItemTile(GameData.LavaBucketItem.Id, TextureAtlas.TLavaBucket);
 
         TextureAtlas.SetBlockTiles(GameData.BFarmland.Id, TextureAtlas.TFarmland, TextureAtlas.TDirt, TextureAtlas.TDirt);
         TextureAtlas.SetBlockTiles(GameData.BTallGrass.Id, TextureAtlas.TTallGrass, TextureAtlas.TTallGrass, TextureAtlas.TTallGrass);
@@ -510,5 +607,22 @@ internal static class Program {
         TextureAtlas.SetBlockTiles(GameData.BNetherQuartzOre.Id, TextureAtlas.TNetherQuartzOre, TextureAtlas.TNetherQuartzOre, TextureAtlas.TNetherQuartzOre);
         TextureAtlas.SetBlockTiles(GameData.BNetherBrick.Id, TextureAtlas.TNetherBrick, TextureAtlas.TNetherBrick, TextureAtlas.TNetherBrick);
         TextureAtlas.SetBlockTiles(GameData.BNetherPortal.Id, TextureAtlas.TNetherPortal, TextureAtlas.TNetherPortal, TextureAtlas.TNetherPortal);
+
+        // Энд: блоки и предметы
+        TextureAtlas.SetBlockTiles(GameData.BEndStone.Id, TextureAtlas.TEndStone, TextureAtlas.TEndStone, TextureAtlas.TEndStone);
+        TextureAtlas.SetBlockTiles(GameData.BEndPortalFrame.Id, TextureAtlas.TEndPortalFrame, TextureAtlas.TEndPortalFrame, TextureAtlas.TEndPortalFrame);
+        TextureAtlas.SetBlockTiles(GameData.BEndPortal.Id, TextureAtlas.TEndPortal, TextureAtlas.TEndPortal, TextureAtlas.TEndPortal);
+        TextureAtlas.SetBlockTiles(GameData.BObsidianPillar.Id, TextureAtlas.TObsidian, TextureAtlas.TObsidian, TextureAtlas.TObsidian);
+        TextureAtlas.SetBlockTiles(GameData.BEnderCrystal.Id, TextureAtlas.TEnderCrystal, TextureAtlas.TEnderCrystal, TextureAtlas.TEnderCrystal);
+        TextureAtlas.SetBlockTiles(GameData.BChorusPlant.Id, TextureAtlas.TChorusPlant, TextureAtlas.TChorusPlant, TextureAtlas.TChorusPlant);
+        TextureAtlas.SetBlockTiles(GameData.BChorusFlower.Id, TextureAtlas.TChorusFlower, TextureAtlas.TChorusFlower, TextureAtlas.TChorusFlower);
+        TextureAtlas.SetItemTile(GameData.EnderPearlItem.Id, TextureAtlas.TEnderPearl);
+        TextureAtlas.SetItemTile(GameData.EyeOfEnderItem.Id, TextureAtlas.TEyeOfEnder);
+        TextureAtlas.SetItemTile(GameData.BlazePowderItem.Id, TextureAtlas.TBlazePowder);
+        TextureAtlas.SetItemTile(GameData.ChorusFruitItem.Id, TextureAtlas.TChorusFruit);
+        TextureAtlas.SetItemTile(GameData.EndSlimeItem.Id, TextureAtlas.TEndSlime);
+        TextureAtlas.SetItemTile(GameData.EndStoneItem.Id, TextureAtlas.TEndStone);
+        TextureAtlas.SetItemTile(GameData.EndPortalFrameItem.Id, TextureAtlas.TEndPortalFrame);
+        TextureAtlas.SetItemTile(GameData.EnderCrystalItem.Id, TextureAtlas.TEnderCrystal);
     }
 }

@@ -47,7 +47,7 @@ public sealed class FallingBlock {
                 placeY++;
             }
             var land = new Vec3i(bx, placeY, bz);
-            world.PlacePlacedBlock(land, Block, 1f);
+            world.PlacePlacedBlock(land, Block);
             Alive = false;
         }
     }

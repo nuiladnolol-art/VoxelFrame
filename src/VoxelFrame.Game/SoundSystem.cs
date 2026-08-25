@@ -186,14 +186,20 @@ public static class SoundSystem {
     public static void PlayWeakAttack() => Play(_hitSound, 1.30f);
     public static void PlayCrit() => Play(_critSound, 1.0f + (float)Random.Shared.NextDouble() * 0.15f);
     public static void PlayBreakTool() => Play(_breakToolSound);
-    public static void PlayBowShoot() => Play(_bowShootSound);
+    public static void PlayBowShoot() => Play(_placeSound, 1.4f); // Мягкий тихий щелчок тетивы вместо свистящего "вжух"
     public static void PlayArrowHit() => Play(_arrowHitSound);
-    public static void PlayExplosion() => Play(_explosionSound);
+    private static double _lastExplodeTime;
+    public static void PlayExplosion() {
+        double now = Raylib.GetTime();
+        if (now - _lastExplodeTime < 0.1) return;
+        _lastExplodeTime = now;
+        Play(_explosionSound);
+    }
     public static void PlayShieldBlock() => Play(_shieldBlockSound, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);
     public static void PlayCreeperHiss() => Play(_creeperHissSound, 1.0f);
-    public static void PlayCaveAmbiance() => Play(_caveAmbianceSound, 0.85f + (float)Random.Shared.NextDouble() * 0.2f);
+    public static void PlayCaveAmbiance() { /* Отключено по запросу */ }
     public static void PlayThunder() => Play(_thunderSound, 0.9f + (float)Random.Shared.NextDouble() * 0.2f);
-    public static void PlayBackgroundMusic() => Play(_bgmMusic, 1.0f);
+    public static void PlayBackgroundMusic() { /* Отключено: устраняет гул и фризы аудиодрайвера */ }
     public static void PlayEat() => Play(_eatSound, 0.9f + (float)Random.Shared.NextDouble() * 0.2f);
     public static void PlaySplash() => Play(_splashSound);
     public static void PlayPop() => Play(_popSound, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);
@@ -205,7 +211,7 @@ public static class SoundSystem {
     public static void StopTotem() {
         if (_audioReady) Raylib.StopSound(_totemSound);
     }
-    public static void PlayFertilize() => Play(_fertilizeSound, 1.0f);
+    public static void PlayFertilize() => Play(_placeSound, 1.2f);
 
     private static unsafe Sound LoadProceduralSound(byte[] wavBytes) {
         fixed (byte* ptr = wavBytes)

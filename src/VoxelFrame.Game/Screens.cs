@@ -10,12 +10,15 @@ public enum MenuAction { None, NewGame, Continue, Exit }
 public enum PauseAction { None, Resume, SaveAndExit, Settings }
 
 /// <summary>Экраны: главное меню, пауза, инвентарь, крафт. Мышь — прямоугольные кнопки.</summary>
-public static class Screens {
+public static partial class Screens {
     private static readonly Color Bg = new(28, 32, 40, 255);
-    private static readonly Color Panel = new(48, 54, 66, 235);
-    private static readonly Color Btn = new(70, 78, 94, 255);
-    private static readonly Color BtnHover = new(96, 108, 128, 255);
-    private static readonly Color BtnDisabled = new(52, 56, 62, 255);
+    private static readonly Color Panel = new(198, 198, 198, 255); // Классический светло-серый GUI (#C6C6C6)
+    private static readonly Color PanelLightBorder = new(255, 255, 255, 255); // Белый блик (верх/лево)
+    private static readonly Color PanelDarkBorder = new(85, 85, 85, 255); // Тень (низ/право)
+    private static readonly Color TextDark = new(64, 64, 64, 255); // Темно-серый текст (#404040)
+    private static readonly Color Btn = new(140, 140, 140, 255);
+    private static readonly Color BtnHover = new(170, 170, 170, 255);
+    private static readonly Color BtnDisabled = new(110, 110, 110, 255);
 
     public static string MenuError = "";
     public static bool InWorldSelectScreen = false;
@@ -232,7 +235,7 @@ public static class Screens {
             if (MenuError.Length > 0)
                 Fonts.DrawCentered(MenuError, w / 2f, h * 0.68f, 18f, new Color(255, 120, 120, 255));
 
-            Fonts.Draw("VoxelFrame Alpha 0.9.0", 10f, h - 25f, 14f, new Color(200, 200, 200, 180));
+            Fonts.Draw("VoxelFrame Alpha 0.9.2", 10f, h - 25f, 14f, new Color(200, 200, 200, 180));
             Fonts.Draw("SenStol Studio", w - 180f, h - 25f, 14f, new Color(200, 200, 200, 180));
         }
 
@@ -282,7 +285,7 @@ public static class Screens {
         }
     }
 
-    private static bool Slider(float x, float y, float w, float h, string text, float value, float min, float max, out float newValue) {
+        private static bool Slider(float x, float y, float w, float h, string text, float value, float min, float max, out float newValue) {
         newValue = value;
         var mouse = Raylib.GetMousePosition();
         var rect = new Rectangle(x, y, w, h);
@@ -294,22 +297,23 @@ public static class Screens {
             newValue = min + ratio * (max - min);
         }
 
-        // Фон трека слайдера (глубокий стилизованный блок)
-        Raylib.DrawRectangle((int)x, (int)y, (int)w, (int)h, new Color(28, 22, 20, 255));
-        Raylib.DrawRectangleLinesEx(rect, 2f, new Color(55, 45, 40, 255));
+        // Фон кнопки-слайдера
+        Raylib.DrawRectangle((int)x, (int)y, (int)w, (int)h, new Color(38, 38, 38, 255));
+        Raylib.DrawRectangleLinesEx(rect, 2f, hovered ? new Color(160, 160, 160, 255) : new Color(60, 60, 60, 255));
 
-        // Ползунок (ручка бегунка)
+        // Полоса заполнения прогресса
         float currentRatio = Math.Clamp((value - min) / (max - min), 0f, 1f);
-        float thumbW = 18f;
-        float thumbX = x + currentRatio * (w - thumbW);
-        var thumbRect = new Rectangle(thumbX, y, thumbW, h);
+        int fillW = (int)((w - 4f) * currentRatio);
+        if (fillW > 0) {
+            Raylib.DrawRectangle((int)x + 2, (int)y + 2, fillW, (int)h - 4, new Color(75, 95, 125, 200));
+        }
 
-        bool thumbHover = Raylib.CheckCollisionPointRec(mouse, thumbRect) || dragging;
-        Color thumbBg = thumbHover ? new Color(175, 175, 175, 255) : new Color(130, 130, 130, 255);
-        Raylib.DrawRectangle((int)thumbX, (int)y, (int)thumbW, (int)h, thumbBg);
-        Raylib.DrawRectangleLinesEx(thumbRect, 1.5f, new Color(220, 220, 220, 255));
+        // Бегунок-разделитель
+        float thumbX = x + 2f + currentRatio * (w - 12f);
+        var thumbRect = new Rectangle(thumbX, y + 2f, 8f, h - 4f);
+        Raylib.DrawRectangleRec(thumbRect, new Color(255, 220, 120, 255));
 
-        // Текст
+        // Текст поверх слайдера
         Fonts.DrawCentered(text, x + w / 2f, y + (h - 18f) / 2f, 18f, Color.White);
 
         return dragging;
@@ -326,27 +330,94 @@ public static class Screens {
             }
         }
 
-        Fonts.DrawCentered("НАСТРОЙКИ ГРАФИКИ", w / 2f, h * 0.15f, 44f, new Color(255, 220, 120, 255));
+        Fonts.DrawCentered("НАСТРОЙКИ ГРАФИКИ", w / 2f, h * 0.10f, 44f, new Color(255, 220, 120, 255));
 
-        float cy = h * 0.30f;
+        float colW = 340f;
+        float rowH = 44f;
+        float gapY = 12f;
+        float startY = h * 0.18f;
+
+        float leftX = w / 2f - colW - 10f;
+        float rightX = w / 2f + 10f;
+
+        // Левая колонка
+        // 1. Графика (Пресет)
+        string gfxPresetText = SaveSystem.GraphicsQuality switch {
+            SaveSystem.GraphicsPreset.Fast => "Графика: Быстрая (Fast)",
+            SaveSystem.GraphicsPreset.Fancy => "Графика: Красивая (Fancy)",
+            SaveSystem.GraphicsPreset.Fabulous => "Графика: Ультра (Fabulous)",
+            _ => "Графика: Красивая"
+        };
+        if (Button(leftX, startY, colW, rowH, gfxPresetText, true)) {
+            SaveSystem.GraphicsQuality = (SaveSystem.GraphicsPreset)(((int)SaveSystem.GraphicsQuality + 1) % 3);
+            if (SaveSystem.GraphicsQuality == SaveSystem.GraphicsPreset.Fast) {
+                SaveSystem.CloudsMode = 1;
+                SaveSystem.ParticlesMode = 0;
+                SaveSystem.DynamicLighting = false;
+                SaveSystem.EntityShadows = false;
+            } else if (SaveSystem.GraphicsQuality == SaveSystem.GraphicsPreset.Fancy) {
+                SaveSystem.CloudsMode = 2;
+                SaveSystem.ParticlesMode = 2;
+                SaveSystem.DynamicLighting = true;
+                SaveSystem.EntityShadows = true;
+            } else {
+                SaveSystem.CloudsMode = 2;
+                SaveSystem.ParticlesMode = 2;
+                SaveSystem.DynamicLighting = true;
+                SaveSystem.EntityShadows = true;
+            }
+        }
+
+        // 2. Облака
+        string cloudsText = SaveSystem.CloudsMode switch {
+            0 => "Облака: Выключены",
+            1 => "Облака: Быстрые (2D)",
+            _ => "Облака: Объёмные (3D)"
+        };
+        if (Button(leftX, startY + (rowH + gapY), colW, rowH, cloudsText, true)) {
+            SaveSystem.CloudsMode = (SaveSystem.CloudsMode + 1) % 3;
+        }
+
+        // 3. Частицы
+        string particlesText = SaveSystem.ParticlesMode switch {
+            0 => "Частицы: Минимум (FPS+)",
+            1 => "Частицы: Уменьшенные",
+            _ => "Частицы: Все"
+        };
+        if (Button(leftX, startY + (rowH + gapY) * 2f, colW, rowH, particlesText, true)) {
+            SaveSystem.ParticlesMode = (SaveSystem.ParticlesMode + 1) % 3;
+        }
+
+        // 4. Тени сущностей
+        string shadowsText = SaveSystem.EntityShadows ? "Тени мобов: Включены" : "Тени мобов: Выключены";
+        if (Button(leftX, startY + (rowH + gapY) * 3f, colW, rowH, shadowsText, true)) {
+            SaveSystem.EntityShadows = !SaveSystem.EntityShadows;
+        }
+
+        // Правая колонка
+        // 1. Режим экрана
         bool isFs = Raylib.IsWindowState(ConfigFlags.UndecoratedWindow) || Raylib.IsWindowFullscreen();
-        string fsText = isFs ? "Режим экрана: Полноэкранный (в окне)" : "Режим экрана: Оконный";
-        if (Button(w / 2f - 180f, cy, 360f, 46f, fsText, true)) {
+        string fsText = isFs ? "Экран: Полноэкранный (в окне)" : "Экран: Оконный";
+        if (Button(rightX, startY, colW, rowH, fsText, true)) {
             Raylib.ToggleBorderlessWindowed();
         }
 
-        string gfxText = SaveSystem.FancyGraphics ? "Графика: Красивая (Fancy)" : "Графика: Быстрая (Fast)";
-        if (Button(w / 2f - 180f, cy + 56f, 360f, 46f, gfxText, true)) {
-            SaveSystem.FancyGraphics = !SaveSystem.FancyGraphics;
+        // 2. Динамическое освещение в руке
+        string dynLightText = SaveSystem.DynamicLighting ? "Динамический свет: Вкл" : "Динамический свет: Выкл";
+        if (Button(rightX, startY + (rowH + gapY), colW, rowH, dynLightText, true)) {
+            SaveSystem.DynamicLighting = !SaveSystem.DynamicLighting;
         }
 
-        // Слайдер дальности прорисовки: от 2 до 20 чанков!
-        string distText = $"Дальность прорисовки: {SaveSystem.RenderDistanceSetting} чанков";
-        if (Slider(w / 2f - 180f, cy + 112f, 360f, 46f, distText, SaveSystem.RenderDistanceSetting, 2f, 20f, out float newDist)) {
-            SaveSystem.RenderDistanceSetting = Math.Clamp((int)MathF.Round(newDist), 2, 20);
+        // 3. Слайдер дальности прорисовки
+        int rd = SaveSystem.RenderDistanceSetting;
+        string chunkWord = (rd % 10 == 1 && rd % 100 != 11) ? "чанк" : (rd % 10 >= 2 && rd % 10 <= 4 && (rd % 100 < 10 || rd % 100 >= 20)) ? "чанка" : "чанков";
+        string distText = $"Дальность: {rd} {chunkWord}";
+        if (Slider(rightX, startY + (rowH + gapY) * 2f, colW, rowH, distText, SaveSystem.RenderDistanceSetting, 2f, 16f, out float newDist)) {
+            SaveSystem.RenderDistanceSetting = Math.Clamp((int)MathF.Round(newDist), 2, 16);
         }
 
-        if (Button(w / 2f - 140f, h * 0.82f, 280f, 46f, "Готово", true)) {
+        // Кнопка Готово
+        if (Button(w / 2f - 140f, h * 0.85f, 280f, 46f, "Готово", true)) {
             InGraphicsScreen = false;
             SaveSystem.SaveSettings();
         }
@@ -481,7 +552,7 @@ public static class Screens {
 
     public static DeathAction DrawDeath(GameSession session) {
         int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
-        // Красный градиент смерти Minecraft
+        // Красный градиент смерти
         Raylib.DrawRectangleGradientV(0, 0, w, h, new Color(170, 20, 20, 170), new Color(40, 5, 5, 235));
 
         Fonts.DrawCentered("ВЫ ПОГИБЛИ!", w / 2f, h * 0.25f, 54f, new Color(255, 60, 60, 255));
@@ -526,14 +597,14 @@ public static class Screens {
         Fonts.DrawCentered($"Чанков: {session.LoadDone}/{session.LoadTotal}", w / 2f, barY + 40f, 16f, new Color(170, 176, 190, 255));
     }
 
-    // ── Инвентарь (Minecraft-стиль: сетка слотов, предмет за курсором) ───────
+    // ── Инвентарь (сетка слотов, предмет за курсором) ─────────────────────────
 
-    private static readonly Color SlotBg = new(34, 38, 46, 255);
-    private static readonly Color SlotBorder = new(52, 58, 70, 255);
-    private static readonly Color SlotHover = new(70, 80, 96, 255);
-    private static readonly Color SlotSelected = new(255, 215, 120, 255);
+    private static readonly Color SlotBg = new(139, 139, 139, 255); // Инсет слота (#8B8B8B)
+    private static readonly Color SlotBorder = new(55, 55, 55, 255); // Тень слота (#373737)
+    private static readonly Color SlotHover = new(220, 220, 220, 160);
+    private static readonly Color SlotSelected = new(255, 255, 255, 255);
 
-    /// Предмет, который игрок держит «за курсором» (Minecraft-style).
+    /// Предмет, который игрок держит «за курсором».
     private static ItemEntry? Held;
 
     public static void Reset() {
@@ -546,8 +617,12 @@ public static class Screens {
         if (Held.HasValue && Held.Value.Quantity > 0) {
             var held = Held.Value;
             if (!inv.TryInsert(held.Item, held.Quantity)) {
-                var pos = session.Player.Position;
-                session.World.SpawnPickup(held.Item.Definition.Id, held.Quantity, new Vec3i((int)pos.X, (int)pos.Y, (int)pos.Z));
+                var dropPos = session.Player.Position + new System.Numerics.Vector3(0f, 1.2f, 0f) + session.Player.Forward * 0.4f;
+                var pickup = new ItemPickup(held.Item, held.Quantity, dropPos) {
+                    PickupDelay = 0.8f,
+                    Velocity = session.Player.Forward * 2.0f + new System.Numerics.Vector3(0f, 1.5f, 0f)
+                };
+                session.World.Pickups.Add(pickup);
             }
             Held = null;
         }
@@ -555,8 +630,12 @@ public static class Screens {
             if (PersonalGrid[i].HasValue && PersonalGrid[i]!.Value.Quantity > 0) {
                 var it = PersonalGrid[i]!.Value;
                 if (!inv.TryInsert(it.Item, it.Quantity)) {
-                    var pos = session.Player.Position;
-                    session.World.SpawnPickup(it.Item.Definition.Id, it.Quantity, new Vec3i((int)pos.X, (int)pos.Y, (int)pos.Z));
+                    var dropPos = session.Player.Position + new System.Numerics.Vector3(0f, 1.2f, 0f) + session.Player.Forward * 0.4f;
+                    var pickup = new ItemPickup(it.Item, it.Quantity, dropPos) {
+                        PickupDelay = 0.8f,
+                        Velocity = session.Player.Forward * 2.0f + new System.Numerics.Vector3(0f, 1.5f, 0f)
+                    };
+                    session.World.Pickups.Add(pickup);
                 }
                 PersonalGrid[i] = null;
             }
@@ -565,8 +644,12 @@ public static class Screens {
             if (WorkbenchGrid[i].HasValue && WorkbenchGrid[i]!.Value.Quantity > 0) {
                 var it = WorkbenchGrid[i]!.Value;
                 if (!inv.TryInsert(it.Item, it.Quantity)) {
-                    var pos = session.Player.Position;
-                    session.World.SpawnPickup(it.Item.Definition.Id, it.Quantity, new Vec3i((int)pos.X, (int)pos.Y, (int)pos.Z));
+                    var dropPos = session.Player.Position + new System.Numerics.Vector3(0f, 1.2f, 0f) + session.Player.Forward * 0.4f;
+                    var pickup = new ItemPickup(it.Item, it.Quantity, dropPos) {
+                        PickupDelay = 0.8f,
+                        Velocity = session.Player.Forward * 2.0f + new System.Numerics.Vector3(0f, 1.5f, 0f)
+                    };
+                    session.World.Pickups.Add(pickup);
                 }
                 WorkbenchGrid[i] = null;
             }
@@ -581,51 +664,64 @@ public static class Screens {
     }
 
     public static void DrawInventory(GameSession session) {
+        if (session.GameMode == GameMode.Creative) {
+            DrawCreativeMenu(session);
+            return;
+        }
+
         int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
         var inv = session.Player.Inventory;
 
         int cols = 9, hotbarRows = 1, mainRows = 3;
         const int slot = 52, gap = 4;
         int gridW = cols * slot + (cols - 1) * gap;
-        int panelW = gridW + 270;
-        int panelH = mainRows * slot + (mainRows - 1) * gap + hotbarRows * slot + 120;
+        int panelW = gridW + 280;
+        int panelH = (mainRows + hotbarRows) * slot + mainRows * gap + 90;
         float px = w / 2f - panelW / 2f, py = (h - panelH) / 2f;
         DrawPanel(px, py, panelW, panelH);
 
-        Fonts.DrawCentered("ИНВЕНТАРЬ", w / 2f, py + 8f, 26f, Color.White);
-        Fonts.DrawCentered("Minecraft Alpha 1.2.6", w / 2f, py + 36f, 16f, new Color(210, 214, 224, 255));
-        Fonts.DrawCentered("ЛКМ — взять/положить · ПКМ — половина/положить 1 · 1-9 / колесо — хотбар", w / 2f, py + 56f, 15f, new Color(170, 176, 190, 255));
+        float gridX = px + 16f;
+        float gridY = py + 38f;
+        float hotbarY = gridY + mainRows * (slot + gap) + 12f;
+
+        // Заголовки
+        Fonts.Draw("Инвентарь", gridX, py + 14f, 16f, TextDark);
+        Fonts.Draw("Хотбар", gridX, hotbarY - 18f, 14f, TextDark);
 
         // Сетка: 3 ряда основного хранилища (записи 9..) + ряд хотбара (0..8).
-        float gridX = px + 16f;
-        float hotbarY = py + 76f + mainRows * (slot + gap);
         for (int row = 0; row < mainRows; row++) {
             for (int col = 0; col < cols; col++) {
                 int idx = 9 + row * cols + col;
-                DrawSlot(session, inv, gridX + col * (slot + gap), py + 76f + row * (slot + gap), idx, false);
+                DrawSlot(session, inv, gridX + col * (slot + gap), gridY + row * (slot + gap), idx, false);
             }
         }
         for (int col = 0; col < cols; col++)
             DrawSlot(session, inv, gridX + col * (slot + gap), hotbarY, col, col == session.Player.SelectedSlot);
 
-        // Слот второй руки (слева/справа от хотбара в окне инвентаря)
+        // Слот второй руки (справа от хотбара в окне инвентаря)
         float offhandX = px + gridW + 30f;
         float offhandY = hotbarY;
         var offhandRec = new Rectangle(offhandX, offhandY, slot, slot);
         bool offhandHover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), offhandRec);
-        Raylib.DrawRectangleRounded(offhandRec, 0.12f, 6, offhandHover ? SlotHover : new Color(45, 45, 60, 220));
-        Raylib.DrawRectangleRoundedLinesEx(offhandRec, 0.12f, 6, 1.5f, new Color(80, 110, 150, 255));
-        Fonts.Draw("2-я рука [F]", offhandX, offhandY - 16f, 12f, new Color(170, 190, 225, 220));
+        
+        Raylib.DrawRectangleRec(offhandRec, SlotBg);
+        Raylib.DrawRectangle((int)offhandX, (int)offhandY, slot, 2, SlotBorder);
+        Raylib.DrawRectangle((int)offhandX, (int)offhandY, 2, slot, SlotBorder);
+        Raylib.DrawRectangle((int)offhandX, (int)offhandY + slot - 2, slot, 2, PanelLightBorder);
+        Raylib.DrawRectangle((int)offhandX + slot - 2, (int)offhandY, 2, slot, PanelLightBorder);
+        if (offhandHover) Raylib.DrawRectangleRec(offhandRec, SlotHover);
 
-        if (session.Player.OffhandItem != null && session.Player.OffhandCount > 0) {
-            Hud.DrawItemIcon(session.Player.OffhandItem, offhandRec, 0.75f);
-            if (session.Player.OffhandCount > 1) {
-                Fonts.DrawShadowed($"×{session.Player.OffhandCount}", offhandX + 3f, offhandY + slot - 18f, 14f, Color.White);
+        Fonts.Draw("2-я рука [F]", offhandX, offhandY - 18f, 14f, TextDark);
+
+        if (session.Player.OffhandEntry != null) {
+            Hud.DrawItemIcon(session.Player.OffhandEntry.Value.Item.Definition, offhandRec, 0.75f);
+            if (session.Player.OffhandEntry.Value.Quantity > 1) {
+                Fonts.DrawShadowed($"×{session.Player.OffhandEntry.Value.Quantity}", offhandX + 3f, offhandY + slot - 18f, 14f, Color.White);
             }
         }
 
         // Панель крафта справа.
-        DrawCraftPanel(session, px + gridW + 30f, py + 76f, panelW - gridW - 46f, panelH - 90f);
+        DrawCraftPanel(session, px + gridW + 30f, py + 14f, panelW - gridW - 46f, panelH - 90f);
 
         // Предмет за курсором.
         if (Held.HasValue && Held.Value.Quantity > 0) {
@@ -648,24 +744,25 @@ public static class Screens {
         const int slot = 52, gap = 4;
         int cols = 9, mainRows = 3;
         int gridW = cols * slot + (cols - 1) * gap;
-        int panelH = mainRows * slot + (mainRows - 1) * gap + slot + 120;
-        int panelW = gridW + 270;
+        int panelH = (mainRows + 1) * slot + mainRows * gap + 90;
+        int panelW = gridW + 280;
         float px = Raylib.GetScreenWidth() / 2f - panelW / 2f;
         float py = (Raylib.GetScreenHeight() - panelH) / 2f;
         float gridX = px + 16f;
+        float gridY = py + 38f;
+        float hotbarY = gridY + mainRows * (slot + gap) + 12f;
 
         VoxelFrame.Core.Inventory.ItemEntry? hoveredEntry = null;
 
         for (int row = 0; row < mainRows; row++) {
             for (int col = 0; col < cols; col++) {
                 int idx = 9 + row * cols + col;
-                var rect = new Rectangle(gridX + col * (slot + gap), py + 76f + row * (slot + gap), slot, slot);
+                var rect = new Rectangle(gridX + col * (slot + gap), gridY + row * (slot + gap), slot, slot);
                 if (Raylib.CheckCollisionPointRec(mouse, rect)) {
                     hoveredEntry = inv.Slots[idx];
                 }
             }
         }
-        float hotbarY = py + 76f + mainRows * (slot + gap);
         for (int col = 0; col < cols; col++) {
             var rect = new Rectangle(gridX + col * (slot + gap), hotbarY, slot, slot);
             if (Raylib.CheckCollisionPointRec(mouse, rect)) {
@@ -673,40 +770,15 @@ public static class Screens {
             }
         }
 
+        // Вторая рука (Offhand slot)
+        float offhandX = px + gridW + 30f;
+        float offhandY = hotbarY;
+        if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(offhandX, offhandY, slot, slot))) {
+            hoveredEntry = session.Player.OffhandEntry;
+        }
+
         if (hoveredEntry != null) {
-            var entry = hoveredEntry.Value;
-            string title = entry.Item.Definition.Name;
-            ushort itemId = entry.Item.Definition.Id;
-            
-            string subtext = "";
-            if (entry.Item.Condition < 0.999) {
-                subtext = $"Прочность: {(int)(entry.Item.Condition * 100)}%";
-            } else if (GameData.FoodValue.TryGetValue(itemId, out float food)) {
-                subtext = $"Пища: +{food} HP";
-            } else if (GameData.GetToolTier(itemId) > 0) {
-                subtext = $"Урон: {GameData.GetWeaponDamage(itemId)} HP";
-            }
-
-            float w = MathF.Max(Fonts.Measure(title, 16f), Fonts.Measure(subtext, 14f)) + 20f;
-            float h = string.IsNullOrEmpty(subtext) ? 30f : 48f;
-
-            float tx = mouse.X + 12f;
-            float ty = mouse.Y - 12f;
-            
-            if (tx + w > Raylib.GetScreenWidth()) tx = mouse.X - w - 8f;
-            if (ty + h > Raylib.GetScreenHeight()) ty = Raylib.GetScreenHeight() - h - 8f;
-            if (ty < 8f) ty = 8f;
-
-            var bg = new Color(14, 10, 24, 245);
-            var border = new Color(80, 50, 140, 255);
-            
-            Raylib.DrawRectangleRounded(new Rectangle(tx, ty, w, h), 0.15f, 6, bg);
-            Raylib.DrawRectangleRoundedLinesEx(new Rectangle(tx, ty, w, h), 0.15f, 6, 2f, border);
-
-            Fonts.DrawShadowed(title, tx + 10f, ty + 6f, 16f, new Color(255, 220, 100, 255));
-            if (!string.IsNullOrEmpty(subtext)) {
-                Fonts.Draw(subtext, tx + 10f, ty + 26f, 14f, new Color(180, 190, 210, 255));
-            }
+            DrawItemTooltip(hoveredEntry.Value.Item.Definition, mouse);
         }
     }
 
@@ -715,10 +787,14 @@ public static class Screens {
         var mouse = Raylib.GetMousePosition();
         bool hovered = Raylib.CheckCollisionPointRec(mouse, rect);
 
-        Raylib.DrawRectangleRounded(rect, 0.12f, 6, hovered ? SlotHover : SlotBg);
-        Color border = hotbarSelected ? SlotSelected : SlotBorder;
-        if (hovered && Held != null) border = SlotSelected;
-        Raylib.DrawRectangleRoundedLinesEx(rect, 0.12f, 6, hotbarSelected || (hovered && Held != null) ? 2.5f : 1.5f, border);
+        Raylib.DrawRectangleRec(rect, SlotBg);
+        Raylib.DrawRectangle((int)x, (int)y, 52, 2, SlotBorder);
+        Raylib.DrawRectangle((int)x, (int)y, 2, 52, SlotBorder);
+        Raylib.DrawRectangle((int)x, (int)y + 50, 52, 2, PanelLightBorder);
+        Raylib.DrawRectangle((int)x + 50, (int)y, 2, 52, PanelLightBorder);
+
+        if (hovered) Raylib.DrawRectangleRec(rect, SlotHover);
+        if (hotbarSelected) Raylib.DrawRectangleLinesEx(rect, 2.5f, SlotSelected);
 
         if (idx >= 0 && idx < inv.Slots.Length) {
             var entry = inv.Slots[idx];
@@ -726,13 +802,6 @@ public static class Screens {
                 Hud.DrawItemIcon(entry.Value.Item.Definition, new Rectangle(x + 3f, y + 3f, 46f, 46f), 1f);
                 if (entry.Value.Quantity > 1) {
                     Fonts.DrawShadowed($"×{entry.Value.Quantity}", x + 4f, y + 32f, 15f, Color.White);
-                }
-                if (entry.Value.Item.Condition < 0.999) {
-                    float dur = (float)entry.Value.Item.Condition;
-                    var barRec = new Rectangle(x + 6f, y + 44f, 40f, 4f);
-                    Raylib.DrawRectangleRec(barRec, new Color(20, 20, 20, 220));
-                    var color = dur > 0.5f ? new Color(50, 220, 50, 255) : dur > 0.2f ? new Color(240, 200, 30, 255) : new Color(240, 40, 40, 255);
-                    Raylib.DrawRectangleRec(new Rectangle(x + 6f, y + 44f, 40f * dur, 4f), color);
                 }
             }
         }
@@ -779,44 +848,39 @@ public static class Screens {
                     if (right) {
                         if (Held.HasValue && Held.Value.Quantity > 0) {
                             var held = Held.Value;
-                            if (session.Player.OffhandItem == null || session.Player.OffhandCount == 0) {
-                                session.Player.OffhandItem = held.Item.Definition;
-                                session.Player.OffhandCount = 1;
+                            if (session.Player.OffhandEntry == null) {
+                                session.Player.OffhandEntry = held with { Quantity = 1 };
                                 Held = held.Quantity > 1 ? held with { Quantity = held.Quantity - 1 } : null;
-                            } else if (session.Player.OffhandItem.Id == held.Item.Definition.Id && session.Player.OffhandCount < 64) {
-                                session.Player.OffhandCount++;
+                            } else if (session.Player.OffhandEntry.Value.Item.Definition.Id == held.Item.Definition.Id && session.Player.OffhandEntry.Value.Quantity < held.Item.Definition.MaxStack) {
+                                session.Player.OffhandEntry = session.Player.OffhandEntry.Value with { Quantity = session.Player.OffhandEntry.Value.Quantity + 1 };
                                 Held = held.Quantity > 1 ? held with { Quantity = held.Quantity - 1 } : null;
                             }
-                        } else if (session.Player.OffhandItem != null && session.Player.OffhandCount > 0) {
-                            int take = (session.Player.OffhandCount + 1) / 2;
-                            Held = new ItemEntry(GameData.NewItem(session.Player.OffhandItem), take);
-                            session.Player.OffhandCount -= take;
-                            if (session.Player.OffhandCount <= 0) session.Player.OffhandItem = null;
+                        } else if (session.Player.OffhandEntry != null) {
+                            int take = (session.Player.OffhandEntry.Value.Quantity + 1) / 2;
+                            Held = session.Player.OffhandEntry.Value with { Quantity = take };
+                            session.Player.OffhandEntry = session.Player.OffhandEntry.Value with { Quantity = session.Player.OffhandEntry.Value.Quantity - take };
+                            if (session.Player.OffhandEntry.Value.Quantity <= 0) session.Player.OffhandEntry = null;
                         }
                     } else {
                         // Left click swap
                         if (!Held.HasValue || Held.Value.Quantity <= 0) {
-                            if (session.Player.OffhandItem != null && session.Player.OffhandCount > 0) {
-                                Held = new ItemEntry(GameData.NewItem(session.Player.OffhandItem), session.Player.OffhandCount);
-                                session.Player.OffhandItem = null;
-                                session.Player.OffhandCount = 0;
+                            if (session.Player.OffhandEntry != null) {
+                                Held = session.Player.OffhandEntry;
+                                session.Player.OffhandEntry = null;
                             }
                         } else {
                             var held = Held.Value;
-                            if (session.Player.OffhandItem == null || session.Player.OffhandCount == 0) {
-                                session.Player.OffhandItem = held.Item.Definition;
-                                session.Player.OffhandCount = held.Quantity;
+                            if (session.Player.OffhandEntry == null) {
+                                session.Player.OffhandEntry = held;
                                 Held = null;
-                            } else if (session.Player.OffhandItem.Id == held.Item.Definition.Id) {
-                                int add = Math.Min(64 - session.Player.OffhandCount, held.Quantity);
-                                session.Player.OffhandCount += add;
+                            } else if (session.Player.OffhandEntry.Value.Item.Definition.Id == held.Item.Definition.Id) {
+                                int add = Math.Min(session.Player.OffhandEntry.Value.Item.Definition.MaxStack - session.Player.OffhandEntry.Value.Quantity, held.Quantity);
+                                session.Player.OffhandEntry = session.Player.OffhandEntry.Value with { Quantity = session.Player.OffhandEntry.Value.Quantity + add };
                                 Held = held.Quantity > add ? held with { Quantity = held.Quantity - add } : null;
                             } else {
-                                var tmpItem = session.Player.OffhandItem;
-                                int tmpCount = session.Player.OffhandCount;
-                                session.Player.OffhandItem = held.Item.Definition;
-                                session.Player.OffhandCount = held.Quantity;
-                                Held = new ItemEntry(GameData.NewItem(tmpItem), tmpCount);
+                                var tmp = session.Player.OffhandEntry;
+                                session.Player.OffhandEntry = held;
+                                Held = tmp;
                             }
                         }
                     }
@@ -829,7 +893,7 @@ public static class Screens {
                 if (!Raylib.CheckCollisionPointRec(mouse, new Rectangle(px, py, panelW, panelH))) {
                     var dropPos = session.Player.Eye + session.Player.Forward * 0.5f;
                     int dropCount = right ? 1 : Held.Value.Quantity;
-                    var pickup = new ItemPickup(Held.Value.Item.Definition, dropCount, dropPos) {
+                    var pickup = new ItemPickup(Held.Value.Item, dropCount, dropPos) {
                         PickupDelay = 1.2f,
                         Velocity = session.Player.Forward * 4.5f + new Vector3(0f, 2.0f, 0f)
                     };
@@ -853,7 +917,7 @@ public static class Screens {
                         var slotEntry = inv.Slots[idx];
                         if (slotEntry.HasValue && slotEntry.Value.Quantity > 0) {
                             var dropPos = session.Player.Eye + session.Player.Forward * 0.5f;
-                            var pickup = new ItemPickup(slotEntry.Value.Item.Definition, 1, dropPos) {
+                            var pickup = new ItemPickup(slotEntry.Value.Item, 1, dropPos) {
                                 PickupDelay = 1.2f,
                                 Velocity = session.Player.Forward * 4.5f + new Vector3(0f, 2.0f, 0f)
                             };
@@ -875,7 +939,7 @@ public static class Screens {
                     var slotEntry = inv.Slots[idx];
                     if (slotEntry.HasValue && slotEntry.Value.Quantity > 0) {
                         var dropPos = session.Player.Eye + session.Player.Forward * 0.5f;
-                        var pickup = new ItemPickup(slotEntry.Value.Item.Definition, 1, dropPos) {
+                        var pickup = new ItemPickup(slotEntry.Value.Item, 1, dropPos) {
                             PickupDelay = 1.2f,
                             Velocity = session.Player.Forward * 4.5f + new Vector3(0f, 2.0f, 0f)
                         };
@@ -931,8 +995,6 @@ public static class Screens {
         if (!Raylib.CheckCollisionPointRec(mouse, rect)) return false;
 
         var entryInSlot = inv.Slots[idx];
-        const int maxStack = 64;
-
         bool shift = Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift);
         if (shift && !rightClick && entryInSlot != null) {
             // Shift-Click: быстрое перемещение между хотбаром (0..8) и основным инвентарем (9..35)
@@ -943,15 +1005,15 @@ public static class Screens {
             int rem = item.Quantity;
             for (int t = targetStart; t < targetEnd && rem > 0; t++) {
                 var te = inv.Slots[t];
-                if (te != null && te.Value.Item.Definition == item.Item.Definition && te.Value.Quantity < maxStack) {
-                    int add = Math.Min(maxStack - te.Value.Quantity, rem);
+                if (te != null && te.Value.Item.Definition == item.Item.Definition && te.Value.Quantity < te.Value.Item.Definition.MaxStack) {
+                    int add = Math.Min(te.Value.Item.Definition.MaxStack - te.Value.Quantity, rem);
                     inv.InsertAt(t, te.Value with { Quantity = te.Value.Quantity + add });
                     rem -= add;
                 }
             }
             for (int t = targetStart; t < targetEnd && rem > 0; t++) {
                 if (inv.Slots[t] == null) {
-                    int add = Math.Min(maxStack, rem);
+                    int add = Math.Min(item.Item.Definition.MaxStack, rem);
                     inv.InsertAt(t, new ItemEntry(item.Item, add));
                     rem -= add;
                 }
@@ -972,7 +1034,7 @@ public static class Screens {
                     if (Held.Value.Quantity <= 0) Held = null;
                 } else if (entryInSlot.Value.Item.Definition == held.Item.Definition) {
                     int current = entryInSlot.Value.Quantity;
-                    if (current < maxStack) {
+                    if (current < entryInSlot.Value.Item.Definition.MaxStack) {
                         inv.InsertAt(idx, entryInSlot.Value with { Quantity = current + 1 });
                         Held = held with { Quantity = held.Quantity - 1 };
                         if (Held.Value.Quantity <= 0) Held = null;
@@ -1009,8 +1071,8 @@ public static class Screens {
             } else if (entryInSlot.Value.Item.Definition == heldItem.Item.Definition) {
                 // Merge all up to 64
                 int current = entryInSlot.Value.Quantity;
-                if (current < maxStack) {
-                    int add = Math.Min(maxStack - current, heldItem.Quantity);
+                if (current < entryInSlot.Value.Item.Definition.MaxStack) {
+                    int add = Math.Min(entryInSlot.Value.Item.Definition.MaxStack - current, heldItem.Quantity);
                     inv.InsertAt(idx, entryInSlot.Value with { Quantity = current + add });
                     if (heldItem.Quantity - add > 0) {
                         Held = heldItem with { Quantity = heldItem.Quantity - add };
@@ -1052,7 +1114,7 @@ public static class Screens {
         bool rightClick = Raylib.IsMouseButtonPressed(MouseButton.Right);
 
         // Заголовок
-        Fonts.Draw("Крафт 2×2", panelX + 8f, panelY + 4f, 15f, new Color(255, 220, 120, 255));
+        Fonts.Draw("Создание", panelX + 8f, panelY, 16f, TextDark);
 
         // 2×2 сетка ингредиентов
         float gridX = panelX + 8f;
@@ -1069,7 +1131,7 @@ public static class Screens {
         // Стрелка
         float arrowX = gridX + 2 * (slotSz + gap) + 6f;
         float arrowMidY = gridY + (slotSz + gap) / 2f + slotSz / 2f - 8f;
-        Fonts.Draw("→", arrowX, arrowMidY, 22f, new Color(200, 200, 200, 255));
+        Fonts.Draw("→", arrowX, arrowMidY, 22f, new Color(80, 80, 80, 255));
 
         // Слот результата
         float resultX = arrowX + 26f;
@@ -1173,6 +1235,15 @@ public static class Screens {
         new("Железная лопата", GameData.IronShovelItem, 1, new[] { (GameData.IronIngotItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.IronIngotItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
         new("Алмазная лопата", GameData.DiamondShovelItem, 1, new[] { (GameData.DiamondItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.DiamondItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
 
+        // Оружие, охота и снаряжение
+        new("Кремень", GameData.FlintItem, 1, new[] { (GameData.GravelItem, 3) }, new ItemDefinition?[] { GameData.GravelItem, GameData.GravelItem, GameData.GravelItem, null, null, null, null, null, null }, true),
+        new("Огниво", GameData.FlintAndSteelItem, 1, new[] { (GameData.IronIngotItem, 1), (GameData.FlintItem, 1) }, new ItemDefinition?[] { GameData.IronIngotItem, null, null, null, GameData.FlintItem, null, null, null, null }, false),
+        new("Ведро", GameData.BucketItem, 1, new[] { (GameData.IronIngotItem, 3) }, new ItemDefinition?[] { GameData.IronIngotItem, null, GameData.IronIngotItem, null, GameData.IronIngotItem, null, null, null, null }, true),
+        new("Лук", GameData.BowItem, 1, new[] { (GameData.StickItem, 3), (GameData.StringItem, 3) }, new ItemDefinition?[] { null, GameData.StickItem, GameData.StringItem, GameData.StickItem, null, GameData.StringItem, null, GameData.StickItem, GameData.StringItem }, true),
+        new("Стрелы (4 шт)", GameData.ArrowItem, 4, new[] { (GameData.FlintItem, 1), (GameData.StickItem, 1), (GameData.FeatherItem, 1) }, new ItemDefinition?[] { GameData.FlintItem, null, null, GameData.StickItem, null, null, GameData.FeatherItem, null, null }, true),
+        new("Щит", GameData.ShieldItem, 1, new[] { (GameData.IronIngotItem, 1), (GameData.PlankItem, 6) }, new ItemDefinition?[] { GameData.PlankItem, GameData.IronIngotItem, GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, null, GameData.PlankItem, null }, true),
+        new("Динамит", GameData.TNTItem, 1, new[] { (GameData.GunpowderItem, 5), (GameData.SandItem, 4) }, new ItemDefinition?[] { GameData.GunpowderItem, GameData.SandItem, GameData.GunpowderItem, GameData.SandItem, GameData.GunpowderItem, GameData.SandItem, GameData.GunpowderItem, GameData.SandItem, GameData.GunpowderItem }, true),
+
         // Мотыги
         new("Деревянная мотыга", GameData.WoodHoeItem, 1, new[] { (GameData.PlankItem, 2), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.PlankItem, GameData.PlankItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
         new("Каменная мотыга", GameData.StoneHoeItem, 1, new[] { (GameData.CobblestoneItem, 2), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.CobblestoneItem, GameData.CobblestoneItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
@@ -1253,28 +1324,8 @@ public static class Screens {
 
     private static void AutoFillRecipe(GameSession session, RecipeBookEntry recipe, ItemEntry?[] grid, bool is3x3) {
         var inv = session.Player.Inventory;
-
-        // Проверяем наличие ингредиентов
-        foreach (var (reqItem, reqCount) in recipe.Ingredients) {
-            if (inv.CountOf(reqItem) < reqCount) {
-                session.AddMessage($"Не хватает: {reqItem.Name} ({inv.CountOf(reqItem)}/{reqCount})");
-                return;
-            }
-        }
-
-        // Возвращаем текущие предметы из сетки в инвентарь
-        for (int i = 0; i < grid.Length; i++) {
-            if (grid[i].HasValue && grid[i]!.Value.Quantity > 0) {
-                inv.TryInsert(grid[i]!.Value.Item, grid[i]!.Value.Quantity);
-                grid[i] = null;
-            }
-        }
-
-        // Определяем размер сетки цели
         int gridSize = is3x3 ? 3 : 2;
 
-        // Shape рецепта — всегда 9 элементов (3x3) или 4 (2x2) в зависимости от Needs3x3
-        // Нормализуем шаблон в minBB и раскладываем в целевую сетку
         var shape = recipe.Shape;
         int shapeW = recipe.Needs3x3 ? 3 : 2;
         int shapeH = recipe.Needs3x3 ? 3 : 2;
@@ -1296,6 +1347,27 @@ public static class Screens {
 
         int bbH = maxR - minR + 1;
         int bbW = maxC - minC + 1;
+
+        if (!is3x3 && (bbW > 2 || bbH > 2 || recipe.Needs3x3)) {
+            session.AddMessage("Этот рецепт требует Верстак 3×3!");
+            return;
+        }
+
+        // Проверяем наличие ингредиентов
+        foreach (var (reqItem, reqCount) in recipe.Ingredients) {
+            if (inv.CountOf(reqItem) < reqCount) {
+                session.AddMessage($"Не хватает: {reqItem.Name} ({inv.CountOf(reqItem)}/{reqCount})");
+                return;
+            }
+        }
+
+        // Возвращаем текущие предметы из сетки в инвентарь
+        for (int i = 0; i < grid.Length; i++) {
+            if (grid[i].HasValue && grid[i]!.Value.Quantity > 0) {
+                inv.TryInsert(grid[i]!.Value.Item, grid[i]!.Value.Quantity);
+                grid[i] = null;
+            }
+        }
 
         // Выровнять по верхнему левому углу целевой сетки
         bool placed = false;
@@ -1339,8 +1411,8 @@ public static class Screens {
         float px = w / 2f - panelW / 2f, py = (h - panelH) / 2f;
         DrawPanel(px, py, panelW, panelH);
 
-        Fonts.DrawCentered("ВЕРСТАК", w / 2f, py + 8f, 26f, new Color(255, 220, 120, 255));
-        Fonts.DrawCentered("3×3 крафт · ЛКМ — взять/положить · ПКМ — положить 1", w / 2f, py + 36f, 14f, new Color(170, 176, 190, 255));
+        Fonts.DrawCentered("ВЕРСТАК", w / 2f, py + 8f, 26f, TextDark);
+        Fonts.DrawCentered("3×3 крафт · ЛКМ — взять/положить · ПКМ — положить 1", w / 2f, py + 36f, 14f, new Color(90, 90, 90, 255));
 
         float gridX = px + 20f;
         float gridY = py + 62f;
@@ -1459,7 +1531,7 @@ public static class Screens {
                 if (e.HasValue) def = e.Value.Item.Definition;
             }
         }
-        if (def != null) DrawNameTooltip(def.Name, mouse);
+        if (def != null) DrawItemTooltip(def, mouse);
     }
 
     // ── Экран печки (Автономная фоновая плавка) ───────────────────────────────
@@ -1479,8 +1551,8 @@ public static class Screens {
         float px = w / 2f - panelW / 2f, py = (h - panelH) / 2f;
         DrawPanel(px, py, panelW, panelH);
 
-        Fonts.DrawCentered("ПЕЧКА", w / 2f, py + 8f, 26f, new Color(255, 160, 50, 255));
-        Fonts.DrawCentered("Сырьё (вверху) + Топливо (внизу) → Результат (справа)", w / 2f, py + 36f, 13f, new Color(170, 176, 190, 255));
+        Fonts.DrawCentered("ПЕЧКА", w / 2f, py + 8f, 26f, TextDark);
+        Fonts.DrawCentered("Сырьё (вверху) + Топливо (внизу) → Результат (справа)", w / 2f, py + 36f, 13f, new Color(90, 90, 90, 255));
 
         float centerX = w / 2f;
         float topY = py + 65f;
@@ -1577,10 +1649,33 @@ public static class Screens {
 
         DrawHeldItem();
         HandleWorkbenchInput(session, inv, invX, invY, hotY);
+
+        if (!Held.HasValue || Held.Value.Quantity <= 0) {
+            ItemDefinition? fDef = null;
+            if (inHov && furnace.Input.HasValue) { fDef = furnace.Input.Value.Item.Definition; }
+            else if (fuelHov && furnace.Fuel.HasValue) { fDef = furnace.Fuel.Value.Item.Definition; }
+            else if (outHov && furnace.Output.HasValue) { fDef = furnace.Output.Value.Item.Definition; }
+            else {
+                for (int row = 0; row < 3; row++) {
+                    for (int col = 0; col < 9; col++) {
+                        if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(invX + col * 56f, invY + row * 56f, 52, 52))) {
+                            var e = inv.Slots[9 + row * 9 + col];
+                            if (e.HasValue) { fDef = e.Value.Item.Definition; }
+                        }
+                    }
+                }
+                for (int col = 0; col < 9; col++) {
+                    if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(invX + col * 56f, hotY, 52, 52))) {
+                        var e = inv.Slots[col];
+                        if (e.HasValue) { fDef = e.Value.Item.Definition; }
+                    }
+                }
+            }
+            if (fDef != null) DrawItemTooltip(fDef, mouse);
+        }
     }
 
     private static void HandleFurnaceSlotClick(ref ItemEntry? slotItem, bool leftClick, bool rightClick, Func<ushort, bool> filter) {
-        const int maxStack = 64;
         if (rightClick) {
             if (Held.HasValue && Held.Value.Quantity > 0) {
                 if (filter(Held.Value.Item.Definition.Id)) {
@@ -1589,7 +1684,7 @@ public static class Screens {
                         slotItem = new ItemEntry(held.Item, 1);
                         Held = held with { Quantity = held.Quantity - 1 };
                         if (Held.Value.Quantity <= 0) Held = null;
-                    } else if (slotItem.Value.Item.Definition == held.Item.Definition && slotItem.Value.Quantity < maxStack) {
+                    } else if (slotItem.Value.Item.Definition == held.Item.Definition && slotItem.Value.Quantity < slotItem.Value.Item.Definition.MaxStack) {
                         slotItem = slotItem.Value with { Quantity = slotItem.Value.Quantity + 1 };
                         Held = held with { Quantity = held.Quantity - 1 };
                         if (Held.Value.Quantity <= 0) Held = null;
@@ -1615,8 +1710,8 @@ public static class Screens {
                     Held = null;
                 } else if (slotItem.Value.Item.Definition == held.Item.Definition) {
                     int current = slotItem.Value.Quantity;
-                    if (current < maxStack) {
-                        int add = Math.Min(maxStack - current, held.Quantity);
+                    if (current < slotItem.Value.Item.Definition.MaxStack) {
+                        int add = Math.Min(slotItem.Value.Item.Definition.MaxStack - current, held.Quantity);
                         slotItem = slotItem.Value with { Quantity = current + add };
                         if (held.Quantity - add > 0) Held = held with { Quantity = held.Quantity - add };
                         else Held = null;
@@ -1648,8 +1743,8 @@ public static class Screens {
         float px = w / 2f - panelW / 2f, py = (h - panelH) / 2f;
         DrawPanel(px, py, panelW, panelH);
 
-        Fonts.DrawCentered("СУНДУК", w / 2f, py + 8f, 24f, new Color(255, 205, 100, 255));
-        Fonts.DrawCentered("Хранилище предметов · ЛКМ / ПКМ", w / 2f, py + 34f, 13f, new Color(170, 176, 190, 255));
+        Fonts.DrawCentered("СУНДУК", w / 2f, py + 8f, 24f, TextDark);
+        Fonts.DrawCentered("Хранилище предметов · ЛКМ / ПКМ", w / 2f, py + 34f, 13f, new Color(90, 90, 90, 255));
 
         float chestY = py + 56f;
         float chestX = px + 16f;
@@ -1671,13 +1766,6 @@ public static class Screens {
                     Hud.DrawItemIcon(entry.Value.Item.Definition, new Rectangle(sx + 3f, sy + 3f, slotSz - 6f, slotSz - 6f), 1f);
                     if (entry.Value.Quantity > 1)
                         Fonts.DrawShadowed($"×{entry.Value.Quantity}", sx + 4f, sy + slotSz - 16f, 14f, Color.White);
-                    if (entry.Value.Item.Condition < 0.999) {
-                        float durRatio = (float)entry.Value.Item.Condition;
-                        var barRec = new Rectangle(sx + 6f, sy + slotSz - 8f, slotSz - 12f, 4f);
-                        Raylib.DrawRectangleRec(barRec, new Color(20, 20, 20, 220));
-                        Color durCol = durRatio > 0.5f ? new Color(50, 220, 50, 255) : durRatio > 0.2f ? new Color(240, 200, 30, 255) : new Color(240, 40, 40, 255);
-                        Raylib.DrawRectangleRec(new Rectangle(sx + 6f, sy + slotSz - 8f, (slotSz - 12f) * durRatio, 4f), durCol);
-                    }
                 }
 
                 if ((leftClick || rightClick) && hov) {
@@ -1723,10 +1811,43 @@ public static class Screens {
                 }
             }
         }
+
+        if (!Held.HasValue || Held.Value.Quantity <= 0) {
+            ItemDefinition? cDef = null;
+            for (int r = 0; r < 3; r++) {
+                for (int c = 0; c < 9; c++) {
+                    int idx = r * 9 + c;
+                    float sx = chestX + c * (slotSz + gap);
+                    float sy = chestY + r * (slotSz + gap);
+                    if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(sx, sy, slotSz, slotSz))) {
+                        var e = chestInv.Slots[idx];
+                        if (e.HasValue) { cDef = e.Value.Item.Definition; }
+                    }
+                }
+            }
+            for (int row = 0; row < 3; row++) {
+                for (int col = 0; col < 9; col++) {
+                    int idx = 9 + row * 9 + col;
+                    float sx = invX + col * (slotSz + gap);
+                    float sy = invY + row * (slotSz + gap);
+                    if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(sx, sy, slotSz, slotSz))) {
+                        var e = pInv.Slots[idx];
+                        if (e.HasValue) { cDef = e.Value.Item.Definition; }
+                    }
+                }
+            }
+            for (int col = 0; col < 9; col++) {
+                float sx = invX + col * (slotSz + gap);
+                if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(sx, hotY, slotSz, slotSz))) {
+                    var e = pInv.Slots[col];
+                    if (e.HasValue) { cDef = e.Value.Item.Definition; }
+                }
+            }
+            if (cDef != null) DrawItemTooltip(cDef, mouse);
+        }
     }
 
     private static void HandleContainerSlotClick(Container inv, int slotIdx, bool leftClick, bool rightClick, Container? targetTransferInv = null) {
-        const int maxStack = 64;
         var slotItem = inv.Slots[slotIdx];
 
         bool shift = Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift);
@@ -1736,8 +1857,8 @@ public static class Screens {
             // 1. Сначала объединяем с существующими одинаковыми стаками
             for (int i = 0; i < targetTransferInv.Slots.Length; i++) {
                 var s = targetTransferInv.Slots[i];
-                if (s.HasValue && s.Value.Item.Definition.Id == item.Item.Definition.Id && s.Value.Quantity < maxStack) {
-                    int space = maxStack - s.Value.Quantity;
+                if (s.HasValue && s.Value.Item.Definition.Id == item.Item.Definition.Id && s.Value.Quantity < s.Value.Item.Definition.MaxStack) {
+                    int space = s.Value.Item.Definition.MaxStack - s.Value.Quantity;
                     int add = Math.Min(space, item.Quantity - inserted);
                     targetTransferInv.InsertAt(i, s.Value with { Quantity = s.Value.Quantity + add });
                     inserted += add;
@@ -1748,7 +1869,7 @@ public static class Screens {
             if (inserted < item.Quantity) {
                 for (int i = 0; i < targetTransferInv.Slots.Length; i++) {
                     if (!targetTransferInv.Slots[i].HasValue) {
-                        int add = Math.Min(maxStack, item.Quantity - inserted);
+                        int add = Math.Min(item.Item.Definition.MaxStack, item.Quantity - inserted);
                         targetTransferInv.InsertAt(i, new ItemEntry(item.Item, add));
                         inserted += add;
                         if (inserted >= item.Quantity) break;
@@ -1772,7 +1893,7 @@ public static class Screens {
                     inv.InsertAt(slotIdx, new ItemEntry(held.Item, 1));
                     Held = held with { Quantity = held.Quantity - 1 };
                     if (Held.Value.Quantity <= 0) Held = null;
-                } else if (slotItem.Value.Item.Definition == held.Item.Definition && slotItem.Value.Quantity < maxStack) {
+                } else if (slotItem.Value.Item.Definition == held.Item.Definition && slotItem.Value.Quantity < slotItem.Value.Item.Definition.MaxStack) {
                     inv.InsertAt(slotIdx, slotItem.Value with { Quantity = slotItem.Value.Quantity + 1 });
                     Held = held with { Quantity = held.Quantity - 1 };
                     if (Held.Value.Quantity <= 0) Held = null;
@@ -1797,8 +1918,8 @@ public static class Screens {
                     Held = null;
                 } else if (slotItem.Value.Item.Definition == held.Item.Definition) {
                     int current = slotItem.Value.Quantity;
-                    if (current < maxStack) {
-                        int add = Math.Min(maxStack - current, held.Quantity);
+                    if (current < slotItem.Value.Item.Definition.MaxStack) {
+                        int add = Math.Min(slotItem.Value.Item.Definition.MaxStack - current, held.Quantity);
                         inv.InsertAt(slotIdx, slotItem.Value with { Quantity = current + add });
                         if (held.Quantity - add > 0) Held = held with { Quantity = held.Quantity - add };
                         else Held = null;
@@ -1830,7 +1951,6 @@ public static class Screens {
         }
 
         if (hov && (leftClick || rightClick)) {
-            const int maxStack = 64;
             if (rightClick) {
                 if (Held.HasValue && Held.Value.Quantity > 0) {
                     var held = Held.Value;
@@ -1838,7 +1958,7 @@ public static class Screens {
                         grid[idx] = new ItemEntry(held.Item, 1);
                         Held = held with { Quantity = held.Quantity - 1 };
                         if (Held.Value.Quantity <= 0) Held = null;
-                    } else if (slotItem.Value.Item.Definition == held.Item.Definition && slotItem.Value.Quantity < maxStack) {
+                    } else if (slotItem.Value.Item.Definition == held.Item.Definition && slotItem.Value.Quantity < slotItem.Value.Item.Definition.MaxStack) {
                         grid[idx] = slotItem.Value with { Quantity = slotItem.Value.Quantity + 1 };
                         Held = held with { Quantity = held.Quantity - 1 };
                         if (Held.Value.Quantity <= 0) Held = null;
@@ -1866,8 +1986,8 @@ public static class Screens {
                         Held = null;
                     } else if (slotItem.Value.Item.Definition == held.Item.Definition) {
                         int current = slotItem.Value.Quantity;
-                        if (current < maxStack) {
-                            int add = Math.Min(maxStack - current, held.Quantity);
+                        if (current < slotItem.Value.Item.Definition.MaxStack) {
+                            int add = Math.Min(slotItem.Value.Item.Definition.MaxStack - current, held.Quantity);
                             grid[idx] = slotItem.Value with { Quantity = current + add };
                             if (held.Quantity - add > 0) {
                                 Held = held with { Quantity = held.Quantity - add };
@@ -1894,6 +2014,40 @@ public static class Screens {
         Hud.DrawItemIcon(held.Item.Definition, new Rectangle(mouse.X - 14f, mouse.Y - 14f, 28f, 28f), 1f);
         if (held.Quantity > 1)
             Fonts.Draw($"×{held.Quantity}", mouse.X - 14f, mouse.Y + 8f, 15f, Color.White);
+    }
+
+    public static void DrawItemTooltip(ItemDefinition def, System.Numerics.Vector2 mouse) {
+        string title = def.Name;
+        ushort itemId = def.Id;
+
+        string subtext = "";
+        if (GameData.FoodValue.TryGetValue(itemId, out float food)) {
+            subtext = $"Пища: +{food} HP";
+        } else if (GameData.GetToolTier(itemId) > 0) {
+            subtext = $"Урон: {GameData.GetWeaponDamage(itemId)} HP";
+        }
+
+        float w = MathF.Max(Fonts.Measure(title, 16f), Fonts.Measure(subtext, 14f)) + 28f;
+        float h = string.IsNullOrEmpty(subtext) ? 32f : 52f;
+
+        float tx = mouse.X + 14f;
+        float ty = mouse.Y - 14f;
+        
+        if (tx + w > Raylib.GetScreenWidth() - 8f) tx = mouse.X - w - 8f;
+        if (ty + h > Raylib.GetScreenHeight() - 8f) ty = Raylib.GetScreenHeight() - h - 8f;
+        if (ty < 8f) ty = 8f;
+        if (tx < 8f) tx = 8f;
+
+        var bg = new Color(16, 12, 28, 255);
+        var border = new Color(85, 55, 145, 255);
+        
+        Raylib.DrawRectangleRounded(new Rectangle(tx, ty, w, h), 0.15f, 6, bg);
+        Raylib.DrawRectangleRoundedLinesEx(new Rectangle(tx, ty, w, h), 0.15f, 6, 2f, border);
+
+        Fonts.DrawShadowed(title, tx + 12f, ty + 7f, 16f, new Color(255, 220, 100, 255));
+        if (!string.IsNullOrEmpty(subtext)) {
+            Fonts.Draw(subtext, tx + 12f, ty + 28f, 14f, new Color(180, 190, 210, 255));
+        }
     }
 
     private static void DrawNameTooltip(string name, System.Numerics.Vector2 mouse) {
@@ -1953,9 +2107,20 @@ public static class Screens {
     }
 
     private static void DrawPanel(float x, float y, float width, float height) {
-        Raylib.DrawRectangle(0, 0, Raylib.GetScreenWidth(), Raylib.GetScreenHeight(), new Color(10, 12, 20, 160));
+        Raylib.DrawRectangle(0, 0, Raylib.GetScreenWidth(), Raylib.GetScreenHeight(), new Color(0, 0, 0, 140));
         var rect = new Rectangle(x, y, width, height);
-        Raylib.DrawRectangleRounded(rect, 0.05f, 12, Panel);
-        Raylib.DrawRectangleRoundedLinesEx(rect, 0.05f, 12, 2f, new Color(80, 90, 110, 255));
+        Raylib.DrawRectangleRec(rect, Panel);
+        Raylib.DrawRectangleLinesEx(rect, 2f, Color.Black);
+        // Верхний и левый белый блик
+        Raylib.DrawRectangle((int)x + 2, (int)y + 2, (int)width - 4, 3, PanelLightBorder);
+        Raylib.DrawRectangle((int)x + 2, (int)y + 2, 3, (int)height - 4, PanelLightBorder);
+        // Нижний и правый темно-серый скос (тень)
+        Raylib.DrawRectangle((int)x + 2, (int)(y + height) - 5, (int)width - 4, 3, PanelDarkBorder);
+        Raylib.DrawRectangle((int)(x + width) - 5, (int)y + 2, 3, (int)height - 4, PanelDarkBorder);
     }
 }
+
+
+
+
+

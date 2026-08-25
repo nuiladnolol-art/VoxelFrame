@@ -14,11 +14,9 @@ public sealed class BlockType {
     public bool IsFlammable { get; set; }             // горит
     public byte LightLevel { get; set; }              // собственный свет (0..15)
     public float BurnTimeSeconds { get; set; }        // время горения
-    public float LoadCapacityKN { get; set; }         // 0 = не несущий (террейн)
     public ushort DropItemId { get; set; }            // что выпадает при ломании
     public int DropItemCount { get; set; } = 1;       // сколько предметов выпадает
     public int PlaceItemCount { get; set; } = 1;      // сколько предметов нужно для установки
-    public float PlaceContentVolumeM3 { get; set; } = 1f;  // объём материала в ячейке после установки
     public bool IsUnbreakable { get; set; }
     /// <summary>Это блок верстака — открывает 3×3 крафт при ПКМ.</summary>
     public bool IsWorkbench { get; set; }
@@ -30,164 +28,197 @@ public sealed class BlockType {
 public static class GameData {
     // ── Материалы (плотность = источник массы, всё в СИ) ─────────────────────
     public static readonly Material Oak = new() {
-        Id = 1, Name = "Дуб", DensityKgPerM3 = 760, CompressiveStrengthKPa = 8000, Category = MaterialCategory.Wood,
+        Id = 1, Name = "Дуб", Category = MaterialCategory.Wood,
     };
     public static readonly Material Sawdust = new() {
-        Id = 2, Name = "Опилки", DensityKgPerM3 = 760, Category = MaterialCategory.Wood, State = PhysicalState.Bulk,
+        Id = 2, Name = "Опилки", Category = MaterialCategory.Wood,
     };
     public static readonly Material Stone = new() {
-        Id = 3, Name = "Камень", DensityKgPerM3 = 2600, CompressiveStrengthKPa = 18000, Category = MaterialCategory.Stone,
+        Id = 3, Name = "Камень", Category = MaterialCategory.Stone,
     };
     public static readonly Material DirtM = new() {
-        Id = 4, Name = "Земля", DensityKgPerM3 = 1500, Category = MaterialCategory.Soil,
+        Id = 4, Name = "Земля", Category = MaterialCategory.Soil,
     };
     public static readonly Material Coal = new() {
-        Id = 5, Name = "Уголь", DensityKgPerM3 = 2600, Category = MaterialCategory.Metal,
+        Id = 5, Name = "Уголь", Category = MaterialCategory.Stone,
     };
     public static readonly Material AppleM = new() {
-        Id = 6, Name = "Яблоко", DensityKgPerM3 = 625, Category = MaterialCategory.Organic,
+        Id = 6, Name = "Яблоко", Category = MaterialCategory.Organic,
     };
     public static readonly Material Pork = new() {
-        Id = 7, Name = "Свинина", DensityKgPerM3 = 667, Category = MaterialCategory.Organic,
+        Id = 7, Name = "Свинина", Category = MaterialCategory.Organic,
     };
     public static readonly Material AshM = new() {
-        Id = 8, Name = "Зола", DensityKgPerM3 = 400, Category = MaterialCategory.Soil, State = PhysicalState.Bulk,
+        Id = 8, Name = "Зола", Category = MaterialCategory.Soil,
     };
     public static readonly Material LeavesM = new() {
-        Id = 9, Name = "Листва", DensityKgPerM3 = 250, Category = MaterialCategory.Wood,
+        Id = 9, Name = "Листва", Category = MaterialCategory.Wood,
     };
     public static readonly Material IronM = new() {
-        Id = 10, Name = "Железо", DensityKgPerM3 = 7874, CompressiveStrengthKPa = 120000, Category = MaterialCategory.Metal,
+        Id = 10, Name = "Железо", Category = MaterialCategory.Metal,
     };
     public static readonly Material StoneToolM = new() {
-        Id = 11, Name = "Каменный инструмент", DensityKgPerM3 = 2600, CompressiveStrengthKPa = 18000, Category = MaterialCategory.Stone,
+        Id = 11, Name = "Каменный инструмент", Category = MaterialCategory.Stone,
     };
     public static readonly Material IronToolM = new() {
-        Id = 12, Name = "Железный инструмент", DensityKgPerM3 = 7874, CompressiveStrengthKPa = 120000, Category = MaterialCategory.Metal,
+        Id = 12, Name = "Железный инструмент", Category = MaterialCategory.Metal,
     };
     public static readonly Material WoodToolM = new() {
-        Id = 13, Name = "Деревянный инструмент", DensityKgPerM3 = 760, Category = MaterialCategory.Wood,
+        Id = 13, Name = "Деревянный инструмент", Category = MaterialCategory.Wood,
     };
     public static readonly Material DiamondM = new() {
-        Id = 14, Name = "Алмаз", DensityKgPerM3 = 3510, CompressiveStrengthKPa = 500000, Category = MaterialCategory.Stone,
+        Id = 14, Name = "Алмаз", Category = MaterialCategory.Stone,
     };
     public static readonly Material GoldM = new() {
-        Id = 15, Name = "Золото", DensityKgPerM3 = 19300, CompressiveStrengthKPa = 100000, Category = MaterialCategory.Metal,
+        Id = 15, Name = "Золото", Category = MaterialCategory.Metal,
     };
     public static readonly Material RedstoneM = new() {
-        Id = 16, Name = "Редстоун", DensityKgPerM3 = 2200, Category = MaterialCategory.Stone,
+        Id = 16, Name = "Редстоун", Category = MaterialCategory.Stone,
     };
     public static readonly Material SandM = new() {
-        Id = 17, Name = "Песок", DensityKgPerM3 = 1600, Category = MaterialCategory.Soil,
+        Id = 17, Name = "Песок", Category = MaterialCategory.Soil,
     };
     public static readonly Material StringM = new() {
-        Id = 18, Name = "Нить", DensityKgPerM3 = 300, Category = MaterialCategory.Organic,
+        Id = 18, Name = "Нить", Category = MaterialCategory.Organic,
     };
     public static readonly Material BoneM = new() {
-        Id = 19, Name = "Кость", DensityKgPerM3 = 1900, Category = MaterialCategory.Organic,
+        Id = 19, Name = "Кость", Category = MaterialCategory.Organic,
     };
     public static readonly Material BeefM = new() {
-        Id = 20, Name = "Говядина", DensityKgPerM3 = 700, Category = MaterialCategory.Organic,
+        Id = 20, Name = "Говядина", Category = MaterialCategory.Organic,
     };
     public static readonly Material LeatherM = new() {
-        Id = 21, Name = "Кожа", DensityKgPerM3 = 860, Category = MaterialCategory.Organic,
+        Id = 21, Name = "Кожа", Category = MaterialCategory.Organic,
     };
     public static readonly Material WoolM = new() {
-        Id = 22, Name = "Шерсть", DensityKgPerM3 = 200, Category = MaterialCategory.Wood,
+        Id = 22, Name = "Шерсть", Category = MaterialCategory.Organic,
+    };
+    public static readonly Material WaterM = new() {
+        Id = 23, Name = "Вода", Category = MaterialCategory.Soil,
+    };
+    public static readonly Material LavaM = new() {
+        Id = 24, Name = "Лава", Category = MaterialCategory.Stone,
+    };
+    public static readonly Material ObsidianM = new() {
+        Id = 25, Name = "Обсидиан", Category = MaterialCategory.Stone,
+    };
+    public static readonly Material GlassM = new() {
+        Id = 26, Name = "Стекло", Category = MaterialCategory.Stone,
+    };
+    public static readonly Material OrganicM = new() {
+        Id = 27, Name = "Органика", Category = MaterialCategory.Organic,
     };
 
     // ── Предметы ─────────────────────────────────────────────────────────────
-    public static readonly ItemDefinition DirtItem = Item(1, "Земля", DirtM, 1.0);
-    public static readonly ItemDefinition StoneItem = Item(2, "Камень", Stone, 1.0);
-    public static readonly ItemDefinition LogItem = Item(3, "Бревно", Oak, 1.0);
-    public static readonly ItemDefinition PlankItem = Item(4, "Доски", Oak, 0.4);
-    public static readonly ItemDefinition StickItem = Item(6, "Палки", Oak, 0.04);
-    public static readonly ItemDefinition CoalItem = Item(7, "Уголь", Coal, 0.02);
-    public static readonly ItemDefinition CoalOreItem = Item(8, "Угольная руда", Stone, 1.0);
-    public static readonly ItemDefinition TorchItem = Item(9, "Факел", Oak, 0.02);
-    public static readonly ItemDefinition AppleItem = Item(13, "Яблоко", AppleM, 0.0004);
-    public static readonly ItemDefinition RawPorkItem = Item(14, "Сырая свинина", Pork, 0.015);
-    public static readonly ItemDefinition CookedPorkItem = Item(15, "Жареная свинина", Pork, 0.015);
-    public static readonly ItemDefinition IronOreItem = Item(16, "Железная руда", Stone, 1.0);
-    public static readonly ItemDefinition IronIngotItem = Item(17, "Железный слиток", IronM, 0.001);
-    public static readonly ItemDefinition WoodPickaxeItem = Item(18, "Деревянная кирка", WoodToolM, 0.05);
-    public static readonly ItemDefinition StonePickaxeItem = Item(19, "Каменная кирка", StoneToolM, 0.05);
-    public static readonly ItemDefinition IronPickaxeItem = Item(20, "Железная кирка", IronToolM, 0.05);
-    public static readonly ItemDefinition WoodAxeItem = Item(21, "Деревянный топор", WoodToolM, 0.05);
-    public static readonly ItemDefinition StoneAxeItem = Item(22, "Каменный топор", StoneToolM, 0.05);
-    public static readonly ItemDefinition IronAxeItem = Item(23, "Железный топор", IronToolM, 0.05);
-    public static readonly ItemDefinition WoodSwordItem = Item(24, "Деревянный меч", WoodToolM, 0.04);
-    public static readonly ItemDefinition StoneSwordItem = Item(25, "Каменный меч", StoneToolM, 0.04);
-    public static readonly ItemDefinition IronSwordItem = Item(26, "Железный меч", IronToolM, 0.04);
-    public static readonly ItemDefinition WoodShovelItem = Item(27, "Деревянная лопата", WoodToolM, 0.03);
-    public static readonly ItemDefinition StoneShovelItem = Item(28, "Каменная лопата", StoneToolM, 0.03);
-    public static readonly ItemDefinition IronShovelItem = Item(29, "Железная лопата", IronToolM, 0.03);
-    public static readonly ItemDefinition WorkbenchItem = Item(30, "Верстак", Oak, 1.0);
-    public static readonly ItemDefinition FurnaceItem = Item(31, "Печка", Stone, 1.0);
-    public static readonly ItemDefinition BreadItem = Item(32, "Хлеб", Oak, 0.15);
+    public static readonly ItemDefinition DirtItem = Item(1, "Земля", DirtM);
+    public static readonly ItemDefinition StoneItem = Item(2, "Камень", Stone);
+    public static readonly ItemDefinition LogItem = Item(3, "Бревно", Oak);
+    public static readonly ItemDefinition PlankItem = Item(4, "Доски", Oak);
+    public static readonly ItemDefinition StickItem = Item(6, "Палки", Oak);
+    public static readonly ItemDefinition CoalItem = Item(7, "Уголь", Coal);
+    public static readonly ItemDefinition CoalOreItem = Item(8, "Угольная руда", Stone);
+    public static readonly ItemDefinition TorchItem = Item(9, "Факел", Oak);
+    public static readonly ItemDefinition AppleItem = Item(13, "Яблоко", AppleM);
+    public static readonly ItemDefinition RawPorkItem = Item(14, "Сырая свинина", Pork);
+    public static readonly ItemDefinition CookedPorkItem = Item(15, "Жареная свинина", Pork);
+    public static readonly ItemDefinition IronOreItem = Item(16, "Железная руда", Stone);
+    public static readonly ItemDefinition IronIngotItem = Item(17, "Железный слиток", IronM);
+    public static readonly ItemDefinition WoodPickaxeItem = Item(18, "Деревянная кирка", WoodToolM, maxStack: 1);
+    public static readonly ItemDefinition StonePickaxeItem = Item(19, "Каменная кирка", StoneToolM, maxStack: 1);
+    public static readonly ItemDefinition IronPickaxeItem = Item(20, "Железная кирка", IronToolM, maxStack: 1);
+    public static readonly ItemDefinition WoodAxeItem = Item(21, "Деревянный топор", WoodToolM, maxStack: 1);
+    public static readonly ItemDefinition StoneAxeItem = Item(22, "Каменный топор", StoneToolM, maxStack: 1);
+    public static readonly ItemDefinition IronAxeItem = Item(23, "Железный топор", IronToolM, maxStack: 1);
+    public static readonly ItemDefinition WoodSwordItem = Item(24, "Деревянный меч", WoodToolM, maxStack: 1);
+    public static readonly ItemDefinition StoneSwordItem = Item(25, "Каменный меч", StoneToolM, maxStack: 1);
+    public static readonly ItemDefinition IronSwordItem = Item(26, "Железный меч", IronToolM, maxStack: 1);
+    public static readonly ItemDefinition WoodShovelItem = Item(27, "Деревянная лопата", WoodToolM, maxStack: 1);
+    public static readonly ItemDefinition StoneShovelItem = Item(28, "Каменная лопата", StoneToolM, maxStack: 1);
+    public static readonly ItemDefinition IronShovelItem = Item(29, "Железная лопата", IronToolM, maxStack: 1);
+    public static readonly ItemDefinition WorkbenchItem = Item(30, "Верстак", Oak);
+    public static readonly ItemDefinition FurnaceItem = Item(31, "Печка", Stone);
+    public static readonly ItemDefinition BreadItem = Item(32, "Хлеб", OrganicM);
 
-    // Новые блоки и предметы MC Alpha 1
-    public static readonly ItemDefinition GoldOreItem = Item(33, "Золотая руда", Stone, 1.0);
-    public static readonly ItemDefinition GoldIngotItem = Item(34, "Золотой слиток", GoldM, 0.001);
-    public static readonly ItemDefinition DiamondItem = Item(35, "Алмаз", DiamondM, 0.0005);
-    public static readonly ItemDefinition DiamondOreItem = Item(36, "Алмазная руда", Stone, 1.0);
-    public static readonly ItemDefinition RedstoneItem = Item(37, "Редстоун пыль", RedstoneM, 0.001);
-    public static readonly ItemDefinition SandItem = Item(38, "Песок", SandM, 1.0);
-    public static readonly ItemDefinition GravelItem = Item(39, "Гравий", Stone, 1.0);
-    public static readonly ItemDefinition CobblestoneItem = Item(40, "Булыжник", Stone, 1.0);
-    public static readonly ItemDefinition GlassItem = Item(41, "Стекло", Stone, 1.0);
-    public static readonly ItemDefinition ObsidianItem = Item(42, "Обсидиан", DiamondM, 1.0);
-    public static readonly ItemDefinition DiamondPickaxeItem = Item(43, "Алмазная кирка", DiamondM, 0.05);
-    public static readonly ItemDefinition DiamondAxeItem = Item(44, "Алмазный топор", DiamondM, 0.05);
-    public static readonly ItemDefinition DiamondSwordItem = Item(45, "Алмазный меч", DiamondM, 0.04);
-    public static readonly ItemDefinition DiamondShovelItem = Item(46, "Алмазная лопата", DiamondM, 0.03);
+    // Блоки и предметы мира
+    public static readonly ItemDefinition GoldOreItem = Item(33, "Золотая руда", Stone);
+    public static readonly ItemDefinition GoldIngotItem = Item(34, "Золотой слиток", GoldM);
+    public static readonly ItemDefinition DiamondItem = Item(35, "Алмаз", DiamondM);
+    public static readonly ItemDefinition DiamondOreItem = Item(36, "Алмазная руда", Stone);
+    public static readonly ItemDefinition RedstoneItem = Item(37, "Редстоун пыль", RedstoneM);
+    public static readonly ItemDefinition SandItem = Item(38, "Песок", SandM);
+    public static readonly ItemDefinition GravelItem = Item(39, "Гравий", Stone);
+    public static readonly ItemDefinition CobblestoneItem = Item(40, "Булыжник", Stone);
+    public static readonly ItemDefinition GlassItem = Item(41, "Стекло", GlassM);
+    public static readonly ItemDefinition ObsidianItem = Item(42, "Обсидиан", ObsidianM);
+    public static readonly ItemDefinition DiamondPickaxeItem = Item(43, "Алмазная кирка", DiamondM, maxStack: 1);
+    public static readonly ItemDefinition DiamondAxeItem = Item(44, "Алмазный топор", DiamondM, maxStack: 1);
+    public static readonly ItemDefinition DiamondSwordItem = Item(45, "Алмазный меч", DiamondM, maxStack: 1);
+    public static readonly ItemDefinition DiamondShovelItem = Item(46, "Алмазная лопата", DiamondM, maxStack: 1);
 
-    public static readonly ItemDefinition FeatherItem = Item(47, "Перо", LeavesM, 0.0001);
-    public static readonly ItemDefinition GunpowderItem = Item(48, "Порох", Coal, 0.0005);
-    public static readonly ItemDefinition StringItem = Item(49, "Нить", StringM, 0.0002);
-    public static readonly ItemDefinition ArrowItem = Item(50, "Стрела", WoodToolM, 0.001);
-    public static readonly ItemDefinition BoneItem = Item(51, "Кость", BoneM, 0.002);
-    public static readonly ItemDefinition CharcoalItem = Item(52, "Древесный уголь", Coal, 0.02);
-    public static readonly ItemDefinition RawBeefItem = Item(53, "Сырая говядина", BeefM, 0.02);
-    public static readonly ItemDefinition CookedBeefItem = Item(54, "Жареная говядина", BeefM, 0.02);
-    public static readonly ItemDefinition LeatherItem = Item(55, "Кожа", LeatherM, 0.005);
-    public static readonly ItemDefinition WhiteWoolItem = Item(56, "Шерсть", WoolM, 0.02);
-    public static readonly ItemDefinition ChestItem = Item(57, "Сундук", Oak, 0.05);
-    public static readonly ItemDefinition BedItem = Item(58, "Кровать", Oak, 0.08);
-    public static readonly ItemDefinition RottenFleshItem = Item(59, "Гнилая плоть", BeefM, 0.02);
-    public static readonly ItemDefinition WoodHoeItem = Item(60, "Деревянная мотыга", WoodToolM, 0.03);
-    public static readonly ItemDefinition StoneHoeItem = Item(61, "Каменная мотыга", StoneToolM, 0.03);
-    public static readonly ItemDefinition IronHoeItem = Item(62, "Железная мотыга", IronToolM, 0.03);
-    public static readonly ItemDefinition DiamondHoeItem = Item(63, "Алмазная мотыга", DiamondM, 0.03);
-    public static readonly ItemDefinition WheatItem = Item(64, "Пшеница", LeavesM, 0.01);
-    public static readonly ItemDefinition WheatSeedsItem = Item(65, "Семена пшеницы", LeavesM, 0.001);
-    public static readonly ItemDefinition BoneMealItem = Item(66, "Костная мука", BoneM, 0.001);
-    public static readonly ItemDefinition SawdustItem = Item(67, "Древесные опилки", Oak, 0.001);
-    public static readonly ItemDefinition SawdustPorridgeItem = Item(68, "Каша из опилок", Oak, 0.05);
-    public static readonly ItemDefinition TotemItem = Item(69, "Тотем бессмертия", GoldM, 0.02);
-    public static readonly ItemDefinition RawMuttonItem = Item(70, "Сырая баранина", BeefM, 0.02);
-    public static readonly ItemDefinition CookedMuttonItem = Item(71, "Жареная баранина", BeefM, 0.02);
-    public static readonly ItemDefinition BowItem = Item(72, "Лук", Oak, 0.05);
-    public static readonly ItemDefinition ShieldItem = Item(73, "Щит", Oak, 0.10);
-    public static readonly ItemDefinition FlintItem = Item(74, "Кремень", Stone, 0.001);
-    public static readonly ItemDefinition FlintAndSteelItem = Item(75, "Огниво", IronM, 0.005);
-    public static readonly ItemDefinition GoldenAppleItem = Item(76, "Золотое яблоко", GoldM, 0.01);
-    public static readonly ItemDefinition SaddleItem = Item(77, "Седло", LeatherM, 0.02);
-    public static readonly ItemDefinition EnchantedBookItem = Item(78, "Зачарованная книга", LeatherM, 0.01);
-    public static readonly ItemDefinition MusicDiscItem = Item(79, "Музыкальная пластинка", DiamondM, 0.01);
-    public static readonly ItemDefinition NetherQuartzItem = Item(80, "Кварц", DiamondM, 0.001);
-    public static readonly ItemDefinition BlazeRodItem = Item(81, "Стержень ифрита", GoldM, 0.01);
-    public static readonly ItemDefinition GlowstoneDustItem = Item(82, "Светопыль", RedstoneM, 0.001);
-    public static readonly ItemDefinition TNTItem = Item(83, "Динамит", SandM, 0.5);
-    public static readonly ItemDefinition NetherrackItem = Item(84, "Адский камень", Stone, 1.0);
-    public static readonly ItemDefinition SoulSandItem = Item(85, "Песок душ", SandM, 1.0);
-    public static readonly ItemDefinition GlowstoneItem = Item(86, "Светокамень", Stone, 1.0);
-    public static readonly ItemDefinition NetherQuartzOreItem = Item(87, "Кварцевая руда", Stone, 1.0);
-    public static readonly ItemDefinition NetherBrickItem = Item(88, "Адский кирпич", Stone, 1.0);
-    public static readonly ItemDefinition MossyCobblestoneItem = Item(89, "Замшелый булыжник", Stone, 1.0);
-    public static readonly ItemDefinition ChiseledSandstoneItem = Item(90, "Резной песчаник", SandM, 1.0);
-    public static readonly ItemDefinition RailItem = Item(91, "Рельсы", IronM, 0.02);
-    public static readonly ItemDefinition DoorItem = Item(95, "Деревянная дверь", Oak, 0.5);
+    public static readonly ItemDefinition FeatherItem = Item(47, "Перо", OrganicM);
+    public static readonly ItemDefinition GunpowderItem = Item(48, "Порох", Coal);
+    public static readonly ItemDefinition StringItem = Item(49, "Нить", StringM);
+    public static readonly ItemDefinition ArrowItem = Item(50, "Стрела", WoodToolM);
+    public static readonly ItemDefinition BoneItem = Item(51, "Кость", BoneM);
+    public static readonly ItemDefinition CharcoalItem = Item(52, "Древесный уголь", Coal);
+    public static readonly ItemDefinition RawBeefItem = Item(53, "Сырая говядина", BeefM);
+    public static readonly ItemDefinition CookedBeefItem = Item(54, "Жареная говядина", BeefM);
+    public static readonly ItemDefinition LeatherItem = Item(55, "Кожа", LeatherM);
+    public static readonly ItemDefinition WhiteWoolItem = Item(56, "Шерсть", WoolM);
+    public static readonly ItemDefinition ChestItem = Item(57, "Сундук", Oak);
+    public static readonly ItemDefinition BedItem = Item(58, "Кровать", Oak, maxStack: 1);
+    public static readonly ItemDefinition RottenFleshItem = Item(59, "Гнилая плоть", BeefM);
+    public static readonly ItemDefinition WoodHoeItem = Item(60, "Деревянная мотыга", WoodToolM, maxStack: 1);
+    public static readonly ItemDefinition StoneHoeItem = Item(61, "Каменная мотыга", StoneToolM, maxStack: 1);
+    public static readonly ItemDefinition IronHoeItem = Item(62, "Железная мотыга", IronToolM, maxStack: 1);
+    public static readonly ItemDefinition DiamondHoeItem = Item(63, "Алмазная мотыга", DiamondM, maxStack: 1);
+    public static readonly ItemDefinition WheatItem = Item(64, "Пшеница", OrganicM);
+    public static readonly ItemDefinition WheatSeedsItem = Item(65, "Семена пшеницы", OrganicM);
+    public static readonly ItemDefinition BoneMealItem = Item(66, "Костная мука", BoneM);
+    public static readonly ItemDefinition SawdustItem = Item(67, "Древесные опилки", Oak);
+    public static readonly ItemDefinition SawdustPorridgeItem = Item(68, "Каша из опилок", Oak);
+    public static readonly ItemDefinition TotemItem = Item(69, "Тотем бессмертия", GoldM, maxStack: 1);
+    public static readonly ItemDefinition RawMuttonItem = Item(70, "Сырая баранина", BeefM);
+    public static readonly ItemDefinition CookedMuttonItem = Item(71, "Жареная баранина", BeefM);
+    public static readonly ItemDefinition BowItem = Item(72, "Лук", Oak, maxStack: 1);
+    public static readonly ItemDefinition ShieldItem = Item(73, "Щит", Oak, maxStack: 1);
+    public static readonly ItemDefinition FlintItem = Item(74, "Кремень", Stone);
+    public static readonly ItemDefinition FlintAndSteelItem = Item(75, "Огниво", IronM, maxStack: 1);
+    public static readonly ItemDefinition GoldenAppleItem = Item(76, "Золотое яблоко", GoldM);
+    public static readonly ItemDefinition SaddleItem = Item(77, "Седло", LeatherM, maxStack: 1);
+    public static readonly ItemDefinition EnchantedBookItem = Item(78, "Зачарованная книга", LeatherM, maxStack: 1);
+    public static readonly ItemDefinition MusicDiscItem = Item(79, "Музыкальная пластинка", DiamondM, maxStack: 1);
+    public static readonly ItemDefinition NetherQuartzItem = Item(80, "Кварц", DiamondM);
+    public static readonly ItemDefinition BlazeRodItem = Item(81, "Стержень ифрита", GoldM);
+    public static readonly ItemDefinition GlowstoneDustItem = Item(82, "Светопыль", RedstoneM);
+    public static readonly ItemDefinition TNTItem = Item(83, "Динамит", SandM);
+    public static readonly ItemDefinition NetherrackItem = Item(84, "Адский камень", Stone);
+    public static readonly ItemDefinition SoulSandItem = Item(85, "Песок душ", SandM);
+    public static readonly ItemDefinition GlowstoneItem = Item(86, "Светокамень", Stone);
+    public static readonly ItemDefinition NetherQuartzOreItem = Item(87, "Кварцевая руда", Stone);
+    public static readonly ItemDefinition NetherBrickItem = Item(88, "Адский кирпич", Stone);
+    public static readonly ItemDefinition MossyCobblestoneItem = Item(89, "Замшелый булыжник", Stone);
+    public static readonly ItemDefinition ChiseledSandstoneItem = Item(90, "Резной песчаник", SandM);
+    public static readonly ItemDefinition RailItem = Item(91, "Рельсы", IronM);
+    public static readonly ItemDefinition BucketItem = Item(92, "Ведро", IronM, maxStack: 16);
+    public static readonly ItemDefinition WaterBucketItem = Item(93, "Ведро воды", IronM, maxStack: 1);
+    public static readonly ItemDefinition LavaBucketItem = Item(94, "Ведро лавы", IronM, maxStack: 1);
+    public static readonly ItemDefinition DoorItem = Item(95, "Деревянная дверь", Oak);
+    public static readonly ItemDefinition GoldPickaxeItem = Item(96, "Золотая кирка", GoldM, maxStack: 1);
+    public static readonly ItemDefinition GoldAxeItem = Item(97, "Золотой топор", GoldM, maxStack: 1);
+    public static readonly ItemDefinition GoldSwordItem = Item(98, "Золотой меч", GoldM, maxStack: 1);
+    public static readonly ItemDefinition GoldShovelItem = Item(99, "Золотая лопата", GoldM, maxStack: 1);
+    public static readonly ItemDefinition GoldHoeItem = Item(100, "Золотая мотыга", GoldM, maxStack: 1);
+
+    // Энд: предметы
+    public static readonly ItemDefinition EnderPearlItem = Item(101, "Жемчуг Эндера", OrganicM);
+    public static readonly ItemDefinition EyeOfEnderItem = Item(102, "Око Эндера", OrganicM);
+    public static readonly ItemDefinition BlazePowderItem = Item(103, "Порох ифрита", Coal);
+    public static readonly ItemDefinition ChorusFruitItem = Item(104, "Плод хоруса", OrganicM);
+    public static readonly ItemDefinition EndSlimeItem = Item(105, "Эндер-слизь", ObsidianM, maxStack: 1);
+    public static readonly ItemDefinition EndStoneItem = Item(106, "Эндовый камень", Stone);
+    public static readonly ItemDefinition EndPortalFrameItem = Item(107, "Рамка портала Энда", ObsidianM);
+    public static readonly ItemDefinition EnderCrystalItem = Item(108, "Эндер-кристалл", GlassM);
 
     // ── Блоки ─────────────────────────────────────────────────────────────────
     public static readonly BlockType BGrass = Block(1, "Трава", DirtM, drop: DirtItem);
@@ -198,7 +229,7 @@ public static class GameData {
         .With(b => { b.IsSolid = true; b.IsOpaque = false; });
     public static readonly BlockType BPlanks = Block(6, "Доски", Oak, drop: PlankItem, flammable: true, burnTime: 7f);
     public static readonly BlockType BCoalOre = Block(7, "Угольная руда", Stone, drop: CoalItem);
-    public static readonly BlockType BTorch = Block(8, "Факел", Oak, drop: TorchItem, light: 11)
+    public static readonly BlockType BTorch = Block(8, "Факел", Oak, drop: TorchItem, light: 14)
         .With(b => { b.IsSolid = false; b.IsOpaque = false; });
     public static readonly BlockType BBedrock = Block(11, "Коренная порода", Stone, drop: null).With(b => b.IsUnbreakable = true);
     public static readonly BlockType BIronOre = Block(12, "Железная руда", Stone, drop: IronOreItem);
@@ -209,13 +240,13 @@ public static class GameData {
     public static readonly BlockType BCobblestone = Block(15, "Булыжник", Stone, drop: CobblestoneItem);
     public static readonly BlockType BSand = Block(16, "Песок", SandM, drop: SandItem);
     public static readonly BlockType BGravel = Block(17, "Гравий", Stone, drop: GravelItem);
-    public static readonly BlockType BGlass = Block(18, "Стекло", Stone, drop: null).With(b => { b.IsOpaque = false; });
-    public static readonly BlockType BWater = Block(19, "Вода", DirtM, drop: null).With(b => { b.IsSolid = false; b.IsOpaque = false; });
-    public static readonly BlockType BLava = Block(20, "Лава", Stone, drop: null, light: 15).With(b => { b.IsSolid = false; b.IsOpaque = true; });
+    public static readonly BlockType BGlass = Block(18, "Стекло", GlassM, drop: null).With(b => { b.IsOpaque = false; });
+    public static readonly BlockType BWater = Block(19, "Вода", WaterM, drop: null).With(b => { b.IsSolid = false; b.IsOpaque = false; });
+    public static readonly BlockType BLava = Block(20, "Лава", LavaM, drop: null, light: 15).With(b => { b.IsSolid = false; b.IsOpaque = true; });
     public static readonly BlockType BGoldOre = Block(21, "Золотая руда", Stone, drop: GoldOreItem);
     public static readonly BlockType BDiamondOre = Block(22, "Алмазная руда", Stone, drop: DiamondItem);
     public static readonly BlockType BRedstoneOre = Block(23, "Редстоун руда", Stone, drop: RedstoneItem);
-    public static readonly BlockType BObsidian = Block(24, "Обсидиан", DiamondM, drop: ObsidianItem);
+    public static readonly BlockType BObsidian = Block(24, "Обсидиан", ObsidianM, drop: ObsidianItem);
     public static readonly BlockType BChest = Block(25, "Сундук", Oak, drop: ChestItem, flammable: true, burnTime: 8f)
         .With(b => { b.IsOpaque = false; });
     public static readonly BlockType BBed = Block(26, "Кровать", Oak, drop: BedItem, flammable: true, burnTime: 6f)
@@ -224,9 +255,9 @@ public static class GameData {
         .With(b => { b.IsOpaque = false; });
     public static readonly BlockType BFarmland = Block(28, "Грядка", DirtM, drop: DirtItem)
         .With(b => { b.IsOpaque = false; });
-    public static readonly BlockType BWheatCrop = Block(29, "Посевы пшеницы", LeavesM, drop: WheatSeedsItem)
+    public static readonly BlockType BWheatCrop = Block(29, "Посевы пшеницы", OrganicM, drop: WheatSeedsItem)
         .With(b => { b.IsSolid = false; b.IsOpaque = false; });
-    public static readonly BlockType BTallGrass = Block(30, "Трава", LeavesM, drop: WheatSeedsItem)
+    public static readonly BlockType BTallGrass = Block(30, "Трава", OrganicM, drop: WheatSeedsItem)
         .With(b => { b.IsSolid = false; b.IsOpaque = false; });
     public static readonly BlockType BMossyCobblestone = Block(31, "Замшелый булыжник", Stone, drop: MossyCobblestoneItem);
     public static readonly BlockType BMobSpawner = Block(32, "Спавнер монстров", Stone, drop: null)
@@ -245,25 +276,65 @@ public static class GameData {
         .With(b => { b.DropItemCount = 3; });
     public static readonly BlockType BNetherQuartzOre = Block(41, "Кварцевая руда", Stone, drop: NetherQuartzItem);
     public static readonly BlockType BNetherBrick = Block(42, "Адский кирпич", Stone, drop: NetherBrickItem);
-    public static readonly BlockType BNetherPortal = Block(43, "Портал в Нижний мир", DiamondM, drop: null, light: 11)
+    public static readonly BlockType BNetherPortal = Block(43, "Портал в Нижний мир", ObsidianM, drop: null, light: 11)
         .With(b => { b.IsSolid = false; b.IsOpaque = false; b.IsUnbreakable = true; });
     public static readonly BlockType BDoorLower = Block(44, "Деревянная дверь", Oak, drop: DoorItem, flammable: true, burnTime: 6f)
         .With(b => { b.IsOpaque = false; });
     public static readonly BlockType BDoorUpper = Block(45, "Деревянная дверь (верх)", Oak, drop: null, flammable: true, burnTime: 6f)
         .With(b => { b.IsOpaque = false; });
 
+    // Энд: блоки
+    public static readonly BlockType BEndStone = Block(46, "Эндовый камень", Stone, drop: EndStoneItem);
+    public static readonly BlockType BEndPortalFrame = Block(47, "Рамка портала Энда", ObsidianM, drop: EndPortalFrameItem)
+        .With(b => { b.IsOpaque = false; });
+    public static readonly BlockType BEndPortal = Block(48, "Портал в Энд", ObsidianM, drop: null, light: 15)
+        .With(b => { b.IsSolid = false; b.IsOpaque = false; b.IsUnbreakable = true; });
+    public static readonly BlockType BObsidianPillar = Block(49, "Обсидиановая колонна", ObsidianM, drop: ObsidianItem);
+    public static readonly BlockType BEnderCrystal = Block(50, "Эндер-кристалл", GlassM, drop: EnderCrystalItem)
+        .With(b => { b.IsOpaque = false; });
+    public static readonly BlockType BChorusPlant = Block(51, "Растение хоруса", Oak, drop: ChorusFruitItem, flammable: true, burnTime: 5f);
+    public static readonly BlockType BChorusFlower = Block(52, "Цветок хоруса", Oak, drop: ChorusFruitItem, flammable: true, burnTime: 3f)
+        .With(b => { b.IsOpaque = false; });
+
     public static readonly BlockType[] Blocks =
         { BGrass, BDirt, BStone, BLog, BLeaves, BPlanks, BCoalOre, BTorch, BBedrock, BIronOre, BWorkbench, BFurnace,
           BCobblestone, BSand, BGravel, BGlass, BWater, BLava, BGoldOre, BDiamondOre, BRedstoneOre, BObsidian, BChest, BBed, BBedHead,
           BFarmland, BWheatCrop, BTallGrass, BMossyCobblestone, BMobSpawner, BWeb, BRail, BPressurePlate, BTNT, BChiseledSandstone,
-          BNetherrack, BSoulSand, BGlowstone, BNetherQuartzOre, BNetherBrick, BNetherPortal, BDoorLower, BDoorUpper };
+          BNetherrack, BSoulSand, BGlowstone, BNetherQuartzOre, BNetherBrick, BNetherPortal, BDoorLower, BDoorUpper,
+          BEndStone, BEndPortalFrame, BEndPortal, BObsidianPillar, BEnderCrystal, BChorusPlant, BChorusFlower };
 
 
     private static readonly Dictionary<ushort, BlockType> _byId = Blocks.ToDictionary(b => b.Id);
-    private static readonly Dictionary<ushort, ushort> _blockByItem =
-        Blocks.Where(b => b.DropItemId != 0 && b.Id != BWheatCrop.Id && b.Id != BTallGrass.Id)
-              .GroupBy(b => b.DropItemId)
-              .ToDictionary(g => g.Key, g => g.First().Id); // grass/dirt share the dirt item
+    private static readonly Dictionary<ushort, ushort> _blockByItem = new() {
+        { DirtItem.Id, BDirt.Id },
+        { StoneItem.Id, BStone.Id },
+        { LogItem.Id, BLog.Id },
+        { PlankItem.Id, BPlanks.Id },
+        { TorchItem.Id, BTorch.Id },
+        { CoalOreItem.Id, BCoalOre.Id },
+        { IronOreItem.Id, BIronOre.Id },
+        { GoldOreItem.Id, BGoldOre.Id },
+        { DiamondOreItem.Id, BDiamondOre.Id },
+        { WorkbenchItem.Id, BWorkbench.Id },
+        { FurnaceItem.Id, BFurnace.Id },
+        { CobblestoneItem.Id, BCobblestone.Id },
+        { SandItem.Id, BSand.Id },
+        { GravelItem.Id, BGravel.Id },
+        { GlassItem.Id, BGlass.Id },
+        { ObsidianItem.Id, BObsidian.Id },
+        { ChestItem.Id, BChest.Id },
+        { BedItem.Id, BBed.Id },
+        { MossyCobblestoneItem.Id, BMossyCobblestone.Id },
+        { TNTItem.Id, BTNT.Id },
+        { ChiseledSandstoneItem.Id, BChiseledSandstone.Id },
+        { NetherrackItem.Id, BNetherrack.Id },
+        { SoulSandItem.Id, BSoulSand.Id },
+        { GlowstoneItem.Id, BGlowstone.Id },
+        { NetherQuartzOreItem.Id, BNetherQuartzOre.Id },
+        { NetherBrickItem.Id, BNetherBrick.Id },
+        { DoorItem.Id, BDoorLower.Id },
+        { RailItem.Id, BRail.Id },
+    };
 
     /// <summary>Возвращает блок по его Id.</summary>
     public static BlockType GetBlock(ushort id) => _byId.TryGetValue(id, out var b) ? b : throw new KeyNotFoundException($"Блок #{id}");
@@ -290,10 +361,10 @@ public static class GameData {
         { RawMuttonItem.Id, 2f },    // Сырая баранина: +2 HP
         { CookedMuttonItem.Id, 6f }, // Жареная баранина: +6 HP
         { GoldenAppleItem.Id, 10f }, // Золотое яблоко: +10 HP
+        { ChorusFruitItem.Id, 4f },  // Плод хоруса: +4 HP (и телепорт)
     };
 
-    // ── Реестр предметов + менеджер материи (консервация) ────────────────────
-    public static readonly MaterialVolumeManager Materials = new();
+    // ── Реестр предметов ───────────────────────────────────────────────────────
 
     public static readonly Dictionary<ushort, ItemDefinition> Items = new();
     private static ulong _nextInstanceId;
@@ -309,34 +380,39 @@ public static class GameData {
     public static readonly Dictionary<ushort, (ItemDefinition Output, int Count)> SmeltingRecipes = new();
 
     // ── Тир инструментов ──────────────────────────────────────────────────────
-    /// <summary>Уровень инструмента: 0=руки, 1=дерево, 2=камень, 3=железо, 5=алмаз.</summary>
+    /// <summary>Уровень инструмента: 0=руки, 1=дерево, 2=камень, 3=железо, 4=золото, 5=алмаз.</summary>
     public static int GetToolTier(ushort itemId) {
         if (itemId == WoodPickaxeItem.Id || itemId == WoodAxeItem.Id || itemId == WoodShovelItem.Id || itemId == WoodSwordItem.Id || itemId == WoodHoeItem.Id) return 1;
         if (itemId == StonePickaxeItem.Id || itemId == StoneAxeItem.Id || itemId == StoneShovelItem.Id || itemId == StoneSwordItem.Id || itemId == StoneHoeItem.Id) return 2;
         if (itemId == IronPickaxeItem.Id || itemId == IronAxeItem.Id || itemId == IronShovelItem.Id || itemId == IronSwordItem.Id || itemId == IronHoeItem.Id) return 3;
+        if (itemId == GoldPickaxeItem.Id || itemId == GoldAxeItem.Id || itemId == GoldShovelItem.Id || itemId == GoldSwordItem.Id || itemId == GoldHoeItem.Id) return 4;
         if (itemId == DiamondPickaxeItem.Id || itemId == DiamondAxeItem.Id || itemId == DiamondShovelItem.Id || itemId == DiamondSwordItem.Id || itemId == DiamondHoeItem.Id) return 5;
         return 0;
     }
 
     public static int GetMaxToolDurability(ushort itemId) {
-        if (itemId == WoodPickaxeItem.Id || itemId == WoodAxeItem.Id || itemId == WoodShovelItem.Id || itemId == WoodSwordItem.Id || itemId == WoodHoeItem.Id) return 60;
-        if (itemId == StonePickaxeItem.Id || itemId == StoneAxeItem.Id || itemId == StoneShovelItem.Id || itemId == StoneSwordItem.Id || itemId == StoneHoeItem.Id) return 132;
-        if (itemId == IronPickaxeItem.Id || itemId == IronAxeItem.Id || itemId == IronShovelItem.Id || itemId == IronSwordItem.Id || itemId == IronHoeItem.Id) return 251;
-        if (itemId == DiamondPickaxeItem.Id || itemId == DiamondAxeItem.Id || itemId == DiamondShovelItem.Id || itemId == DiamondSwordItem.Id || itemId == DiamondHoeItem.Id) return 1562;
-        return 60;
+        if (itemId == WoodPickaxeItem.Id || itemId == WoodAxeItem.Id || itemId == WoodShovelItem.Id || itemId == WoodSwordItem.Id || itemId == WoodHoeItem.Id) return 59;
+        if (itemId == StonePickaxeItem.Id || itemId == StoneAxeItem.Id || itemId == StoneShovelItem.Id || itemId == StoneSwordItem.Id || itemId == StoneHoeItem.Id) return 131;
+        if (itemId == IronPickaxeItem.Id || itemId == IronAxeItem.Id || itemId == IronShovelItem.Id || itemId == IronSwordItem.Id || itemId == IronHoeItem.Id) return 250;
+        if (itemId == GoldPickaxeItem.Id || itemId == GoldAxeItem.Id || itemId == GoldShovelItem.Id || itemId == GoldSwordItem.Id || itemId == GoldHoeItem.Id) return 32;
+        if (itemId == DiamondPickaxeItem.Id || itemId == DiamondAxeItem.Id || itemId == DiamondShovelItem.Id || itemId == DiamondSwordItem.Id || itemId == DiamondHoeItem.Id) return 1561;
+        return 59;
     }
 
     public static bool RequiresPickaxe(ushort blockId) =>
         blockId == BStone.Id || blockId == BCobblestone.Id || blockId == BCoalOre.Id ||
         blockId == BIronOre.Id || blockId == BGoldOre.Id || blockId == BDiamondOre.Id ||
-        blockId == BRedstoneOre.Id || blockId == BFurnace.Id || blockId == BObsidian.Id;
+        blockId == BRedstoneOre.Id || blockId == BFurnace.Id || blockId == BObsidian.Id ||
+        blockId == BMossyCobblestone.Id || blockId == BNetherrack.Id ||
+        blockId == BNetherQuartzOre.Id || blockId == BNetherBrick.Id ||
+        blockId == BEndStone.Id || blockId == BEndPortalFrame.Id || blockId == BObsidianPillar.Id;
 
     /// <summary>Минимальный тир инструмента для добычи блока. 0 = можно голыми руками.</summary>
     public static int GetRequiredTier(ushort blockId) {
-        if (blockId == BStone.Id || blockId == BCoalOre.Id || blockId == BFurnace.Id || blockId == BCobblestone.Id) return 1;
+        if (blockId == BStone.Id || blockId == BCoalOre.Id || blockId == BFurnace.Id || blockId == BCobblestone.Id || blockId == BMossyCobblestone.Id || blockId == BNetherrack.Id || blockId == BNetherQuartzOre.Id || blockId == BNetherBrick.Id || blockId == BEndStone.Id || blockId == BEndPortalFrame.Id) return 1;
         if (blockId == BIronOre.Id) return 2;
         if (blockId == BGoldOre.Id || blockId == BDiamondOre.Id || blockId == BRedstoneOre.Id) return 3;
-        if (blockId == BObsidian.Id) return 5; // Алмазная кирка
+        if (blockId == BObsidian.Id || blockId == BObsidianPillar.Id) return 5; // Алмазная кирка
         return 0;
     }
 
@@ -350,19 +426,19 @@ public static class GameData {
     }
 
     public static bool IsPickaxe(ushort itemId) =>
-        itemId == WoodPickaxeItem.Id || itemId == StonePickaxeItem.Id || itemId == IronPickaxeItem.Id || itemId == DiamondPickaxeItem.Id;
+        itemId == WoodPickaxeItem.Id || itemId == StonePickaxeItem.Id || itemId == IronPickaxeItem.Id || itemId == GoldPickaxeItem.Id || itemId == DiamondPickaxeItem.Id;
 
     public static bool IsAxe(ushort itemId) =>
-        itemId == WoodAxeItem.Id || itemId == StoneAxeItem.Id || itemId == IronAxeItem.Id || itemId == DiamondAxeItem.Id;
+        itemId == WoodAxeItem.Id || itemId == StoneAxeItem.Id || itemId == IronAxeItem.Id || itemId == GoldAxeItem.Id || itemId == DiamondAxeItem.Id;
 
     public static bool IsShovel(ushort itemId) =>
-        itemId == WoodShovelItem.Id || itemId == StoneShovelItem.Id || itemId == IronShovelItem.Id || itemId == DiamondShovelItem.Id;
+        itemId == WoodShovelItem.Id || itemId == StoneShovelItem.Id || itemId == IronShovelItem.Id || itemId == GoldShovelItem.Id || itemId == DiamondShovelItem.Id;
 
     public static bool IsSword(ushort itemId) =>
-        itemId == WoodSwordItem.Id || itemId == StoneSwordItem.Id || itemId == IronSwordItem.Id || itemId == DiamondSwordItem.Id;
+        itemId == WoodSwordItem.Id || itemId == StoneSwordItem.Id || itemId == IronSwordItem.Id || itemId == GoldSwordItem.Id || itemId == DiamondSwordItem.Id;
 
     public static bool IsHoe(ushort itemId) =>
-        itemId == WoodHoeItem.Id || itemId == StoneHoeItem.Id || itemId == IronHoeItem.Id || itemId == DiamondHoeItem.Id;
+        itemId == WoodHoeItem.Id || itemId == StoneHoeItem.Id || itemId == IronHoeItem.Id || itemId == GoldHoeItem.Id || itemId == DiamondHoeItem.Id;
 
     public static bool IsDoor(ushort blockId) =>
         blockId == BDoorLower.Id || blockId == BDoorUpper.Id;
@@ -387,37 +463,39 @@ public static class GameData {
         if (itemId == DiamondSwordItem.Id) return 7f;   // Алмазный меч: 7 HP (3.5 сердца)
         if (itemId == IronSwordItem.Id) return 6f;      // Железный меч: 6 HP (3 сердца)
         if (itemId == StoneSwordItem.Id) return 5f;     // Каменный меч: 5 HP (2.5 сердца)
-        if (itemId == WoodSwordItem.Id) return 4f;      // Деревянный меч: 4 HP (2 сердца)
+        if (itemId == WoodSwordItem.Id || itemId == GoldSwordItem.Id) return 4f; // Деревянный/Золотой меч: 4 HP (2 сердца)
         
-        if (itemId == DiamondAxeItem.Id) return 6f;     // Алмазный топор: 6 HP
-        if (itemId == IronAxeItem.Id) return 5f;        // Железный топор: 5 HP
-        if (itemId == StoneAxeItem.Id) return 4f;       // Каменный топор: 4 HP
-        if (itemId == WoodAxeItem.Id) return 3f;        // Деревянный топор: 3 HP
+        if (itemId == DiamondAxeItem.Id) return 9f;     // Алмазный топор: 9 HP (4.5 сердца)
+        if (itemId == IronAxeItem.Id) return 9f;        // Железный топор: 9 HP (4.5 сердца)
+        if (itemId == StoneAxeItem.Id) return 9f;       // Каменный топор: 9 HP (4.5 сердца)
+        if (itemId == WoodAxeItem.Id || itemId == GoldAxeItem.Id) return 7f; // Деревянный/Золотой топор: 7 HP (3.5 сердца)
 
         if (itemId == DiamondPickaxeItem.Id) return 5f; // Алмазная кирка: 5 HP
         if (itemId == IronPickaxeItem.Id) return 4f;    // Железная кирка: 4 HP
         if (itemId == StonePickaxeItem.Id) return 3f;   // Каменная кирка: 3 HP
-        if (itemId == WoodPickaxeItem.Id) return 2f;    // Деревянная кирка: 2 HP
+        if (itemId == WoodPickaxeItem.Id || itemId == GoldPickaxeItem.Id) return 2f; // Деревянная/Золотая кирка: 2 HP
 
-        if (itemId == DiamondShovelItem.Id) return 4f;  // Алмазная лопата: 4 HP
-        if (itemId == IronShovelItem.Id) return 3f;     // Железная лопата: 3 HP
-        if (itemId == StoneShovelItem.Id) return 2f;    // Каменная лопата: 2 HP
-        if (itemId == WoodShovelItem.Id) return 1f;     // Деревянная лопата: 1 HP
+        if (itemId == DiamondShovelItem.Id) return 5.5f;// Алмазная лопата: 5.5 HP
+        if (itemId == IronShovelItem.Id) return 4.5f;   // Железная лопата: 4.5 HP
+        if (itemId == StoneShovelItem.Id) return 3.5f;  // Каменная лопата: 3.5 HP
+        if (itemId == WoodShovelItem.Id || itemId == GoldShovelItem.Id) return 2.5f; // Деревянная/Золотая лопата: 2.5 HP
 
         return 1f; // Рука / любой другой предмет: 1 HP (0.5 сердца)
     }
 
     /// <summary>
-    /// Длительность перезарядки атаки оружия (Minecraft 1.9+):
-    /// Мечи ~0.625с (1.6 ск/с), Топоры ~1.0с (1.0 ск/с), Кирки ~0.83с, Рука/Мотыга ~0.35с
+    /// Длительность перезарядки атаки оружия:
+    /// Мечи ~0.625с (1.6 ск/с), Топоры (Дерево/Камень/Золото 1.25с, Железо 1.11с, Алмаз 1.0с), Кирки ~0.83с, Рука/Мотыга 0.25с (4.0 ск/с)
     /// </summary>
     public static float GetWeaponCooldown(ushort itemId) {
         if (IsSword(itemId)) return 0.625f;
-        if (IsAxe(itemId)) return 1.0f;
+        if (itemId == DiamondAxeItem.Id) return 1.0f;
+        if (itemId == IronAxeItem.Id) return 1.11f;
+        if (itemId == StoneAxeItem.Id || itemId == WoodAxeItem.Id || itemId == GoldAxeItem.Id) return 1.25f;
         if (IsPickaxe(itemId)) return 0.833f;
         if (IsShovel(itemId)) return 1.0f;
-        if (IsHoe(itemId)) return 0.35f;
-        return 0.35f;
+        if (IsHoe(itemId)) return 0.25f;
+        return 0.25f;
     }
 
     // ── Добыча блоков ─────────────────────────────────────────────────────────
@@ -431,7 +509,9 @@ public static class GameData {
         if (b.Id == BCoalOre.Id) return 3.0f;
         if (b.Id == BIronOre.Id || b.Id == BGoldOre.Id) return 3.0f;
         if (b.Id == BDiamondOre.Id || b.Id == BRedstoneOre.Id) return 3.0f;
-        if (b.Id == BObsidian.Id) return 25f;
+        if (b.Id == BObsidian.Id || b.Id == BObsidianPillar.Id) return 50.0f;
+        if (b.Id == BEndStone.Id || b.Id == BEndPortalFrame.Id) return 3.0f;
+        if (b.Id == BEnderCrystal.Id) return 0.5f;
         if (b.Id == BCobblestone.Id) return 2.0f;
         if (b.Id == BStone.Id) return 1.5f;
         if (b.Id == BSand.Id || b.Id == BGravel.Id) return 0.6f;
@@ -456,13 +536,13 @@ public static class GameData {
         bool isSoilBlock = b.Material.Category == MaterialCategory.Soil || b.Id == BDirt.Id || b.Id == BGrass.Id || b.Id == BSand.Id || b.Id == BGravel.Id;
 
         if (IsPickaxe(toolId) && isStoneBlock) {
-            return tier switch { 1 => 2f, 2 => 4f, 3 => 6f, 5 => 8f, _ => 1f };
+            return tier switch { 1 => 2f, 2 => 4f, 3 => 6f, 4 => 12f, 5 => 8f, _ => 1f };
         }
         if (IsAxe(toolId) && isWoodBlock) {
-            return tier switch { 1 => 2f, 2 => 4f, 3 => 6f, 5 => 8f, _ => 1f };
+            return tier switch { 1 => 2f, 2 => 4f, 3 => 6f, 4 => 12f, 5 => 8f, _ => 1f };
         }
         if (IsShovel(toolId) && isSoilBlock) {
-            return tier switch { 1 => 2f, 2 => 4f, 3 => 6f, 5 => 8f, _ => 1f };
+            return tier switch { 1 => 2f, 2 => 4f, 3 => 6f, 4 => 12f, 5 => 8f, _ => 1f };
         }
         if (IsSword(toolId) && b.Id == BLeaves.Id) {
             return 3f;
@@ -491,28 +571,43 @@ public static class GameData {
     public static string MiningRequirementHint(BlockType b) {
         int tier = GetRequiredTier(b.Id);
         return tier switch {
-            1 => $"Для «{b.Name}» нужна кирка (деревянная или лучше)",
-            2 => $"Для «{b.Name}» нужна каменная кирка или лучше",
-            3 => $"Для «{b.Name}» нужна железная кирка или лучше",
-            5 => $"Для «{b.Name}» нужна алмазная кирка",
-            _ => $"«{b.Name}» добывается любым инструментом или руками",
-        };
+            1 => $"Для «{b.Name}» нужна кирка (деревянная или лучше)", 2 => $"Для «{b.Name}» нужна каменная кирка или лучше", 3 => $"Для «{b.Name}» нужна железная кирка или лучше", 5 => $"Для «{b.Name}» нужна алмазная кирка", _ => $"«{b.Name}» добывается любым инструментом или руками", };
     }
 
     static GameData() {
         _blockByItem[DirtItem.Id] = BDirt.Id;
+        _blockByItem[StoneItem.Id] = BStone.Id;
+        _blockByItem[LogItem.Id] = BLog.Id;
+        _blockByItem[PlankItem.Id] = BPlanks.Id;
+        _blockByItem[CoalOreItem.Id] = BCoalOre.Id;
+        _blockByItem[TorchItem.Id] = BTorch.Id;
+        _blockByItem[IronOreItem.Id] = BIronOre.Id;
+        _blockByItem[GoldOreItem.Id] = BGoldOre.Id;
+        _blockByItem[DiamondOreItem.Id] = BDiamondOre.Id;
         _blockByItem[SandItem.Id] = BSand.Id;
         _blockByItem[GravelItem.Id] = BGravel.Id;
         _blockByItem[CobblestoneItem.Id] = BCobblestone.Id;
         _blockByItem[GlassItem.Id] = BGlass.Id;
         _blockByItem[ObsidianItem.Id] = BObsidian.Id;
+        _blockByItem[WorkbenchItem.Id] = BWorkbench.Id;
+        _blockByItem[FurnaceItem.Id] = BFurnace.Id;
         _blockByItem[ChestItem.Id] = BChest.Id;
         _blockByItem[BedItem.Id] = BBed.Id;
+        _blockByItem[TNTItem.Id] = BTNT.Id;
+        _blockByItem[NetherrackItem.Id] = BNetherrack.Id;
+        _blockByItem[SoulSandItem.Id] = BSoulSand.Id;
+        _blockByItem[GlowstoneItem.Id] = BGlowstone.Id;
+        _blockByItem[NetherQuartzOreItem.Id] = BNetherQuartzOre.Id;
+        _blockByItem[NetherBrickItem.Id] = BNetherBrick.Id;
+        _blockByItem[MossyCobblestoneItem.Id] = BMossyCobblestone.Id;
+        _blockByItem[ChiseledSandstoneItem.Id] = BChiseledSandstone.Id;
+        _blockByItem[RailItem.Id] = BRail.Id;
+        _blockByItem[DoorItem.Id] = BDoorLower.Id;
+        _blockByItem[EndStoneItem.Id] = BEndStone.Id;
+        _blockByItem[EndPortalFrameItem.Id] = BEndPortalFrame.Id;
+        _blockByItem[EnderCrystalItem.Id] = BEnderCrystal.Id;
+        _blockByItem[ChorusFruitItem.Id] = BChorusPlant.Id;
 
-        foreach (var m in new[] { Oak, Stone, DirtM, Coal, AppleM, Pork, LeavesM,
-                                   IronM, StoneToolM, IronToolM, WoodToolM, DiamondM, GoldM, RedstoneM, SandM, StringM, BoneM,
-                                   BeefM, LeatherM, WoolM })
-            Materials.RegisterMaterial(m);
         foreach (var item in new[] {
             DirtItem, StoneItem, LogItem, PlankItem, StickItem, CoalItem,
             CoalOreItem, TorchItem, AppleItem, RawPorkItem, CookedPorkItem,
@@ -528,20 +623,22 @@ public static class GameData {
             FeatherItem, GunpowderItem, StringItem, ArrowItem, BoneItem,
             CharcoalItem, RawBeefItem, CookedBeefItem, LeatherItem, WhiteWoolItem,
             ChestItem, BedItem, RottenFleshItem,
-            WoodHoeItem, StoneHoeItem, IronHoeItem, DiamondHoeItem,
+            WoodHoeItem, StoneHoeItem, IronHoeItem, GoldHoeItem, DiamondHoeItem,
+            GoldPickaxeItem, GoldAxeItem, GoldSwordItem, GoldShovelItem,
             WheatItem, WheatSeedsItem,
             BoneMealItem, SawdustItem, SawdustPorridgeItem, TotemItem,
-            RawMuttonItem, CookedMuttonItem, DoorItem
-        }) {
+            RawMuttonItem, CookedMuttonItem, BowItem, ShieldItem,
+            FlintItem, FlintAndSteelItem, GoldenAppleItem, SaddleItem,
+            EnchantedBookItem, MusicDiscItem, NetherQuartzItem, BlazeRodItem,
+            GlowstoneDustItem, TNTItem, NetherrackItem, SoulSandItem,
+            GlowstoneItem, NetherQuartzOreItem, NetherBrickItem, MossyCobblestoneItem,
+            ChiseledSandstoneItem, RailItem, BucketItem, WaterBucketItem, LavaBucketItem, DoorItem,
+            EnderPearlItem, EyeOfEnderItem, BlazePowderItem, ChorusFruitItem, EndSlimeItem,
+            EndStoneItem, EndPortalFrameItem, EnderCrystalItem }) {
             Items.Add(item.Id, item);
         }
 
 
-        MaterialVolumeManager.EnableConservationChecks = false;
-
-        // Старые list-based рецепты (для совместимости с сохранениями)
-        Register("cook.pork", "Жарка свинины", 4f,
-            new[] { new ItemPart(RawPorkItem, 1) }, new ItemPart(CookedPorkItem, 1));
 
         InitShapeRecipes();
         InitSmeltingRecipes();
@@ -624,6 +721,11 @@ public static class GameData {
     }
 
     private static void InitShapeRecipes() {
+        AddShapeRecipe(new ItemDefinition?[] {
+            IronIngotItem, null, IronIngotItem,
+            null, IronIngotItem, null,
+            null, null, null
+        }, BucketItem, 1);
         // Бревно → доски (1 бревно в любой ячейке)
         AddShapeRecipe(new ItemDefinition?[] { LogItem,null,null, null,null,null, null,null,null }, PlankItem, 4);
 
@@ -641,13 +743,12 @@ public static class GameData {
 
         // Печка: 8 булыжников вокруг пустого центра
         AddShapeRecipe(new ItemDefinition?[] { CobblestoneItem,CobblestoneItem,CobblestoneItem, CobblestoneItem,null,CobblestoneItem, CobblestoneItem,CobblestoneItem,CobblestoneItem }, FurnaceItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { StoneItem,StoneItem,StoneItem, StoneItem,null,StoneItem, StoneItem,StoneItem,StoneItem }, FurnaceItem, 1);
 
         // Кирки
         AddShapeRecipe(new ItemDefinition?[] { PlankItem,PlankItem,PlankItem, null,StickItem,null, null,StickItem,null }, WoodPickaxeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { CobblestoneItem,CobblestoneItem,CobblestoneItem, null,StickItem,null, null,StickItem,null }, StonePickaxeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { StoneItem,StoneItem,StoneItem, null,StickItem,null, null,StickItem,null }, StonePickaxeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { IronIngotItem,IronIngotItem,IronIngotItem, null,StickItem,null, null,StickItem,null }, IronPickaxeItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { GoldIngotItem,GoldIngotItem,GoldIngotItem, null,StickItem,null, null,StickItem,null }, GoldPickaxeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { DiamondItem,DiamondItem,DiamondItem, null,StickItem,null, null,StickItem,null }, DiamondPickaxeItem, 1);
 
         // Топоры (левые и правые)
@@ -655,24 +756,25 @@ public static class GameData {
         AddShapeRecipe(new ItemDefinition?[] { null,PlankItem,PlankItem, null,StickItem,PlankItem, null,StickItem,null }, WoodAxeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { CobblestoneItem,CobblestoneItem,null, CobblestoneItem,StickItem,null, null,StickItem,null }, StoneAxeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { null,CobblestoneItem,CobblestoneItem, null,StickItem,CobblestoneItem, null,StickItem,null }, StoneAxeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { StoneItem,StoneItem,null, StoneItem,StickItem,null, null,StickItem,null }, StoneAxeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { IronIngotItem,IronIngotItem,null, IronIngotItem,StickItem,null, null,StickItem,null }, IronAxeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { null,IronIngotItem,IronIngotItem, null,StickItem,IronIngotItem, null,StickItem,null }, IronAxeItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { GoldIngotItem,GoldIngotItem,null, GoldIngotItem,StickItem,null, null,StickItem,null }, GoldAxeItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { null,GoldIngotItem,GoldIngotItem, null,StickItem,GoldIngotItem, null,StickItem,null }, GoldAxeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { DiamondItem,DiamondItem,null, DiamondItem,StickItem,null, null,StickItem,null }, DiamondAxeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { null,DiamondItem,DiamondItem, null,StickItem,DiamondItem, null,StickItem,null }, DiamondAxeItem, 1);
 
         // Мечи
         AddShapeRecipe(new ItemDefinition?[] { null,PlankItem,null, null,PlankItem,null, null,StickItem,null }, WoodSwordItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { null,CobblestoneItem,null, null,CobblestoneItem,null, null,StickItem,null }, StoneSwordItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,StoneItem,null, null,StoneItem,null, null,StickItem,null }, StoneSwordItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { null,IronIngotItem,null, null,IronIngotItem,null, null,StickItem,null }, IronSwordItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { null,GoldIngotItem,null, null,GoldIngotItem,null, null,StickItem,null }, GoldSwordItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { null,DiamondItem,null, null,DiamondItem,null, null,StickItem,null }, DiamondSwordItem, 1);
 
         // Лопаты
         AddShapeRecipe(new ItemDefinition?[] { null,PlankItem,null, null,StickItem,null, null,StickItem,null }, WoodShovelItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { null,CobblestoneItem,null, null,StickItem,null, null,StickItem,null }, StoneShovelItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,StoneItem,null, null,StickItem,null, null,StickItem,null }, StoneShovelItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { null,IronIngotItem,null, null,StickItem,null, null,StickItem,null }, IronShovelItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { null,GoldIngotItem,null, null,StickItem,null, null,StickItem,null }, GoldShovelItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { null,DiamondItem,null, null,StickItem,null, null,StickItem,null }, DiamondShovelItem, 1);
 
         // Факел из древесного угля
@@ -681,17 +783,16 @@ public static class GameData {
 
         // Шерсть из нитей (2×2 нити)
         AddShapeRecipe(new ItemDefinition?[] { StringItem,StringItem,null, StringItem,StringItem,null, null,null,null }, WhiteWoolItem, 1);
-        // Нити из шерсти (1 шерсть -> 4 нити)
-        AddShapeRecipe(new ItemDefinition?[] { WhiteWoolItem,null,null, null,null,null, null,null,null }, StringItem, 4);
 
         // Мотыги
         AddShapeRecipe(new ItemDefinition?[] { PlankItem,PlankItem,null, null,StickItem,null, null,StickItem,null }, WoodHoeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { null,PlankItem,PlankItem, null,StickItem,null, null,StickItem,null }, WoodHoeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { CobblestoneItem,CobblestoneItem,null, null,StickItem,null, null,StickItem,null }, StoneHoeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { null,CobblestoneItem,CobblestoneItem, null,StickItem,null, null,StickItem,null }, StoneHoeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { StoneItem,StoneItem,null, null,StickItem,null, null,StickItem,null }, StoneHoeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { IronIngotItem,IronIngotItem,null, null,StickItem,null, null,StickItem,null }, IronHoeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { null,IronIngotItem,IronIngotItem, null,StickItem,null, null,StickItem,null }, IronHoeItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { GoldIngotItem,GoldIngotItem,null, null,StickItem,null, null,StickItem,null }, GoldHoeItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { null,GoldIngotItem,GoldIngotItem, null,StickItem,null, null,StickItem,null }, GoldHoeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { DiamondItem,DiamondItem,null, null,StickItem,null, null,StickItem,null }, DiamondHoeItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { null,DiamondItem,DiamondItem, null,StickItem,null, null,StickItem,null }, DiamondHoeItem, 1);
 
@@ -706,20 +807,6 @@ public static class GameData {
 
         // Костная мука: 1 кость -> 3 костной муки
         AddShapeRecipe(new ItemDefinition?[] { BoneItem,null,null, null,null,null, null,null,null }, BoneMealItem, 3);
-
-        // Опилки: 2 доски -> 4 опилок, или 1 доска + 1 палка -> 2 опилок
-        AddShapeRecipe(new ItemDefinition?[] { PlankItem,PlankItem,null, null,null,null, null,null,null }, SawdustItem, 4);
-        AddShapeRecipe(new ItemDefinition?[] { PlankItem,null,null, StickItem,null,null, null,null,null }, SawdustItem, 2);
-
-        // Каша из опилок: 2 опилки + 1 доска + 1 семена пшеницы
-        AddShapeRecipe(new ItemDefinition?[] { SawdustItem,SawdustItem,null, PlankItem,WheatSeedsItem,null, null,null,null }, SawdustPorridgeItem, 1);
-
-        // Тотем бессмертия: фигурка из костей с золотым слитком в центре
-        AddShapeRecipe(new ItemDefinition?[] {
-            BoneItem, GoldIngotItem, BoneItem,
-            BoneItem, BoneItem,      BoneItem,
-            null,     BoneItem,      null
-        }, TotemItem, 1);
 
         // Лук (Bow): 3 палки + 3 нити
         AddShapeRecipe(new ItemDefinition?[] {
@@ -740,17 +827,15 @@ public static class GameData {
             null,      PlankItem,     null
         }, ShieldItem, 1);
 
-        // Огниво (Flint and Steel): 1 железо + 1 кремень
-        AddShapeRecipe(new ItemDefinition?[] {
-            IronIngotItem, null, null,
-            null, FlintItem, null,
-            null, null, null
-        }, FlintAndSteelItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] {
-            null, IronIngotItem, null,
-            null, FlintItem, null,
-            null, null, null
-        }, FlintAndSteelItem, 1);
+        // Огниво (Flint and Steel): 1 железо + 1 кремень (во всех комбинациях)
+        AddShapeRecipe(new ItemDefinition?[] { IronIngotItem, null, null, null, FlintItem, null, null, null, null }, FlintAndSteelItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { null, IronIngotItem, null, FlintItem, null, null, null, null, null }, FlintAndSteelItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { FlintItem, null, null, null, IronIngotItem, null, null, null, null }, FlintAndSteelItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { null, FlintItem, null, IronIngotItem, null, null, null, null, null }, FlintAndSteelItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { IronIngotItem, FlintItem, null, null, null, null, null, null, null }, FlintAndSteelItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { FlintItem, IronIngotItem, null, null, null, null, null, null, null }, FlintAndSteelItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { IronIngotItem, null, null, FlintItem, null, null, null, null, null }, FlintAndSteelItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { FlintItem, null, null, IronIngotItem, null, null, null, null, null }, FlintAndSteelItem, 1);
 
         // Динамит (TNT): 5 пороха + 4 песка (крест-накрест)
         AddShapeRecipe(new ItemDefinition?[] {
@@ -791,6 +876,17 @@ public static class GameData {
             null, PlankItem, PlankItem,
             null, PlankItem, PlankItem
         }, DoorItem, 3);
+
+        // Стержень ифрита → 2 пороха ифрита
+        AddShapeRecipe(new ItemDefinition?[] { BlazeRodItem, null, null, null, null, null, null, null, null }, BlazePowderItem, 2);
+        AddShapeRecipe(new ItemDefinition?[] { null, BlazeRodItem, null, null, null, null, null, null, null }, BlazePowderItem, 2);
+        AddShapeRecipe(new ItemDefinition?[] { null, null, null, BlazeRodItem, null, null, null, null, null }, BlazePowderItem, 2);
+
+        // Око Эндера: порох ифрита + жемчуг Эндера
+        AddShapeRecipe(new ItemDefinition?[] { BlazePowderItem, null, null, EnderPearlItem, null, null, null, null, null }, EyeOfEnderItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { null, BlazePowderItem, null, null, EnderPearlItem, null, null, null, null }, EyeOfEnderItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { EnderPearlItem, null, null, BlazePowderItem, null, null, null, null, null }, EyeOfEnderItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { null, EnderPearlItem, null, null, BlazePowderItem, null, null, null, null }, EyeOfEnderItem, 1);
     }
 
     private static void InitSmeltingRecipes() {
@@ -805,29 +901,20 @@ public static class GameData {
         SmeltingRecipes[RawMuttonItem.Id] = (CookedMuttonItem, 1);
     }
 
-    // ── Старый список рецептов (для DrawCraftPanel legacy) ───────────────────
-    private static void Register(string id, string name, float seconds, RecipePart[] inputs, params RecipePart[] outputs) {
-        Materials.RegisterRecipe(new CraftingRecipe {
-            Id = id, CraftTimeSeconds = seconds,
-            Inputs = inputs,
-            Outputs = outputs,
-        });
-        _recipeNames[id] = name;
-    }
 
     public static readonly Dictionary<string, string> _recipeNames = new();
     public static string RecipeName(string id) => _recipeNames.TryGetValue(id, out var n) ? n : id;
 
-    private static ItemDefinition Item(ushort id, string name, Material material, double volumeM3) =>
-        new() { Id = id, Name = name, Material = material, VolumeM3 = volumeM3 };
+    private static ItemDefinition Item(ushort id, string name, Material material, int maxStack = 64) =>
+        new() { Id = id, Name = name, Material = material, MaxStack = maxStack };
 
     private static BlockType Block(ushort id, string name, Material material, ItemDefinition? drop,
-                                   bool flammable = false, float burnTime = 0f, float capacity = 0f, byte light = 0) =>
+                                   bool flammable = false, float burnTime = 0f, byte light = 0) =>
         new() {
             Id = id, Name = name, Material = material,
             DropItemId = drop?.Id ?? 0,
             IsFlammable = flammable, BurnTimeSeconds = burnTime,
-            LoadCapacityKN = capacity, LightLevel = light,
+            LightLevel = light,
         };
 
     private static BlockType With(this BlockType b, Action<BlockType> configure) {
@@ -835,3 +922,7 @@ public static class GameData {
         return b;
     }
 }
+
+
+
+

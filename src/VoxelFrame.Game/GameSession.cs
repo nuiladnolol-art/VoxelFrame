@@ -5,16 +5,16 @@ using VoxelFrame.Core.World;
 
 namespace VoxelFrame.Game;
 
-public enum UiState { Playing, Inventory, Crafting, Paused, Workbench, Furnace, Chest, Loading, Death }
-public enum Dimension { Overworld, Nether }
+public enum UiState { Playing, Inventory, Crafting, Paused, Workbench, Furnace, Chest, Loading, Death, Chat }
+public enum Dimension { Overworld, Nether, End }
 public enum WeatherType { Clear, Rain, Thunder }
+public enum GameMode { Survival, Creative }
 
 /// <summary>
 /// Игровая сессия: мир + игрок + время суток + UI-состояние + сообщения.
 /// Вся логика чистая (без Raylib) — работает в headless-режиме для тестов.
 /// </summary>
 public sealed class GameSession {
-    public const float PhysicsTick = 1f / 20f;
 
     public GameWorld World = null!;
     public Player Player = null!;
@@ -23,6 +23,19 @@ public sealed class GameSession {
     public UiState Ui;
     public bool Headless;
 
+    public GameMode GameMode = GameMode.Survival;
+    public bool KeepInventory = false;
+    public int MasterSeed;
+
+    // Чат и команды
+    public string ChatInput = "";
+    public readonly List<(string Text, Color Col, float Time)> ChatLog = new();
+
+    public void AddChatMessage(string text, Color? col = null) {
+        ChatLog.Add((text, col ?? Color.White, 12f));
+        if (ChatLog.Count > 100) ChatLog.RemoveAt(0);
+    }
+
     public Dimension Dimension => World.Dimension;
     public WeatherType Weather = WeatherType.Clear;
     public float WeatherTimer = 300f;
@@ -30,8 +43,13 @@ public sealed class GameSession {
     public float AmbientSoundTimer = 25f;
     public float MusicTimer = 180f;
 
+    // Автосохранение: интервал в секундах игрового времени
+    public const float AutosaveInterval = 180f;
+    public float AutosaveTimer = AutosaveInterval;
+
     public GameWorld? NetherWorld;
     public GameWorld? OverworldWorld;
+    public GameWorld? EndWorld;
 
     public Vec3i TargetBlock;
     public Vec3i PlaceCell;
@@ -53,7 +71,6 @@ public sealed class GameSession {
     public bool IsLoading => _loadQueue != null;
 
     private readonly List<(string Text, float Age)> _messages = new();
-    private float _physicsAccumulator;
 
     public GameSession(bool headless) {
         Headless = headless;
@@ -81,6 +98,9 @@ public sealed class GameSession {
     }
 
     public void RespawnPlayer() {
+        if (World.Dimension != Dimension.Overworld) {
+            World = OverworldWorld ?? new GameWorld(World.Seed) { Dimension = Dimension.Overworld };
+        }
         Player.Health = Player.MaxHealth;
         Player.Hunger = Player.MaxHunger;
         Player.Saturation = 5f;
@@ -91,7 +111,11 @@ public sealed class GameSession {
         Player.FireTicks = 0f;
         Player.AirSupply = 10f;
         Player.StuckTimer = 0f;
-        Player.Position = World.GetSafeRespawnPosition(World.SpawnBlock);
+        Player.PortalTimer = 0f;
+
+        var spawnBlock = BedPosition == default ? World.SpawnBlock : BedPosition;
+        World.EnsureLoadedAroundSync(new Vector3(spawnBlock.X, spawnBlock.Y, spawnBlock.Z), 2);
+        Player.Position = World.GetSafeRespawnPosition(spawnBlock);
         Ui = UiState.Playing;
         AddMessage("Вы возродились на точке спавна");
     }
@@ -103,6 +127,7 @@ public sealed class GameSession {
             World = new GameWorld(seed),
             DayNight = new DayNightCycle(),
             Player = new Player(),
+            MasterSeed = seed,
         };
         // Спавн: площадка 3×3 на поверхности у (0,0). Мгновенная плавная загрузка без фризов
         int target = session.World.Generator.SurfaceHeight(0, 0);
@@ -118,7 +143,7 @@ public sealed class GameSession {
                     }
                 } else if (sh < target) {
                     for (int y = sh + 1; y <= target; y++)
-                        session.World.PlacePlacedBlock(new Vec3i(dx, y, dz), GameData.BDirt, 1f);
+                        session.World.PlacePlacedBlock(new Vec3i(dx, y, dz), GameData.BDirt);
                 }
                 // Крона дерева, попавшего в площадку, не должна висеть в воздухе.
                 for (int y = target + 1; y <= target + 8; y++) {
@@ -130,8 +155,6 @@ public sealed class GameSession {
         }
         session.World.SpawnBlock = new Vec3i(0, target, 0);
         session.Player.Position = new Vector3(0.5f, target + 1.9f, 0.5f);
-        session.AddMessage($"Новый мир. Сид: {seed}");
-        session.AddMessage("Соберите дерево: держите ЛКМ на бревне");
         return session;
     }
 
@@ -139,25 +162,85 @@ public sealed class GameSession {
 
     public void SwitchDimension(Dimension targetDim) {
         if (World.Dimension == targetDim) return;
+
+        // Сохраняем текущий мир в соответствующее поле
+        switch (World.Dimension) {
+            case Dimension.Overworld: OverworldWorld = World; break;
+            case Dimension.Nether: NetherWorld = World; break;
+            case Dimension.End: EndWorld = World; break;
+        }
+
         if (targetDim == Dimension.Nether) {
-            OverworldWorld = World;
             if (NetherWorld == null) {
                 NetherWorld = new GameWorld(World.Seed ^ 0x1337BEEF) { Dimension = Dimension.Nether };
             }
             World = NetherWorld;
-            var newPos = new Vector3(Player.Position.X / 8f, 50f, Player.Position.Z / 8f);
-            World.EnsureLoadedAroundSync(newPos, 2);
-            Player.Position = newPos;
+            int targetX = (int)MathF.Floor(Player.Position.X / 8f);
+            int targetZ = (int)MathF.Floor(Player.Position.Z / 8f);
+            int targetY = 56;
+
+            World.EnsureLoadedAroundSync(new Vector3(targetX, targetY, targetZ), 2);
+            EnsureSafePortalPlatform(World, targetX, targetY, targetZ, GameData.BNetherPortal);
+
+            Player.Position = new Vector3(targetX + 0.5f, targetY + 1.0f, targetZ + 0.5f);
             Player.Velocity = Vector3.Zero;
-            AddMessage("Вы вошли в Нижний мир (Nether)!");
+            Player.PortalTimer = -2.5f;
+            AddMessage("Вы вошли в Нижний мир!");
+        } else if (targetDim == Dimension.End) {
+            if (EndWorld == null) {
+                EndWorld = new GameWorld(World.Seed ^ 0x2E1D0FF) { Dimension = Dimension.End };
+            }
+            World = EndWorld;
+            int targetX = 0, targetZ = 0;
+            int targetY = World.Generator.EndSurfaceHeight(targetX, targetZ);
+            if (targetY <= 0) targetY = 60;
+
+            World.EnsureLoadedAroundSync(new Vector3(targetX, targetY, targetZ), 2);
+            EnsureSafePortalPlatform(World, targetX, targetY, targetZ, GameData.BEndPortal);
+
+            Player.Position = new Vector3(targetX + 0.5f, targetY + 1.0f, targetZ + 0.5f);
+            Player.Velocity = Vector3.Zero;
+            Player.PortalTimer = -2.5f;
+            AddMessage("Вы вошли в Энд!");
         } else {
-            NetherWorld = World;
             World = OverworldWorld ?? new GameWorld(World.Seed) { Dimension = Dimension.Overworld };
-            var newPos = new Vector3(Player.Position.X * 8f, 65f, Player.Position.Z * 8f);
-            World.EnsureLoadedAroundSync(newPos, 2);
-            Player.Position = newPos;
+            int targetX = (int)MathF.Floor(Player.Position.X * 8f);
+            int targetZ = (int)MathF.Floor(Player.Position.Z * 8f);
+
+            World.EnsureLoadedAroundSync(new Vector3(targetX, 64f, targetZ), 2);
+            int surfaceY = World.Generator.SurfaceHeight(targetX, targetZ);
+            if (surfaceY <= 0) surfaceY = 64;
+            int targetY = surfaceY + 1;
+
+            EnsureSafePortalPlatform(World, targetX, targetY, targetZ, GameData.BNetherPortal);
+
+            Player.Position = new Vector3(targetX + 0.5f, targetY + 1.0f, targetZ + 0.5f);
             Player.Velocity = Vector3.Zero;
+            Player.PortalTimer = -2.5f;
             AddMessage("Вы вернулись в Обычный мир!");
+        }
+    }
+
+    private static void EnsureSafePortalPlatform(GameWorld world, int px, int py, int pz, BlockType portalBlock) {
+        // Создаём надежную платформу 5х5 под ногами игрока
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                world.PlacePlacedBlock(new Vec3i(px + dx, py - 1, pz + dz), GameData.BObsidian);
+                for (int dy = 0; dy <= 4; dy++) {
+                    world.RemoveBlock(new Vec3i(px + dx, py + dy, pz + dz));
+                }
+            }
+        }
+        // Строим 4x5 рамку портала из обсидиана с портальными блоками внутри
+        for (int dx = -1; dx <= 2; dx++) {
+            world.PlacePlacedBlock(new Vec3i(px + dx, py - 1, pz), GameData.BObsidian);
+            world.PlacePlacedBlock(new Vec3i(px + dx, py + 3, pz), GameData.BObsidian);
+        }
+        for (int dy = 0; dy <= 2; dy++) {
+            world.PlacePlacedBlock(new Vec3i(px - 1, py + dy, pz), GameData.BObsidian);
+            world.PlacePlacedBlock(new Vec3i(px + 2, py + dy, pz), GameData.BObsidian);
+            world.PlacePlacedBlock(new Vec3i(px, py + dy, pz), portalBlock);
+            world.PlacePlacedBlock(new Vec3i(px + 1, py + dy, pz), portalBlock);
         }
     }
 
@@ -188,15 +271,6 @@ public sealed class GameSession {
                 }
             }
 
-            // Пещерный эмбиент в глубоких пещерах
-            AmbientSoundTimer -= dt;
-            if (AmbientSoundTimer <= 0f) {
-                if (Player.Position.Y < 38f) {
-                    SoundSystem.PlayCaveAmbiance();
-                }
-                AmbientSoundTimer = 35f + Random.Shared.NextSingle() * 40f;
-            }
-
             // Фоновая музыка на рассвете и закате
             MusicTimer -= dt;
             if (MusicTimer <= 0f) {
@@ -207,12 +281,16 @@ public sealed class GameSession {
 
         if (IsSleeping) {
             SleepProgress += dt;
-            // Во время пика затемнения (1.0 секунда сна) переводим время на раннее утро 7:40 (TimeOfDay = 0.32f)
-            if (SleepProgress >= 1.0f && DayNight.TimeOfDay != 0.32f) {
-                DayNight.TimeOfDay = 0.32f;
+            // Во время пика затемнения (1.0 секунда сна) переводим время на рассвет 6:00 (TimeOfDay = 0.25f)
+            if (SleepProgress >= 1.0f && DayNight.TimeOfDay != 0.25f) {
+                DayNight.TimeOfDay = 0.25f;
+                if (Weather != WeatherType.Clear) {
+                    Weather = WeatherType.Clear;
+                    WeatherTimer = 300f + Random.Shared.Next(300);
+                }
             }
             if (SleepProgress >= 2.0f) {
-                DayNight.TimeOfDay = 0.32f;
+                DayNight.TimeOfDay = 0.25f;
                 IsSleeping = false;
                 Player.Health = MathF.Min(Player.MaxHealth, Player.Health + 4f);
                 AddMessage("Вы проснулись. Точка возрождения установлена.");
@@ -233,7 +311,7 @@ public sealed class GameSession {
             Camera.Target = Player.Eye + new Vector3(0f, Player.BobOffset, 0f) + Player.Forward + shake;
             Camera.FovY = 70f + Player.SprintFovProgress * 10f;
 
-            // Minecraft Camera Hurt Tilt (наклон камеры при получении урона)
+            // Наклон камеры при получении урона (Hurt Tilt)
             if (Player.HurtTimer > 0f) {
                 float tiltFactor = MathF.Sin(Player.HurtTimer / 0.5f * MathF.PI);
                 float tiltAngle = tiltFactor * (Player.HurtDirection * 0.12f); // ~7 градусов
@@ -245,7 +323,7 @@ public sealed class GameSession {
             if (input.OpenInventory) Ui = UiState.Inventory;
             else if (input.OpenCrafting) Ui = UiState.Crafting;
             else if (input.Pause) Ui = UiState.Paused;
-        } else {
+        } else if (Ui != UiState.Chat && Ui != UiState.Death) {
             if (input.OpenInventory || input.OpenCrafting || input.Pause) {
                 Screens.ReturnHeld(this);   // предмет «из руки» и предметы крафта вернуть в инвентарь
                 Ui = UiState.Playing;
@@ -257,17 +335,19 @@ public sealed class GameSession {
         World.Tick(dt, Player);
         World.TickPickups(dt, Player);
         World.TickHostileMobs(dt, Player, this);
-        World.ProcessSolverEvents();
-
-        _physicsAccumulator += dt;
-        while (_physicsAccumulator >= PhysicsTick) {
-            _physicsAccumulator -= PhysicsTick;
-            World.Physics.Tick(PhysicsTick);
-            World.ProcessSolverEvents();
-        }
+        var endIslandTop = World.Generator.EndSurfaceHeight(0, 0);
+        var endIslandCenter = new Vector3(0.5f, endIslandTop, 0.5f);
+        World.TickEndSlime(dt, Player, this, endIslandCenter, endIslandTop);
 
         DayNight.Tick(dt);
         // Фактор неба — uniform шейдера, меши не пересобираются при смене дня.
+
+        for (int i = 0; i < ChatLog.Count; i++) {
+            var item = ChatLog[i];
+            if (item.Time > 0f) {
+                ChatLog[i] = (item.Text, item.Col, item.Time - dt);
+            }
+        }
     }
 
     // ── Смерть и возрождение ────────────────────────────────────────────────
@@ -275,38 +355,153 @@ public sealed class GameSession {
     public void DiePlayer(string message = "Вы погибли!") {
         if (Ui == UiState.Death) return;
         Screens.ReturnHeld(this);
-        // Дроп всех предметов из инвентаря на месте гибели с разлетом и задержкой подбора 2.5с
-        var dropPos = Player.Position + new Vector3(0f, 0.5f, 0f);
-        var rng = Random.Shared;
-        for (int i = 0; i < Player.Inventory.Capacity; i++) {
-            var slot = Player.Inventory.Slots[i];
-            if (slot != null && slot.Value.Quantity > 0) {
+        if (!KeepInventory) {
+            // Дроп всех предметов из инвентаря на месте гибели с разлетом и задержкой подбора 2.5с
+            var dropPos = Player.Position + new Vector3(0f, 0.5f, 0f);
+            var rng = Random.Shared;
+            for (int i = 0; i < Player.Inventory.Capacity; i++) {
+                var slot = Player.Inventory.Slots[i];
+                if (slot != null && slot.Value.Quantity > 0) {
+                    float angle = rng.NextSingle() * MathF.Tau;
+                    float speed = 1.2f + rng.NextSingle() * 2.0f;
+                    var pickup = new ItemPickup(slot.Value.Item, slot.Value.Quantity, dropPos) {
+                        PickupDelay = 2.5f,
+                        Velocity = new Vector3(MathF.Cos(angle) * speed, 3.5f + rng.NextSingle() * 2.0f, MathF.Sin(angle) * speed)
+                    };
+                    World.Pickups.Add(pickup);
+                }
+            }
+            if (Player.OffhandEntry != null) {
                 float angle = rng.NextSingle() * MathF.Tau;
                 float speed = 1.2f + rng.NextSingle() * 2.0f;
-                var pickup = new ItemPickup(slot.Value.Item.Definition, slot.Value.Quantity, dropPos) {
+                var pickup = new ItemPickup(Player.OffhandEntry.Value.Item, Player.OffhandEntry.Value.Quantity, dropPos) {
                     PickupDelay = 2.5f,
                     Velocity = new Vector3(MathF.Cos(angle) * speed, 3.5f + rng.NextSingle() * 2.0f, MathF.Sin(angle) * speed)
                 };
                 World.Pickups.Add(pickup);
+                Player.OffhandEntry = null;
             }
+            Player.Inventory.Clear();
         }
-        if (Player.OffhandItem != null && Player.OffhandCount > 0) {
-            float angle = rng.NextSingle() * MathF.Tau;
-            float speed = 1.2f + rng.NextSingle() * 2.0f;
-            var pickup = new ItemPickup(Player.OffhandItem, Player.OffhandCount, dropPos) {
-                PickupDelay = 2.5f,
-                Velocity = new Vector3(MathF.Cos(angle) * speed, 3.5f + rng.NextSingle() * 2.0f, MathF.Sin(angle) * speed)
-            };
-            World.Pickups.Add(pickup);
-            Player.OffhandItem = null;
-            Player.OffhandCount = 0;
-        }
-        Player.Inventory.Clear();
         Player.Health = 0f;
         Player.Velocity = Vector3.Zero;
         Player.FireTicks = 0f;
         Ui = UiState.Death;
         AddMessage(message);
+    }
+
+    public void ExecuteChatCommand(string cmd) {
+        cmd = cmd.Trim();
+        if (string.IsNullOrEmpty(cmd)) return;
+
+        AddChatMessage("> " + cmd, new Color(220, 220, 220, 255));
+
+        if (!cmd.StartsWith("/")) {
+            return;
+        }
+
+        string[] parts = cmd.Substring(1).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return;
+
+        string c = parts[0].ToLowerInvariant();
+        switch (c) {
+            case "gamemode":
+            case "gm":
+                if (parts.Length < 2) {
+                    AddChatMessage("Использование: /gamemode <survival|creative|0|1|s|c>", Color.Yellow);
+                    return;
+                }
+                string modeStr = parts[1].ToLowerInvariant();
+                if (modeStr is "creative" or "c" or "1") {
+                    GameMode = GameMode.Creative;
+                    Player.Health = Player.MaxHealth;
+                    Player.Hunger = 20f;
+                    AddChatMessage("Установлен режим игры: Творческий (Creative)", Color.Green);
+                } else if (modeStr is "survival" or "s" or "0") {
+                    GameMode = GameMode.Survival;
+                    Player.IsFlying = false;
+                    AddChatMessage("Установлен режим игры: Выживание (Survival)", Color.Green);
+                } else {
+                    AddChatMessage($"Неизвестный режим игры: {parts[1]}", Color.Red);
+                }
+                break;
+
+            case "gamerule":
+                if (parts.Length < 3) {
+                    AddChatMessage("Использование: /gamerule keepInventory <true|false>", Color.Yellow);
+                    return;
+                }
+                if (parts[1].Equals("keepInventory", StringComparison.OrdinalIgnoreCase)) {
+                    if (bool.TryParse(parts[2], out bool val)) {
+                        KeepInventory = val;
+                        AddChatMessage($"Игровое правило keepInventory установлено в {val}", Color.Green);
+                    } else {
+                        AddChatMessage("Значение должно быть true или false", Color.Red);
+                    }
+                } else {
+                    AddChatMessage($"Неизвестное правило: {parts[1]}", Color.Red);
+                }
+                break;
+
+            case "time":
+                if (parts.Length >= 3 && parts[1].Equals("set", StringComparison.OrdinalIgnoreCase)) {
+                    string t = parts[2].ToLowerInvariant();
+                    if (t is "day" or "1000") {
+                        DayNight.TimeOfDay = 0.35f;
+                        AddChatMessage("Установлено время: День", Color.Green);
+                    } else if (t is "night" or "13000") {
+                        DayNight.TimeOfDay = 0.85f;
+                        AddChatMessage("Установлено время: Ночь", Color.Green);
+                    } else if (float.TryParse(parts[2], out float val)) {
+                        DayNight.TimeOfDay = Math.Clamp(val / 24000f, 0f, 1f);
+                        AddChatMessage($"Время установлено в {val}", Color.Green);
+                    }
+                } else {
+                    AddChatMessage("Использование: /time set <day|night|число>", Color.Yellow);
+                }
+                break;
+
+            case "weather":
+                if (parts.Length >= 2) {
+                    string w = parts[1].ToLowerInvariant();
+                    if (w is "clear" or "sun") {
+                        Weather = WeatherType.Clear;
+                        WeatherTimer = 600f;
+                        AddChatMessage("Установлена ясная погода", Color.Green);
+                    } else if (w is "rain") {
+                        Weather = WeatherType.Rain;
+                        WeatherTimer = 600f;
+                        AddChatMessage("Установлена дождливая погода", Color.Green);
+                    } else if (w is "thunder") {
+                        Weather = WeatherType.Thunder;
+                        WeatherTimer = 600f;
+                        AddChatMessage("Установлена грозовая погода", Color.Green);
+                    }
+                } else {
+                    AddChatMessage("Использование: /weather <clear|rain|thunder>", Color.Yellow);
+                }
+                break;
+
+            case "clear":
+                Player.Inventory.Clear();
+                Player.OffhandEntry = null;
+                AddChatMessage("Инвентарь игрока очищен", Color.Green);
+                break;
+
+            case "help":
+            case "?":
+                AddChatMessage("=== Доступные команды ===", Color.Gold);
+                AddChatMessage("/gamemode <survival|creative|s|c|0|1> — сменить режим", Color.White);
+                AddChatMessage("/gamerule keepInventory <true|false> — сохранение инвентаря", Color.White);
+                AddChatMessage("/time set <day|night|число> — сменить время", Color.White);
+                AddChatMessage("/weather <clear|rain|thunder> — изменить погоду", Color.White);
+                AddChatMessage("/clear — очистить инвентарь", Color.White);
+                break;
+
+            default:
+                AddChatMessage($"Неизвестная команда: {parts[0]}. Введите /help для справки.", Color.Red);
+                break;
+        }
     }
 
     // ── Сохранение ───────────────────────────────────────────────────────────
@@ -346,3 +541,6 @@ public sealed class GameSession {
         return false;
     }
 }
+
+
+

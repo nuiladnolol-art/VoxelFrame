@@ -17,7 +17,6 @@ public sealed class FireSystem {
     public readonly Dictionary<Vec3i, float> Burning = new();
     /// <summary>Позиции костров (источники поджигания).</summary>
     public readonly HashSet<Vec3i> Campfires = new();
-    public double TotalSmokeKg;
 
     public FireSystem(GameWorld world) => _world = world;
 
@@ -94,9 +93,7 @@ public sealed class FireSystem {
         if (block == null) { Burning.Remove(pos); return; }
         Burning.Remove(pos);
 
-        double mass = _world.GetVoxel(pos).Weight;
         _world.RemoveBlock(pos);
-        TotalSmokeKg += mass;
         _world.MarkLightDirty(pos);
     }
 }

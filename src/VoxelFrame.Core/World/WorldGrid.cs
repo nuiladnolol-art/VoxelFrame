@@ -1,18 +1,11 @@
 namespace VoxelFrame.Core.World;
 
-/// <summary>What the rest of the engine may know about the world.</summary>
-public interface IChunkSource {
-    event Action<Vec3i, VoxelData, VoxelData>? VoxelChanged;   // (worldPos, before, after)
-    bool TryGetVoxel(Vec3i worldPos, out VoxelData voxel);
-    Chunk GetOrCreateChunk(Vec3i chunkCoord);
-    bool TryGetChunk(Vec3i chunkCoord, out Chunk chunk);
-}
-
 /// <summary>
-/// Sparse in-memory chunk store (replaced by streaming later). The physics
-/// layer depends on IChunkSource, never on this class.
+/// Разрежённое (in-memory) хранилище чанков.
+/// Единый путь записи: все изменения вокселей проходят через SetVoxel,
+/// чтобы слой освещения/мешей видел каждую пару (before, after).
 /// </summary>
-public sealed class WorldGrid : IChunkSource {
+public sealed class WorldGrid {
     private readonly Dictionary<Vec3i, Chunk> _chunks = new();
 
     public event Action<Vec3i, VoxelData, VoxelData>? VoxelChanged;
@@ -27,6 +20,8 @@ public sealed class WorldGrid : IChunkSource {
 
     public bool TryGetChunk(Vec3i chunkCoord, out Chunk chunk) => _chunks.TryGetValue(chunkCoord, out chunk!);
 
+    public Chunk? GetChunk(Vec3i chunkCoord) => _chunks.TryGetValue(chunkCoord, out var c) ? c : null;
+
     public bool TryGetVoxel(Vec3i world, out VoxelData voxel) {
         if (!_chunks.TryGetValue(Chunk.CoordOf(world), out var chunk)) {
             voxel = VoxelData.Air;
@@ -36,8 +31,6 @@ public sealed class WorldGrid : IChunkSource {
         return true;
     }
 
-    /// The single write path: all voxel mutations flow through here so the
-    /// physics layer sees every change as (before, after).
     public void SetVoxel(Vec3i world, in VoxelData value) {
         var chunk = GetOrCreateChunk(Chunk.CoordOf(world));
         int idx = Chunk.Index(world.X & 31, world.Y & 31, world.Z & 31);

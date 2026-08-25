@@ -13,7 +13,7 @@ namespace VoxelFrame.Game;
 /// </summary>
 public static class SaveSystem {
     public const uint Magic = 0x56465331;   // "VFS1"
-    public const int Version = 8;
+    public const int Version = 15;
 
     public static string CurrentWorldPath = "";
     public static int SelectedWorldSlot = 1;
@@ -79,18 +79,19 @@ public static class SaveSystem {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var tmp = path + ".tmp";
         using (var fs = File.Create(tmp))
-        using (var gz = new GZipStream(fs, CompressionLevel.SmallestSize))
+        using (var gz = new GZipStream(fs, CompressionLevel.Fastest))
         using (var bw = new BinaryWriter(gz, Encoding.UTF8, leaveOpen: false)) {
             bw.Write(Magic);
             bw.Write(Version);
             string worldName = Path.GetFileNameWithoutExtension(path);
             bw.Write(worldName);
-            bw.Write(session.World.Seed);
+            // Мастер-сид — сид Обычного мира; Нижний и Энд выводятся из него XOR-ом.
+            var overworld0 = session.World.Dimension == Dimension.Overworld ? session.World : session.OverworldWorld;
+            bw.Write(overworld0?.Seed ?? session.MasterSeed);
             bw.Write(session.DayNight.TimeOfDay);
-            bw.Write(session.World.Fire.TotalSmokeKg);
-            bw.Write(session.World.SpawnBlock.X);
-            bw.Write(session.World.SpawnBlock.Y);
-            bw.Write(session.World.SpawnBlock.Z);
+            bw.Write((int)session.GameMode);
+            bw.Write(session.KeepInventory);
+            bw.Write((int)session.Dimension);
 
             var p = session.Player;
             WriteVec3(bw, p.Position);
@@ -112,115 +113,189 @@ public static class SaveSystem {
                 bw.Write(idx);
                 bw.Write(e!.Value.Item.Definition.Id);
                 bw.Write(e.Value.Quantity);
-                bw.Write((float)e.Value.Item.Condition);
             }
 
-            bw.Write(session.World.Chunks.Count);
-            foreach (var gc in session.World.Chunks) {
-                bw.Write(gc.Coord.X);
-                bw.Write(gc.Coord.Y);
-                bw.Write(gc.Coord.Z);
-                var partials = new List<(int Index, float Content)>();
-                var types = new ushort[Chunk.VoxelCount];
-                for (int i = 0; i < Chunk.VoxelCount; i++) {
-                    var v = gc.Chunk.Get(i);
-                    types[i] = v.TypeId;
-                    if (v.TypeId != 0 && MathF.Abs(v.ContentVolumeM3 - 1f) > 0.001f)
-                        partials.Add((i, v.ContentVolumeM3));
-                }
-                foreach (var t in types) bw.Write(t);
-                bw.Write(partials.Count);
-                foreach (var (idx, content) in partials) {
-                    bw.Write(idx);
-                    bw.Write(content);
-                }
+            if (p.OffhandEntry != null) {
+                bw.Write(true);
+                bw.Write(p.OffhandEntry.Value.Item.Definition.Id);
+                bw.Write(p.OffhandEntry.Value.Quantity);
+            } else {
+                bw.Write(false);
             }
 
-            bw.Write(session.World.Pickups.Count);
-            foreach (var pk in session.World.Pickups) {
-                bw.Write(pk.Definition.Id);
-                bw.Write(pk.Quantity);
-                WriteVec3(bw, pk.Position);
-            }
-
-            bw.Write(session.World.Animals.Count);
-            foreach (var a in session.World.Animals) {
-                bw.Write((int)a.Type);
-                WriteVec3(bw, a.Position);
-                bw.Write(a.Health);
-            }
-
-            bw.Write(session.World.HostileMobs.Count);
-            foreach (var h in session.World.HostileMobs) {
-                bw.Write((int)h.Type);
-                WriteVec3(bw, h.Position);
-                bw.Write(h.Health);
-            }
-
-            bw.Write(session.World.FallingBlocks.Count);
-            foreach (var f in session.World.FallingBlocks) {
-                bw.Write(f.Block.Id);
-                WriteVec3(bw, f.Position);
-            }
-
-            bw.Write(session.World.Fire.Burning.Count);
-            foreach (var (pos, remaining) in session.World.Fire.Burning) {
-                bw.Write(pos.X); bw.Write(pos.Y); bw.Write(pos.Z);
-                bw.Write(remaining);
-            }
-            bw.Write(session.World.Fire.Campfires.Count);
-            foreach (var pos in session.World.Fire.Campfires) {
-                bw.Write(pos.X); bw.Write(pos.Y); bw.Write(pos.Z);
-            }
-
-            // Сундуки мира
-            bw.Write(session.World.Chests.Count);
-            foreach (var (cpos, cinv) in session.World.Chests) {
-                bw.Write(cpos.X); bw.Write(cpos.Y); bw.Write(cpos.Z);
-                var cNonNull = cinv.Slots.Select((e, idx) => (e, idx)).Where(x => x.e != null).ToList();
-                bw.Write(cNonNull.Count);
-                foreach (var (e, idx) in cNonNull) {
-                    bw.Write(idx);
-                    bw.Write(e!.Value.Item.Definition.Id);
-                    bw.Write(e.Value.Quantity);
-                    bw.Write((float)e.Value.Item.Condition);
-                }
-            }
-
-            // Печи мира
-            bw.Write(session.World.Furnaces.Count);
-            foreach (var (fpos, f) in session.World.Furnaces) {
-                bw.Write(fpos.X); bw.Write(fpos.Y); bw.Write(fpos.Z);
-                bw.Write(f.FuelTimer);
-                bw.Write(f.MaxFuelTimer);
-                bw.Write(f.SmeltTimer);
-
-                // Input
-                bw.Write(f.Input.HasValue);
-                if (f.Input.HasValue) {
-                    bw.Write(f.Input.Value.Item.Definition.Id);
-                    bw.Write(f.Input.Value.Quantity);
-                    bw.Write((float)f.Input.Value.Item.Condition);
-                }
-
-                // Fuel
-                bw.Write(f.Fuel.HasValue);
-                if (f.Fuel.HasValue) {
-                    bw.Write(f.Fuel.Value.Item.Definition.Id);
-                    bw.Write(f.Fuel.Value.Quantity);
-                    bw.Write((float)f.Fuel.Value.Item.Condition);
-                }
-
-                // Output
-                bw.Write(f.Output.HasValue);
-                if (f.Output.HasValue) {
-                    bw.Write(f.Output.Value.Item.Definition.Id);
-                    bw.Write(f.Output.Value.Quantity);
-                    bw.Write((float)f.Output.Value.Item.Condition);
-                }
+            // Пишем все существующие миры: Обычный + каждый посещённый Нижний/Энд.
+            // Недоступные измерения остаются null — их сид выводится заново при первом входе.
+            var worlds = CollectWorlds(session);
+            bw.Write(worlds.Count);
+            foreach (var (dim, w) in worlds) {
+                bw.Write((int)dim);
+                bw.Write(w.Seed);
+                bw.Write(w.SpawnBlock.X);
+                bw.Write(w.SpawnBlock.Y);
+                bw.Write(w.SpawnBlock.Z);
+                WriteWorldData(bw, w);
             }
         }
-        File.Move(tmp, path, overwrite: true);
+        // Атомарная подмена: предыдущий рабочий сейв уходит в .bak.
+        // Краши посреди сохранения оставляют либо новый main, либо старый main + .bak —
+        // мир не теряется никогда.
+        if (File.Exists(path)) File.Replace(tmp, path, path + ".bak");
+        else File.Move(tmp, path);
+    }
+
+    // ── Сериализация миров (Обычный/Нижний/Энд) ─────────────────────────────
+
+    /// <summary>Собирает существующие миры сессии. Обычный всегда первый.</summary>
+    private static List<(Dimension Dim, GameWorld World)> CollectWorlds(GameSession session) {
+        var list = new List<(Dimension, GameWorld)>();
+        void Add(GameWorld? w) { if (w != null) list.Add((w.Dimension, w)); }
+        Add(session.World.Dimension == Dimension.Overworld ? session.World : session.OverworldWorld);
+        Add(session.World.Dimension == Dimension.Nether ? session.World : session.NetherWorld);
+        Add(session.World.Dimension == Dimension.End ? session.World : session.EndWorld);
+        return list;
+    }
+
+    /// <summary>Пишет данные одного мира: босс Энда, чанки, сущности, печи, сундуки, огонь.</summary>
+    private static void WriteWorldData(BinaryWriter bw, GameWorld world) {
+        // Босс Слизня Края (для не-Эндовых миров — false/null).
+        bw.Write(world.EndBossDefeated);
+        if (world.EndBoss is { Alive: true } eb) {
+            bw.Write(true);
+            bw.Write(eb.Health);
+            WriteVec3(bw, eb.Position);
+        } else {
+            bw.Write(false);
+        }
+
+        var chunkByteBuf = new byte[Chunk.VoxelCount * sizeof(ushort)];
+        var types = new ushort[Chunk.VoxelCount];
+
+        bw.Write(world.Chunks.Count);
+        foreach (var gc in world.Chunks) {
+            bw.Write(gc.Coord.X);
+            bw.Write(gc.Coord.Y);
+            bw.Write(gc.Coord.Z);
+            var masks = new List<(int Index, byte Mask)>();
+            for (int i = 0; i < Chunk.VoxelCount; i++) {
+                var v = gc.Chunk.Get(i);
+                types[i] = v.TypeId;
+                if (v.TypeId != 0 && v.SubGridLayerMask != 0)
+                    masks.Add((i, v.SubGridLayerMask));
+            }
+            System.Runtime.InteropServices.MemoryMarshal.AsBytes(types.AsSpan()).CopyTo(chunkByteBuf);
+            bw.Write(chunkByteBuf);
+
+            bw.Write(masks.Count);
+            foreach (var (idx, mask) in masks) {
+                bw.Write(idx);
+                bw.Write(mask);
+            }
+        }
+
+        bw.Write(world.Pickups.Count);
+        foreach (var pk in world.Pickups) {
+            bw.Write(pk.Item.Definition.Id);
+            bw.Write(pk.Quantity);
+            WriteVec3(bw, pk.Position);
+        }
+
+        bw.Write(world.Animals.Count);
+        foreach (var a in world.Animals) {
+            bw.Write((int)a.Type);
+            WriteVec3(bw, a.Position);
+            bw.Write(a.Health);
+        }
+
+        bw.Write(world.HostileMobs.Count);
+        foreach (var h in world.HostileMobs) {
+            bw.Write((int)h.Type);
+            WriteVec3(bw, h.Position);
+            bw.Write(h.Health);
+        }
+
+        bw.Write(world.FallingBlocks.Count);
+        foreach (var f in world.FallingBlocks) {
+            bw.Write(f.Block.Id);
+            WriteVec3(bw, f.Position);
+        }
+
+        bw.Write(world.Fire.Burning.Count);
+        foreach (var (pos, remaining) in world.Fire.Burning) {
+            bw.Write(pos.X); bw.Write(pos.Y); bw.Write(pos.Z);
+            bw.Write(remaining);
+        }
+        bw.Write(world.Fire.Campfires.Count);
+        foreach (var pos in world.Fire.Campfires) {
+            bw.Write(pos.X); bw.Write(pos.Y); bw.Write(pos.Z);
+        }
+
+        // Сундуки мира
+        bw.Write(world.Chests.Count);
+        foreach (var (cpos, cinv) in world.Chests) {
+            bw.Write(cpos.X); bw.Write(cpos.Y); bw.Write(cpos.Z);
+            var cNonNull = cinv.Slots.Select((e, idx) => (e, idx)).Where(x => x.e != null).ToList();
+            bw.Write(cNonNull.Count);
+            foreach (var (e, idx) in cNonNull) {
+                bw.Write(idx);
+                bw.Write(e!.Value.Item.Definition.Id);
+                bw.Write(e.Value.Quantity);
+            }
+        }
+
+        // Реестр сундуков (размещенные игроком и облутанные структуры)
+        bw.Write(world.PlacedChests.Count);
+        foreach (var pos in world.PlacedChests) {
+            bw.Write(pos.X); bw.Write(pos.Y); bw.Write(pos.Z);
+        }
+        bw.Write(world.LootedStructureChests.Count);
+        foreach (var pos in world.LootedStructureChests) {
+            bw.Write(pos.X); bw.Write(pos.Y); bw.Write(pos.Z);
+        }
+
+        // Печи мира
+        bw.Write(world.Furnaces.Count);
+        foreach (var (fpos, f) in world.Furnaces) {
+            bw.Write(fpos.X); bw.Write(fpos.Y); bw.Write(fpos.Z);
+            bw.Write(f.FuelTimer);
+            bw.Write(f.MaxFuelTimer);
+            bw.Write(f.SmeltTimer);
+
+            bw.Write(f.Input.HasValue);
+            if (f.Input.HasValue) {
+                bw.Write(f.Input.Value.Item.Definition.Id);
+                bw.Write(f.Input.Value.Quantity);
+            }
+            bw.Write(f.Fuel.HasValue);
+            if (f.Fuel.HasValue) {
+                bw.Write(f.Fuel.Value.Item.Definition.Id);
+                bw.Write(f.Fuel.Value.Quantity);
+            }
+            bw.Write(f.Output.HasValue);
+            if (f.Output.HasValue) {
+                bw.Write(f.Output.Value.Item.Definition.Id);
+                bw.Write(f.Output.Value.Quantity);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Загружает мир, а при повреждении основного файла автоматически
+    /// поднимает резервную копию (.bak). Возвращает признак восстановления.
+    /// </summary>
+    public static (GameSession Session, bool FromBackup) LoadWithRecovery(string path, bool headless) {
+        Exception mainError;
+        try {
+            return (Load(path, headless), false);
+        } catch (Exception ex) {
+            mainError = ex;
+        }
+        var bak = path + ".bak";
+        if (File.Exists(bak)) {
+            try {
+                return (Load(bak, headless), true);
+            } catch { /* бэкап тоже бит — отдаём исходную ошибку */ }
+        }
+        throw new InvalidDataException($"Сохранение повреждено ({mainError.Message}), резервная копия не найдена", mainError);
     }
 
     public static GameSession Load(string path, bool headless) {
@@ -232,18 +307,30 @@ public static class SaveSystem {
         if (version < 2 || version > Version) throw new InvalidDataException($"Версия сохранения {version} не поддерживается");
 
         string worldName = version >= 7 ? br.ReadString() : Path.GetFileNameWithoutExtension(path);
+        if (version >= 15) return LoadWorlds(br, headless);
         int seed = br.ReadInt32();
         float timeOfDay = br.ReadSingle();
-        double smokeKg = br.ReadDouble();
+        if (version < 13) br.ReadDouble(); // legacy smoke mass (удалена в v13)
         var spawn = new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32());
+        var savedDim = version >= 11 ? (Dimension)br.ReadInt32() : Dimension.Overworld;
+        var savedGameMode = version >= 12 ? (GameMode)br.ReadInt32() : GameMode.Survival;
+        bool savedKeepInv = version >= 12 && br.ReadBoolean();
 
         var session = new GameSession(headless) {
-            World = new GameWorld(seed),
+            World = new GameWorld(seed) { Dimension = savedDim },
             DayNight = new DayNightCycle(timeOfDay),
             Player = new Player(),
+            GameMode = savedGameMode,
+            KeepInventory = savedKeepInv,
         };
-        session.World.Fire.TotalSmokeKg = smokeKg;
         session.World.SpawnBlock = spawn;
+        if (savedDim == Dimension.Nether) {
+            session.NetherWorld = session.World;
+            session.OverworldWorld = new GameWorld(seed) { Dimension = Dimension.Overworld };
+        } else if (savedDim == Dimension.End) {
+            session.EndWorld = session.World;
+            session.OverworldWorld = new GameWorld(seed) { Dimension = Dimension.Overworld };
+        }
 
         var loadedPos = ReadVec3(br);
         if (float.IsNaN(loadedPos.X) || float.IsNaN(loadedPos.Y) || float.IsNaN(loadedPos.Z) ||
@@ -267,11 +354,23 @@ public static class SaveSystem {
             int index = br.ReadInt32();
             ushort defId = br.ReadUInt16();
             int qty = br.ReadInt32();
-            float cond = version >= 5 ? br.ReadSingle() : 1.0f;
+            if (version >= 5 && version < 13) br.ReadSingle(); // legacy condition (удалена в v13)
             if (GameData.Items.TryGetValue(defId, out var def)) {
                 var item = GameData.NewItem(def);
-                item.Condition = Math.Clamp(cond, 0.0, 1.0);
                 session.Player.Inventory.InsertAt(index, new ItemEntry(item, qty));
+            }
+        }
+
+        if (version >= 9) {
+            bool hasOffhand = br.ReadBoolean();
+            if (hasOffhand) {
+                ushort defId = br.ReadUInt16();
+                int qty = br.ReadInt32();
+                if (version < 13) br.ReadSingle(); // legacy condition (удалена в v13)
+                if (GameData.Items.TryGetValue(defId, out var def)) {
+                    var item = GameData.NewItem(def);
+                    session.Player.OffhandEntry = new ItemEntry(item, qty);
+                }
             }
         }
 
@@ -279,14 +378,29 @@ public static class SaveSystem {
         for (int c = 0; c < chunkCount; c++) {
             var cc = new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32());
             var types = new ushort[Chunk.VoxelCount];
-            for (int i = 0; i < types.Length; i++) types[i] = br.ReadUInt16();
-            int partialCount = br.ReadInt32();
-            var partials = new Dictionary<int, float>();
-            for (int i = 0; i < partialCount; i++) {
-                int idx = br.ReadInt32();
-                partials[idx] = br.ReadSingle();
+            if (version >= 12) {
+                byte[] chunkBytes = br.ReadBytes(Chunk.VoxelCount * sizeof(ushort));
+                System.Runtime.InteropServices.MemoryMarshal.Cast<byte, ushort>(chunkBytes).CopyTo(types);
+            } else {
+                for (int i = 0; i < types.Length; i++) types[i] = br.ReadUInt16();
             }
-            session.World.LoadChunk(cc, types, partials);
+            if (version < 13) {
+                int partialCount = br.ReadInt32(); // legacy content volume (удалён в v13)
+                for (int i = 0; i < partialCount; i++) {
+                    _ = br.ReadInt32();
+                    _ = br.ReadSingle();
+                }
+            }
+            Dictionary<int, byte>? masks = null;
+            if (version >= 10) {
+                int maskCount = br.ReadInt32();
+                masks = new Dictionary<int, byte>();
+                for (int i = 0; i < maskCount; i++) {
+                    int idx = br.ReadInt32();
+                    masks[idx] = br.ReadByte();
+                }
+            }
+            session.World.LoadChunk(cc, types, masks);
         }
 
         int pickupCount = br.ReadInt32();
@@ -296,7 +410,7 @@ public static class SaveSystem {
             int qty = br.ReadInt32();
             var pos = ReadVec3(br);
             if (GameData.Items.TryGetValue(defId, out var def))
-                session.World.Pickups.Add(new ItemPickup(def, qty, pos));
+                session.World.Pickups.Add(new ItemPickup(GameData.NewItem(def), qty, pos));
         }
 
         int animalCount = br.ReadInt32();
@@ -342,19 +456,33 @@ public static class SaveSystem {
             int chestCount = br.ReadInt32();
             for (int ch = 0; ch < chestCount; ch++) {
                 var cpos = new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32());
-                var cinv = session.World.GetOrCreateChest(cpos);
+                if (!session.World.Chests.TryGetValue(cpos, out var cinv)) {
+                    cinv = new Container();
+                    session.World.Chests[cpos] = cinv;
+                }
+                session.World.LootedStructureChests.Add(cpos);
                 int cEntries = br.ReadInt32();
                 for (int ce = 0; ce < cEntries; ce++) {
                     int cidx = br.ReadInt32();
                     ushort cDefId = br.ReadUInt16();
                     int cQty = br.ReadInt32();
-                    float cCond = br.ReadSingle();
+                    if (version < 13) br.ReadSingle(); // legacy condition (удалена в v13)
                     if (GameData.Items.TryGetValue(cDefId, out var cDef)) {
                         var cItem = GameData.NewItem(cDef);
-                        cItem.Condition = Math.Clamp(cCond, 0.0, 1.0);
                         cinv.InsertAt(cidx, new ItemEntry(cItem, cQty));
                     }
                 }
+            }
+        }
+
+        if (version >= 10) {
+            int placedCount = br.ReadInt32();
+            for (int i = 0; i < placedCount; i++) {
+                session.World.PlacedChests.Add(new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32()));
+            }
+            int lootedCount = br.ReadInt32();
+            for (int i = 0; i < lootedCount; i++) {
+                session.World.LootedStructureChests.Add(new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32()));
             }
         }
 
@@ -370,10 +498,9 @@ public static class SaveSystem {
                 if (br.ReadBoolean()) {
                     ushort defId = br.ReadUInt16();
                     int qty = br.ReadInt32();
-                    float cond = br.ReadSingle();
+                    if (version < 13) br.ReadSingle(); // legacy condition (удалена в v13)
                     if (GameData.Items.TryGetValue(defId, out var def)) {
                         var itm = GameData.NewItem(def);
-                        itm.Condition = Math.Clamp(cond, 0.0, 1.0);
                         f.Input = new ItemEntry(itm, qty);
                     }
                 } else f.Input = null;
@@ -381,10 +508,9 @@ public static class SaveSystem {
                 if (br.ReadBoolean()) {
                     ushort defId = br.ReadUInt16();
                     int qty = br.ReadInt32();
-                    float cond = br.ReadSingle();
+                    if (version < 13) br.ReadSingle(); // legacy condition (удалена в v13)
                     if (GameData.Items.TryGetValue(defId, out var def)) {
                         var itm = GameData.NewItem(def);
-                        itm.Condition = Math.Clamp(cond, 0.0, 1.0);
                         f.Fuel = new ItemEntry(itm, qty);
                     }
                 } else f.Fuel = null;
@@ -392,18 +518,253 @@ public static class SaveSystem {
                 if (br.ReadBoolean()) {
                     ushort defId = br.ReadUInt16();
                     int qty = br.ReadInt32();
-                    float cond = br.ReadSingle();
+                    if (version < 13) br.ReadSingle(); // legacy condition (удалена в v13)
                     if (GameData.Items.TryGetValue(defId, out var def)) {
                         var itm = GameData.NewItem(def);
-                        itm.Condition = Math.Clamp(cond, 0.0, 1.0);
                         f.Output = new ItemEntry(itm, qty);
                     }
                 } else f.Output = null;
             }
         }
 
-        session.AddMessage("Мир загружен");
+        if (version >= 14) {
+            session.World.EndBossDefeated = br.ReadBoolean();
+            if (br.ReadBoolean()) {
+                float bossHp = br.ReadSingle();
+                var bossPos = ReadVec3(br);
+                float islandTop = session.World.Generator.EndSurfaceHeight(0, 0);
+                var islandCenter = new Vector3(0.5f, islandTop, 0.5f);
+                var boss = new EndSlime(bossPos, islandCenter, session.World.Seed) { Health = bossHp };
+                session.World.EndBoss = boss;
+            }
+        }
+
         return session;
+    }
+
+    // ── Загрузка формата v15: все измерения ─────────────────────────────────
+
+    private static GameSession LoadWorlds(BinaryReader br, bool headless) {
+        int masterSeed = br.ReadInt32();
+        float timeOfDay = br.ReadSingle();
+        var savedGameMode = (GameMode)br.ReadInt32();
+        bool savedKeepInv = br.ReadBoolean();
+        var currentDim = (Dimension)br.ReadInt32();
+
+        var session = new GameSession(headless) {
+            MasterSeed = masterSeed,
+            DayNight = new DayNightCycle(timeOfDay),
+            Player = new Player(),
+            GameMode = savedGameMode,
+            KeepInventory = savedKeepInv,
+        };
+
+        var p = session.Player;
+        var loadedPos = ReadVec3(br);
+        p.Yaw = br.ReadSingle();
+        p.Pitch = br.ReadSingle();
+        p.Health = br.ReadSingle();
+        p.Hunger = br.ReadSingle();
+        p.Saturation = br.ReadSingle();
+        p.HighestYInAir = br.ReadSingle();
+        p.SelectedSlot = br.ReadInt32();
+
+        int entryCount = br.ReadInt32();
+        for (int i = 0; i < entryCount; i++) {
+            int index = br.ReadInt32();
+            ushort defId = br.ReadUInt16();
+            int qty = br.ReadInt32();
+            if (GameData.Items.TryGetValue(defId, out var def)) {
+                p.Inventory.InsertAt(index, new ItemEntry(GameData.NewItem(def), qty));
+            }
+        }
+
+        if (br.ReadBoolean()) {
+            ushort defId = br.ReadUInt16();
+            int qty = br.ReadInt32();
+            if (GameData.Items.TryGetValue(defId, out var def)) {
+                p.OffhandEntry = new ItemEntry(GameData.NewItem(def), qty);
+            }
+        }
+
+        // Миры: Обычный/Нижний/Энд (столько, сколько было посещено)
+        int worldCount = br.ReadInt32();
+        GameWorld? overworld = null, nether = null, end = null;
+        for (int i = 0; i < worldCount; i++) {
+            var dim = (Dimension)br.ReadInt32();
+            int seed = br.ReadInt32();
+            var spawn = new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32());
+            var w = ReadWorldData(br, seed, dim);
+            w.SpawnBlock = spawn;
+            switch (dim) {
+                case Dimension.Overworld: overworld = w; break;
+                case Dimension.Nether: nether = w; break;
+                case Dimension.End: end = w; break;
+            }
+        }
+        session.OverworldWorld = overworld;
+        session.NetherWorld = nether;
+        session.EndWorld = end;
+
+        var currentWorld = currentDim switch {
+            Dimension.Overworld => overworld,
+            Dimension.Nether => nether,
+            Dimension.End => end,
+            _ => null,
+        };
+        session.World = currentWorld ?? overworld ?? new GameWorld(masterSeed) { Dimension = Dimension.Overworld };
+
+        if (float.IsNaN(loadedPos.X) || float.IsNaN(loadedPos.Y) || float.IsNaN(loadedPos.Z) ||
+            float.IsInfinity(loadedPos.X) || float.IsInfinity(loadedPos.Y) || float.IsInfinity(loadedPos.Z)) {
+            p.Position = session.World.GetSafeRespawnPosition(session.World.SpawnBlock);
+        } else {
+            p.Position = loadedPos;
+        }
+        return session;
+    }
+
+    private static GameWorld ReadWorldData(BinaryReader br, int seed, Dimension dim) {
+        var world = new GameWorld(seed) { Dimension = dim };
+
+        // Босс Слизня Края (только у Энда; для других измерений — false/null)
+        world.EndBossDefeated = br.ReadBoolean();
+        if (br.ReadBoolean()) {
+            float bossHp = br.ReadSingle();
+            var bossPos = ReadVec3(br);
+            float islandTop = world.Generator.EndSurfaceHeight(0, 0);
+            var islandCenter = new Vector3(0.5f, islandTop, 0.5f);
+            world.EndBoss = new EndSlime(bossPos, islandCenter, seed) { Health = bossHp };
+        }
+
+        int chunkCount = br.ReadInt32();
+        for (int c = 0; c < chunkCount; c++) {
+            var cc = new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32());
+            var types = new ushort[Chunk.VoxelCount];
+            byte[] chunkBytes = br.ReadBytes(Chunk.VoxelCount * sizeof(ushort));
+            System.Runtime.InteropServices.MemoryMarshal.Cast<byte, ushort>(chunkBytes).CopyTo(types);
+            int maskCount = br.ReadInt32();
+            Dictionary<int, byte>? masks = null;
+            if (maskCount > 0) {
+                masks = new Dictionary<int, byte>();
+                for (int i = 0; i < maskCount; i++) {
+                    int idx = br.ReadInt32();
+                    masks[idx] = br.ReadByte();
+                }
+            }
+            world.LoadChunk(cc, types, masks);
+        }
+
+        int pickupCount = br.ReadInt32();
+        world.Pickups.Clear();
+        for (int i = 0; i < pickupCount; i++) {
+            ushort defId = br.ReadUInt16();
+            int qty = br.ReadInt32();
+            var pos = ReadVec3(br);
+            if (GameData.Items.TryGetValue(defId, out var def))
+                world.Pickups.Add(new ItemPickup(GameData.NewItem(def), qty, pos));
+        }
+
+        int animalCount = br.ReadInt32();
+        world.Animals.Clear();
+        for (int i = 0; i < animalCount; i++) {
+            var animalType = (AnimalType)br.ReadInt32();
+            var pos = ReadVec3(br);
+            float hp = br.ReadSingle();
+            world.Animals.Add(new Animal(animalType, pos) { Health = hp });
+        }
+
+        int hostileCount = br.ReadInt32();
+        world.HostileMobs.Clear();
+        for (int i = 0; i < hostileCount; i++) {
+            var hType = (HostileType)br.ReadInt32();
+            var pos = ReadVec3(br);
+            float hp = br.ReadSingle();
+            world.HostileMobs.Add(new HostileMob(hType, pos) { Health = hp });
+        }
+
+        int fallingCount = br.ReadInt32();
+        world.FallingBlocks.Clear();
+        for (int i = 0; i < fallingCount; i++) {
+            ushort typeId = br.ReadUInt16();
+            var pos = ReadVec3(br);
+            world.FallingBlocks.Add(new FallingBlock(GameData.GetBlock(typeId), pos));
+        }
+
+        int burningCount = br.ReadInt32();
+        world.Fire.Burning.Clear();
+        for (int i = 0; i < burningCount; i++) {
+            var pos = new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32());
+            float remaining = br.ReadSingle();
+            world.Fire.Burning[pos] = remaining;
+        }
+        int campCount = br.ReadInt32();
+        world.Fire.Campfires.Clear();
+        for (int i = 0; i < campCount; i++) {
+            var pos = new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32());
+            world.Fire.Campfires.Add(pos);
+        }
+
+        int chestCount = br.ReadInt32();
+        world.Chests.Clear();
+        for (int ch = 0; ch < chestCount; ch++) {
+            var cpos = new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32());
+            if (!world.Chests.TryGetValue(cpos, out var cinv)) {
+                cinv = new Container();
+                world.Chests[cpos] = cinv;
+            }
+            world.LootedStructureChests.Add(cpos);
+            int cEntries = br.ReadInt32();
+            for (int ce = 0; ce < cEntries; ce++) {
+                int cidx = br.ReadInt32();
+                ushort cDefId = br.ReadUInt16();
+                int cQty = br.ReadInt32();
+                if (GameData.Items.TryGetValue(cDefId, out var cDef))
+                    cinv.InsertAt(cidx, new ItemEntry(GameData.NewItem(cDef), cQty));
+            }
+        }
+
+        int placedCount = br.ReadInt32();
+        world.PlacedChests.Clear();
+        for (int i = 0; i < placedCount; i++) {
+            world.PlacedChests.Add(new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32()));
+        }
+        int lootedCount = br.ReadInt32();
+        world.LootedStructureChests.Clear();
+        for (int i = 0; i < lootedCount; i++) {
+            world.LootedStructureChests.Add(new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32()));
+        }
+
+        int furnaceCount = br.ReadInt32();
+        for (int fn = 0; fn < furnaceCount; fn++) {
+            var fpos = new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32());
+            var f = world.GetOrCreateFurnace(fpos);
+            f.FuelTimer = br.ReadSingle();
+            f.MaxFuelTimer = br.ReadSingle();
+            f.SmeltTimer = br.ReadSingle();
+
+            if (br.ReadBoolean()) {
+                ushort defId = br.ReadUInt16();
+                int qty = br.ReadInt32();
+                if (GameData.Items.TryGetValue(defId, out var def))
+                    f.Input = new ItemEntry(GameData.NewItem(def), qty);
+            } else f.Input = null;
+
+            if (br.ReadBoolean()) {
+                ushort defId = br.ReadUInt16();
+                int qty = br.ReadInt32();
+                if (GameData.Items.TryGetValue(defId, out var def))
+                    f.Fuel = new ItemEntry(GameData.NewItem(def), qty);
+            } else f.Fuel = null;
+
+            if (br.ReadBoolean()) {
+                ushort defId = br.ReadUInt16();
+                int qty = br.ReadInt32();
+                if (GameData.Items.TryGetValue(defId, out var def))
+                    f.Output = new ItemEntry(GameData.NewItem(def), qty);
+            } else f.Output = null;
+        }
+
+        return world;
     }
 
     private static void WriteVec3(BinaryWriter bw, Vector3 v) {
@@ -416,9 +777,23 @@ public static class SaveSystem {
 
     // ── Настройки (JSON) ───────────────────────────────────────────────────
 
-    public static bool FancyGraphics = true;
+    public enum GraphicsPreset {
+        Fast = 0,       // Быстрая: максимальный FPS, упрощенные облака/частицы, без тяжелых каркасов
+        Fancy = 1,      // Красивая: сбалансированная графика (3D облака, тени, подводный туман)
+        Fabulous = 2    // Ультра: максимальный визуал, плотный туман, полный набор частиц и света
+    }
+
+    public static GraphicsPreset GraphicsQuality = GraphicsPreset.Fancy;
+    public static bool FancyGraphics {
+        get => GraphicsQuality != GraphicsPreset.Fast;
+        set => GraphicsQuality = value ? GraphicsPreset.Fancy : GraphicsPreset.Fast;
+    }
+    public static int CloudsMode = 2; // 0=Off, 1=Fast, 2=Fancy
+    public static int ParticlesMode = 2; // 0=Minimal, 1=Decreased, 2=All
+    public static bool DynamicLighting = true;
+    public static bool EntityShadows = true;
     public static int SoundVolume = 100; // 0..100%
-    public static int RenderDistanceSetting = 5; // 3, 5, 7
+    public static int RenderDistanceSetting = 5; // 2..20
 
     public static void SaveSettings() {
         try {
@@ -438,7 +813,12 @@ public static class SaveSystem {
                 ["Fullscreen"] = Raylib_cs.Raylib.IsWindowState(Raylib_cs.ConfigFlags.UndecoratedWindow) || Raylib_cs.Raylib.IsWindowFullscreen(),
                 ["Width"] = Raylib_cs.Raylib.GetScreenWidth(),
                 ["Height"] = Raylib_cs.Raylib.GetScreenHeight(),
+                ["GraphicsQuality"] = (int)GraphicsQuality,
                 ["FancyGraphics"] = FancyGraphics,
+                ["CloudsMode"] = CloudsMode,
+                ["ParticlesMode"] = ParticlesMode,
+                ["DynamicLighting"] = DynamicLighting,
+                ["EntityShadows"] = EntityShadows,
                 ["SoundVolume"] = SoundVolume,
                 ["RenderDistanceSetting"] = RenderDistanceSetting,
             };
@@ -465,7 +845,18 @@ public static class SaveSystem {
             R("Inventory", v => KeyBinds.Inventory = (Raylib_cs.KeyboardKey)v);
             R("Crafting", v => KeyBinds.Crafting = (Raylib_cs.KeyboardKey)v);
             R("Pause", v => KeyBinds.Pause = (Raylib_cs.KeyboardKey)v);
-            B("FancyGraphics", v => FancyGraphics = v);
+            R("GraphicsQuality", v => {
+                GraphicsQuality = (GraphicsPreset)Math.Clamp(v, 0, 2);
+            });
+            B("FancyGraphics", v => {
+                if (!root.TryGetProperty("GraphicsQuality", out _)) {
+                    GraphicsQuality = v ? GraphicsPreset.Fancy : GraphicsPreset.Fast;
+                }
+            });
+            R("CloudsMode", v => CloudsMode = Math.Clamp(v, 0, 2));
+            R("ParticlesMode", v => ParticlesMode = Math.Clamp(v, 0, 2));
+            B("DynamicLighting", v => DynamicLighting = v);
+            B("EntityShadows", v => EntityShadows = v);
             R("SoundVolume", v => SoundVolume = v);
             R("RenderDistanceSetting", v => RenderDistanceSetting = v);
         } catch { }

@@ -45,8 +45,10 @@ namespace VoxelFrame.Game;
     /// Строит GPU-меши чанка. Если вершин больше лимита ushort-индексов —
     /// возвращает НЕСКОЛЬКО мешей (большие постройки не обрезаются).
     /// </summary>
-    public static List<Mesh> Build(GameChunk gc, GameWorld world) {
-        var result = new List<Mesh>();
+    public static (List<Mesh> Opaque, List<Mesh> Translucent) Build(GameChunk gc, GameWorld world) {
+        var resultOpaque = new List<Mesh>();
+        var resultTranslucent = new List<Mesh>();
+        var currentResult = resultOpaque;
         var verts = _tVerts ??= new List<float>(8192); verts.Clear();
         var norms = _tNorms ??= new List<float>(8192); norms.Clear();
         var uvs = _tUvs ??= new List<float>(8192); uvs.Clear();
@@ -57,7 +59,7 @@ namespace VoxelFrame.Game;
         // считаются от 0 своего меша, поэтому после сброса продолжаем так же.
         void Flush() {
             if (verts.Count == 0) return;
-            result.Add(UploadMesh(verts, norms, uvs, cols, indices));
+            currentResult.Add(UploadMesh(verts, norms, uvs, cols, indices));
             verts.Clear(); norms.Clear(); uvs.Clear(); cols.Clear(); indices.Clear();
         }
 
@@ -71,7 +73,9 @@ namespace VoxelFrame.Game;
             }
         }
 
-        for (int lx = 0; lx < Chunk.SizeX; lx++) {
+        for (int pass = 0; pass < 2; pass++) {
+            currentResult = pass == 0 ? resultOpaque : resultTranslucent;
+            for (int lx = 0; lx < Chunk.SizeX; lx++) {
             for (int ly = 0; ly < Chunk.SizeY; ly++) {
                 for (int lz = 0; lz < Chunk.SizeZ; lz++) {
                     int idx = Chunk.Index(lx, ly, lz);
@@ -81,6 +85,9 @@ namespace VoxelFrame.Game;
                     bool isFluid = v.TypeId == GameData.BWater.Id || v.TypeId == GameData.BLava.Id;
                     bool isWater = v.TypeId == GameData.BWater.Id;
                     bool isFoliage = v.TypeId == GameData.BTallGrass.Id || v.TypeId == GameData.BWheatCrop.Id;
+                    bool isTranslucent = isFluid || isFoliage || GameData.IsDoor(v.TypeId) || v.TypeId == GameData.BGlass.Id || v.TypeId == GameData.BBed.Id || v.TypeId == GameData.BBedHead.Id;
+                    if (pass == 0 && isTranslucent) continue;
+                    if (pass == 1 && !isTranslucent) continue;
 
                     if (isFoliage) {
                         byte foliageTile = v.TypeId == GameData.BTallGrass.Id
@@ -151,7 +158,7 @@ namespace VoxelFrame.Game;
                         continue;
                     }
 
-                    // ── Тонкие 3D-двери (Minecraft Door: панель толщиной 3/16 м с поворотом на 90° при открытии) ──
+                    // ── Тонкие 3D-двери (панель толщиной 3/16 м с поворотом на 90° при открытии) ──
                     if (GameData.IsDoor(v.TypeId)) {
                         byte facing = (byte)(v.SubGridLayerMask & 3);
                         bool isOpen = (v.SubGridLayerMask & 8) != 0;
@@ -226,6 +233,95 @@ namespace VoxelFrame.Game;
                         continue;
                     }
 
+                    // ── Полноценная геометрия жидкостей (Вода и Лава: ступени потока без щелей и просветов) ──
+                    if (isFluid) {
+                        ushort aboveType = GetTypeIdAtOffset(neighbors, gc, lx, ly, lz, 0, 1, 0);
+                        float selfH = (aboveType == v.TypeId) ? 1.0f : GetFluidHeight(v.TypeId, v.SubGridLayerMask);
+                        byte fluidTile = (byte)(isWater ? TextureAtlas.TWater : TextureAtlas.TLava);
+                        var (u0, v0, u1, v1) = TileUv(fluidTile);
+                        byte alpha = isWater ? (byte)210 : (byte)255;
+
+                        float worldOffsetX = gc.Coord.X * Chunk.SizeX;
+                        float worldOffsetY = gc.Coord.Y * Chunk.SizeY;
+                        float worldOffsetZ = gc.Coord.Z * Chunk.SizeZ;
+
+                        for (int f = 0; f < 6; f++) {
+                            var (dx, dy, dz, nx, ny, nz) = Faces[f];
+                            float yBottom = 0f, yTop = selfH;
+                            bool renderFace = false;
+
+                            if (f == 2) { // Верхняя грань (+Y)
+                                ushort topNeighbor = GetTypeIdAtOffset(neighbors, gc, lx, ly, lz, 0, 1, 0);
+                                if (topNeighbor != v.TypeId && (topNeighbor == 0 || !GameData.GetBlock(topNeighbor).IsOpaque)) {
+                                    renderFace = true;
+                                    yBottom = selfH;
+                                    yTop = selfH;
+                                }
+                            } else if (f == 3) { // Нижняя грань (-Y)
+                                ushort bottomNeighbor = GetTypeIdAtOffset(neighbors, gc, lx, ly, lz, 0, -1, 0);
+                                if (bottomNeighbor != v.TypeId && (bottomNeighbor == 0 || !GameData.GetBlock(bottomNeighbor).IsOpaque)) {
+                                    renderFace = true;
+                                    yBottom = 0f;
+                                    yTop = 0f;
+                                }
+                            } else { // Боковые грани (±X, ±Z)
+                                var neighborVox = GetVoxelAtOffset(neighbors, gc, lx, ly, lz, dx, 0, dz);
+                                ushort nType = neighborVox.TypeId;
+                                if (nType == v.TypeId) {
+                                    ushort nAbove = GetTypeIdAtOffset(neighbors, gc, lx, ly, lz, dx, 1, dz);
+                                    float neighborH = (nAbove == v.TypeId) ? 1.0f : GetFluidHeight(nType, neighborVox.SubGridLayerMask);
+                                    if (selfH > neighborH + 0.01f) {
+                                        renderFace = true;
+                                        yBottom = neighborH;
+                                        yTop = selfH;
+                                    }
+                                } else if (nType == 0 || (!GameData.GetBlock(nType).IsOpaque && nType != v.TypeId)) {
+                                    renderFace = true;
+                                    yBottom = 0f;
+                                    yTop = selfH;
+                                }
+                            }
+
+                            if (!renderFace) continue;
+
+                            if (verts.Count / 3 + 4 > MaxVertices) Flush();
+                            int baseVertex = verts.Count / 3;
+
+                            var (sun, blockL) = GetFaceLight(neighbors, gc, lx, ly, lz, dx, dy, dz);
+                            float faceDir = f switch {
+                                2 => 1.0f,
+                                3 => 0.55f,
+                                0 or 1 => 0.82f,
+                                _ => 0.68f
+                            };
+                            byte shadeDir = (byte)(255f * faceDir);
+                            byte shadeSun = (byte)(255f * sun);
+                            byte shadeBlock = (byte)(255f * blockL);
+
+                            foreach (var (fx, fy, fz, fu, fv) in FaceVerts[f]) {
+                                float actualFy = (f == 2) ? selfH : (f == 3) ? 0f : (fy > 0.5f ? yTop : yBottom);
+                                float actualFu = fu;
+                                float actualFv = (f == 2 || f == 3) ? fv : (1f - (fy > 0.5f ? yTop : yBottom));
+
+                                verts.Add(worldOffsetX + lx + fx);
+                                verts.Add(worldOffsetY + ly + actualFy);
+                                verts.Add(worldOffsetZ + lz + fz);
+                                norms.Add(nx); norms.Add(ny); norms.Add(nz);
+                                uvs.Add(u0 + (u1 - u0) * actualFu);
+                                uvs.Add(v0 + (v1 - v0) * actualFv);
+                                cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(shadeDir); cols.Add(alpha);
+                            }
+
+                            indices.Add((ushort)(baseVertex + 0));
+                            indices.Add((ushort)(baseVertex + 1));
+                            indices.Add((ushort)(baseVertex + 2));
+                            indices.Add((ushort)(baseVertex + 0));
+                            indices.Add((ushort)(baseVertex + 2));
+                            indices.Add((ushort)(baseVertex + 3));
+                        }
+                        continue;
+                    }
+
                     if (!block.IsSolid && !block.IsOpaque && !isFluid) continue;   // факелы рисуются как 3D-декор
 
                     var tiles = TextureAtlas.BlockTiles(v.TypeId);
@@ -234,16 +330,11 @@ namespace VoxelFrame.Game;
                         ushort neighborType = GetTypeIdAtOffset(neighbors, gc, lx, ly, lz, dx, dy, dz);
                         
                         bool visible;
-                        if (isFluid) {
-                            // Жидкость показывает грань, только если рядом воздух (и соседний чанк загружен) или неполный блок
-                            int nChunkDx = (lx + dx < 0) ? -1 : (lx + dx >= 32) ? 1 : 0;
-                            int nChunkDy = (ly + dy < 0) ? -1 : (ly + dy >= 32) ? 1 : 0;
-                            int nChunkDz = (lz + dz < 0) ? -1 : (lz + dz >= 32) ? 1 : 0;
-                            bool isLoadedNeighbor = neighbors[nChunkDx + 1, nChunkDy + 1, nChunkDz + 1] != null;
-
-                            visible = neighborType != v.TypeId && isLoadedNeighbor && (neighborType == 0 || !GameData.GetBlock(neighborType).IsOpaque);
-                        } else if (v.TypeId == GameData.BGlass.Id) {
+                        if (v.TypeId == GameData.BGlass.Id) {
                             visible = neighborType != GameData.BGlass.Id && !IsOpaqueAtOffset(neighbors, lx, ly, lz, dx, dy, dz);
+                        } else if (v.TypeId == GameData.BLeaves.Id) {
+                            // Листва не рисует внутренние соприкасающиеся грани с соседней листвой (буст FPS в 3-4 раза в лесу)
+                            visible = neighborType != GameData.BLeaves.Id && (neighborType == 0 || !GameData.GetBlock(neighborType).IsOpaque || neighborType == GameData.BWater.Id);
                         } else {
                             // Твердый блок показывает грань если рядом воздух, стекло, листва или полупрозрачная вода
                             visible = neighborType == 0 || !GameData.GetBlock(neighborType).IsOpaque || neighborType == GameData.BWater.Id;
@@ -273,11 +364,7 @@ namespace VoxelFrame.Game;
                             byte shadeBlock = (byte)(255f * blockL * ao);
 
                             float actualFy = fy;
-                            if (isWater && f == 2 && fy > 0.5f) {
-                                byte lvl = v.SubGridLayerMask;
-                                if (lvl == 0 || lvl == FluidEngine.FallingLevel) actualFy = 0.90f;
-                                else actualFy = MathF.Max(0.35f, 0.90f - lvl * 0.08f);
-                            } else if ((v.TypeId == GameData.BBed.Id || v.TypeId == GameData.BBedHead.Id) && fy > 0.5f) {
+                            if ((v.TypeId == GameData.BBed.Id || v.TypeId == GameData.BBedHead.Id) && fy > 0.5f) {
                                 actualFy = 0.56f;
                             }
 
@@ -298,7 +385,7 @@ namespace VoxelFrame.Game;
                             norms.Add(nx); norms.Add(ny); norms.Add(nz);
                             uvs.Add(u0 + (u1 - u0) * actualFu);
                             uvs.Add(v0 + (v1 - v0) * actualFv);
-                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(shadeDir); cols.Add(isWater ? (byte)210 : (byte)255);
+                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(shadeDir); cols.Add((byte)255);
                         }
                         indices.Add((ushort)(baseVertex + 0));
                         indices.Add((ushort)(baseVertex + 1));
@@ -306,13 +393,13 @@ namespace VoxelFrame.Game;
                         indices.Add((ushort)(baseVertex + 0));
                         indices.Add((ushort)(baseVertex + 2));
                         indices.Add((ushort)(baseVertex + 3));
-                    }
+                    }                    }
                 }
             }
+            Flush();
         }
 
-        Flush();
-        return result;
+        return (resultOpaque, resultTranslucent);
     }
 
     private static (float Sun, float Block) GetFaceLight(GameChunk?[,,] neighbors, GameChunk gc, int lx, int ly, int lz, int dx, int dy, int dz) {
@@ -338,8 +425,11 @@ namespace VoxelFrame.Game;
 
         int wy = (gc.Coord.Y + cdy) * Chunk.SizeY + nly;
         int surf = gc.Surface[gc.SurfaceIndex(lx, lz)];
-        float fallbackSun = wy >= surf ? 1f : 0f;
-        return (fallbackSun, 0f);
+        if (surf != int.MinValue && wy >= surf) {
+            return (1f, 0f);
+        }
+        int selfIdx = Chunk.Index(lx, ly, lz);
+        return (gc.SunLight[selfIdx] / 15f, gc.BlockLight[selfIdx] / 15f);
     }
 
     private static (float U0, float V0, float U1, float V1) TileUv(byte tile) {
@@ -375,6 +465,42 @@ namespace VoxelFrame.Game;
             if (src != null)
                 Buffer.MemoryCopy(src, dest, span.Length * sizeof(T), span.Length * sizeof(T));
         }
+    }
+
+    public static float GetFluidHeight(ushort typeId, byte level) {
+        if (typeId == GameData.BWater.Id) {
+            if (level == 0 || level == FluidEngine.FallingLevel) return 0.88f;
+            return Math.Clamp(0.88f - (level / 7.0f) * 0.65f, 0.20f, 0.88f);
+        }
+        if (typeId == GameData.BLava.Id) {
+            if (level == 0 || level == FluidEngine.FallingLevel) return 0.88f;
+            return Math.Clamp(0.88f - (level / 3.0f) * 0.65f, 0.23f, 0.88f);
+        }
+        return 1.0f;
+    }
+
+    private static VoxelData GetVoxelAtOffset(GameChunk?[,,] neighbors, GameChunk gc, int lx, int ly, int lz, int ox, int oy, int oz) {
+        int nlx = lx + ox;
+        int nly = ly + oy;
+        int nlz = lz + oz;
+
+        int cdx = 0, cdy = 0, cdz = 0;
+        if (nlx < 0) { cdx = -1; nlx += 32; }
+        else if (nlx >= 32) { cdx = 1; nlx -= 32; }
+
+        if (nly < 0) { cdy = -1; nly += 32; }
+        else if (nly >= 32) { cdy = 1; nly -= 32; }
+
+        if (nlz < 0) { cdz = -1; nlz += 32; }
+        else if (nlz >= 32) { cdz = 1; nlz -= 32; }
+
+        var nChunk = neighbors[cdx + 1, cdy + 1, cdz + 1];
+        if (nChunk == null) {
+            int wy = (gc.Coord.Y + cdy) * 32 + nly;
+            int surf = gc.Surface[gc.SurfaceIndex(lx, lz)];
+            return wy < surf ? new VoxelData { TypeId = GameData.BStone.Id, Flags = VoxelFlags.Solid } : default;
+        }
+        return nChunk.Chunk.Get(nlx, nly, nlz);
     }
 
     private static ushort GetTypeIdAtOffset(GameChunk?[,,] neighbors, GameChunk gc, int lx, int ly, int lz, int ox, int oy, int oz) {
@@ -534,3 +660,6 @@ namespace VoxelFrame.Game;
         };
     }
 }
+
+
+

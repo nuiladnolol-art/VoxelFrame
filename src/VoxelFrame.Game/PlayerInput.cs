@@ -7,10 +7,11 @@ public struct PlayerInput {
     public float MoveX;          // +1 = вправо (D)
     public float MoveZ;          // +1 = вперёд (W)
     public bool Jump;
+    public bool JumpPressed;
     public bool AttackHeld;      // ЛКМ зажата (ломание блоков)
     public bool AttackPressed;   // ЛКМ нажата в этом кадре (удары по мобам / клик)
     public bool UsePressed;      // ПКМ нажата в этом кадре (установка/еда)
-    public bool UseHeld;         // ПКМ зажата (непрерывная установка как в MC)
+    public bool UseHeld;         // ПКМ зажата (непрерывное действие/установка)
     public float MouseDX, MouseDY;
     public int Scroll;
     public bool OpenInventory;   // E
