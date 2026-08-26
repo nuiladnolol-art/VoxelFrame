@@ -1,4 +1,5 @@
 using System;
+using System.Numerics;
 using VoxelFrame.Core;
 using VoxelFrame.Core.World;
 
@@ -236,7 +237,131 @@ public sealed class WorldGenerator {
         if (chunk.Origin.Y == 1 || chunk.Origin.Y == 2) {
             PlaceVillages(chunk, ox, oz);
             PlaceRuinedPortals(chunk, ox, oy, oz);
+            PlaceEndStrongholds(chunk, ox, oy, oz);
         }
+    }
+
+    // ── Крепости Энда (strongholds) в обычном мире ─────────────────────────────
+    private const int EndStrongholdsCount = 6;
+    private const int EndStrongholdRingRadius = 700; // крепости ближе друг к другу (было 1200)
+
+    /// <summary>Детерминированный центр i-й крепости Энда (мировые XZ).</summary>
+    private (int X, int Z) EndStrongholdCenter(int i) {
+        int hash = unchecked((int)i * -1640531535 + 2137107477); // 0x9E3779B9, 0x7F4A7C15 как int
+        var rng = new Random(_seed ^ hash);
+        float angle = i / (float)EndStrongholdsCount * MathF.Tau + (float)rng.NextDouble() * 0.4f;
+        float dist = EndStrongholdRingRadius + rng.Next(-120, 160);
+        int x = (int)(MathF.Cos(angle) * dist);
+        int z = (int)(MathF.Sin(angle) * dist);
+        return (x, z);
+    }
+
+    /// <summary>Ближайшая к точке крепость Энда (мировые координаты, поверхность).</summary>
+    public Vector3? FindNearestEndStronghold(Vector3 from) {
+        Vector3? best = null;
+        float bestDist = float.MaxValue;
+        for (int i = 0; i < EndStrongholdsCount; i++) {
+            var (cx, cz) = EndStrongholdCenter(i);
+            // Крепость не генерируется над водой/пляжем — такую не показываем глазу
+            if (SurfaceHeight(cx, cz) <= SeaLevel + 6) continue;
+            float dx = cx - from.X, dz = cz - from.Z;
+            float d = dx * dx + dz * dz;
+            if (d < bestDist) {
+                bestDist = d;
+                best = new Vector3(cx + 0.5f, SurfaceHeight(cx, cz) + 0.5f, cz + 0.5f);
+            }
+        }
+        return best;
+    }
+
+    /// <summary>Кладёт крепость Энда в чанки, пересекающиеся с её зоной.</summary>
+    private void PlaceEndStrongholds(Chunk chunk, int ox, int oy, int oz) {
+        for (int i = 0; i < EndStrongholdsCount; i++) {
+            var (cx, cz) = EndStrongholdCenter(i);
+            const int radius = 16;
+            if (cx + radius < ox || cx - radius > ox + Chunk.SizeX - 1) continue;
+            if (cz + radius < oz || cz - radius > oz + Chunk.SizeZ - 1) continue;
+            PlaceEndStronghold(chunk, ox, oy, oz, cx, cz);
+        }
+    }
+
+    /// <summary>
+    /// Подземная крепость Энда: большая портальная камера в толще камня,
+    /// кольцо 4×4 рамок, боковые сокровищницы и входная шахта с поверхности.
+    /// </summary>
+    private void PlaceEndStronghold(Chunk chunk, int ox, int oy, int oz, int cWX, int cWZ) {
+        int surface = SurfaceHeight(cWX, cWZ);
+        if (surface <= SeaLevel + 6) return; // не в воде/пляже
+
+        // Портальная камера — глубоко под поверхностью (в Y-чанке 1)
+        int roomY = Math.Clamp(surface - 20, 34, 100);
+        const int hw = 8;   // полуширина камеры (17×17)
+        const int hh = 5;   // высота камеры
+
+        // 1. Пол из камня
+        for (int dx = -hw; dx <= hw; dx++)
+            for (int dz = -hw; dz <= hw; dz++)
+                SetWorldBlock(chunk, ox, oy, oz, cWX + dx, roomY, cWZ + dz, GameData.BStone.Id);
+
+        // 2. Стены (булыжник) и воздух внутри
+        for (int dx = -hw; dx <= hw; dx++) {
+            for (int dz = -hw; dz <= hw; dz++) {
+                for (int dy = 1; dy < hh; dy++) {
+                    bool wall = Math.Abs(dx) == hw || Math.Abs(dz) == hw;
+                    SetWorldBlock(chunk, ox, oy, oz, cWX + dx, roomY + dy, cWZ + dz,
+                        wall ? GameData.BCobblestone.Id : (ushort)0);
+                }
+            }
+        }
+
+        // 3. Потолок
+        for (int dx = -hw; dx <= hw; dx++)
+            for (int dz = -hw; dz <= hw; dz++)
+                SetWorldBlock(chunk, ox, oy, oz, cWX + dx, roomY + hh, cWZ + dz, GameData.BCobblestone.Id);
+
+        // 4. Кольцо 4×4 из 12 рамок портала Энда в центре пола
+        for (int dx = -2; dx <= 1; dx++)
+            for (int dz = -2; dz <= 1; dz++) {
+                bool ring = dx == -2 || dx == 1 || dz == -2 || dz == 1;
+                SetWorldBlock(chunk, ox, oy, oz, cWX + dx, roomY + 1, cWZ + dz,
+                    ring ? GameData.BEndPortalFrame.Id : (ushort)0);
+            }
+
+        // 5. Внутренние колонны и факелы
+        SetWorldBlock(chunk, ox, oy, oz, cWX - hw + 2, roomY + 1, cWZ - hw + 2, GameData.BCobblestone.Id);
+        SetWorldBlock(chunk, ox, oy, oz, cWX - hw + 2, roomY + 2, cWZ - hw + 2, GameData.BTorch.Id, 2);
+        SetWorldBlock(chunk, ox, oy, oz, cWX + hw - 2, roomY + 1, cWZ - hw + 2, GameData.BCobblestone.Id);
+        SetWorldBlock(chunk, ox, oy, oz, cWX + hw - 2, roomY + 2, cWZ - hw + 2, GameData.BTorch.Id, 1);
+        SetWorldBlock(chunk, ox, oy, oz, cWX - hw + 2, roomY + 1, cWZ + hw - 2, GameData.BCobblestone.Id);
+        SetWorldBlock(chunk, ox, oy, oz, cWX - hw + 2, roomY + 2, cWZ + hw - 2, GameData.BTorch.Id, 2);
+        SetWorldBlock(chunk, ox, oy, oz, cWX + hw - 2, roomY + 1, cWZ + hw - 2, GameData.BCobblestone.Id);
+        SetWorldBlock(chunk, ox, oy, oz, cWX + hw - 2, roomY + 2, cWZ + hw - 2, GameData.BTorch.Id, 1);
+
+        // 6. Сокровищницы в боковых стенах (сундуки)
+        SetWorldBlock(chunk, ox, oy, oz, cWX - hw, roomY + 1, cWZ - 1, GameData.BChest.Id, 3);
+        SetWorldBlock(chunk, ox, oy, oz, cWX + hw, roomY + 1, cWZ + 1, GameData.BChest.Id, 1);
+
+        // 7. Входная шахта с поверхности в камеру (через потолок), со ступеньками
+        for (int y = surface; y >= roomY + hh; y--) {
+            SetWorldBlock(chunk, ox, oy, oz, cWX, y, cWZ, 0);
+            SetWorldBlock(chunk, ox, oy, oz, cWX + 1, y, cWZ, 0);
+            if (y % 2 == 0) {
+                SetWorldBlock(chunk, ox, oy, oz, cWX, y - 1, cWZ, GameData.BCobblestone.Id);
+                SetWorldBlock(chunk, ox, oy, oz, cWX + 1, y - 1, cWZ, GameData.BCobblestone.Id);
+            }
+        }
+        // Проём в потолке камеры над шахтой
+        SetWorldBlock(chunk, ox, oy, oz, cWX, roomY + hh, cWZ, 0);
+        SetWorldBlock(chunk, ox, oy, oz, cWX + 1, roomY + hh, cWZ, 0);
+
+        // 8. Заметный маркер на поверхности над крепостью — чтобы её легко было найти
+        int markerY = surface;
+        SetWorldBlock(chunk, ox, oy, oz, cWX, markerY, cWZ, GameData.BCobblestone.Id);
+        SetWorldBlock(chunk, ox, oy, oz, cWX + 1, markerY, cWZ, GameData.BCobblestone.Id);
+        SetWorldBlock(chunk, ox, oy, oz, cWX, markerY, cWZ + 1, GameData.BCobblestone.Id);
+        SetWorldBlock(chunk, ox, oy, oz, cWX + 1, markerY, cWZ + 1, GameData.BCobblestone.Id);
+        SetWorldBlock(chunk, ox, oy, oz, cWX, markerY + 1, cWZ, GameData.BTorch.Id, 3);
+        SetWorldBlock(chunk, ox, oy, oz, cWX + 1, markerY + 1, cWZ, GameData.BTorch.Id, 3);
     }
 
     private void PlaceFoliage(Chunk chunk, int ox, int oz) {
@@ -288,7 +413,7 @@ public sealed class WorldGenerator {
                 // Вертикальные разломы / Каньоны (Ravines)
                 float ravineAngle = wx * 0.018f + wz * 0.012f;
                 float ravineDist = MathF.Abs(MathF.Sin(ravineAngle) * 35f - (wz * 0.035f));
-                bool isRavine = ravineDist < 1.8f;
+                bool isRavine = ravineDist < 1.1f;
 
                 for (int ly = 0; ly < Chunk.SizeY; ly++) {
                     int wy = oy + ly;
@@ -299,24 +424,24 @@ public sealed class WorldGenerator {
                     ushort cur = chunk.Get(idx).TypeId;
                     if (cur == 0 || cur == GameData.BBedrock.Id) continue;
 
-                    // 1. Cheese Caves (Массивные глубокие залы и просторные гроты)
+                    // 1. Cheese Caves (Редкие огромные залы и просторные гроты)
                     float cheese = _caveCheese.Fractal(wx * 0.012f, wy * 0.018f + 100f, wz * 0.012f, 3, 0.5f);
-                    bool isCheese = (wy < 36 ? cheese > 0.47f : cheese > 0.55f) && wy < surface - 3;
+                    bool isCheese = (wy < 36 ? cheese > 0.62f : cheese > 0.68f) && wy < surface - 3;
 
-                    // 2. Spaghetti Caves (Извилистые разветвленные туннели)
+                    // 2. Spaghetti Caves (Узкие извилистые туннели — редкие)
                     float sp1 = _caveSpaghetti1.Get(wx * 0.022f + wy * 0.014f, wz * 0.022f);
                     float sp2 = _caveSpaghetti2.Get(wx * 0.022f, wz * 0.022f + wy * 0.014f + 500f);
-                    bool isSpaghetti = (sp1 * sp1 + sp2 * sp2) < 0.026f && wy < surface - 2;
+                    bool isSpaghetti = (sp1 * sp1 + sp2 * sp2) < 0.012f && wy < surface - 2;
 
-                    // 3. Noodle Caves (Узкие лабиринты и вертикальные расщелины)
+                    // 3. Noodle Caves (Узкие вертикальные расщелины — редкие)
                     float noodle = _caveNoodle.Get(wx * 0.015f + 2000f, wz * 0.015f + wy * 0.028f);
-                    bool isNoodle = MathF.Abs(noodle) < 0.026f && wy > 6 && wy < surface - 2;
+                    bool isNoodle = MathF.Abs(noodle) < 0.012f && wy > 6 && wy < surface - 2;
 
                     // 4. Каньон / Разлом (глубокий вертикальный разрез)
                     bool inRavine = isRavine && wy >= 9 && wy <= surface - 4;
 
                     // Выходы пещер и разломов на поверхность
-                    bool surfaceBreach = wy >= surface - 3 && (isSpaghetti || isNoodle || inRavine) && cheese > 0.45f;
+                    bool surfaceBreach = wy >= surface - 3 && (isSpaghetti || isNoodle || inRavine) && cheese > 0.5f;
 
                     if (isCheese || isSpaghetti || isNoodle || inRavine || surfaceBreach) {
                         ushort replaceWith;
@@ -429,7 +554,7 @@ public sealed class WorldGenerator {
                     int maxGoldY = (biome == BiomeType.Desert) ? 65 : 34;
                     if (wy <= maxGoldY) {
                         float goldN = _goldNoise.Fractal(wx * 0.22f + 700f, wy * 0.22f, wz * 0.22f, 2, 0.5f);
-                        if (goldN > 0.72f) {
+                        if (goldN > 0.80f) {
                             var v = MakeVoxel(GameData.BGoldOre.Id);
                             chunk.SetVoxel(idx, in v);
                             continue;
@@ -439,7 +564,7 @@ public sealed class WorldGenerator {
                     // Редстоун (Redstone) — жилы на глубине Y=1..20
                     if (wy <= 20) {
                         float redN = _oreNoise.Fractal(wx * 0.24f + 1200f, wy * 0.24f, wz * 0.24f, 2, 0.5f);
-                        if (redN > 0.74f) {
+                        if (redN > 0.82f) {
                             var v = MakeVoxel(GameData.BRedstoneOre.Id);
                             chunk.SetVoxel(idx, in v);
                             continue;
@@ -449,7 +574,7 @@ public sealed class WorldGenerator {
                     // Алмазы (Diamond) — жилы на глубине Y=1..16 (чем глубже, тем больше)
                     if (wy <= 16) {
                         float diaN = _diamondNoise.Fractal(wx * 0.24f + 5000f, wy * 0.24f, wz * 0.24f, 2, 0.5f);
-                        float threshold = wy <= 8 ? 0.69f : 0.73f;
+                        float threshold = wy <= 8 ? 0.79f : 0.82f;
                         if (diaN > threshold) {
                             var v = MakeVoxel(GameData.BDiamondOre.Id);
                             chunk.SetVoxel(idx, in v);
@@ -528,8 +653,8 @@ public sealed class WorldGenerator {
     /// Деревни появляются на равнинах и в лесах вне пустынь и водоёмов.
     /// </summary>
     private void PlaceVillages(Chunk chunk, int ox, int oz) {
-        // Размер сектора деревни: 16×16 чанков = 512×512 блоков
-        const int villageSectorChunks = 16;
+        // Размер сектора деревни: 10×10 чанков = 320×320 блоков (деревни ближе друг к другу)
+        const int villageSectorChunks = 10;
         const int villageSectorBlocks = villageSectorChunks * Chunk.SizeX;
 
         int chunkX = ox / Chunk.SizeX;
@@ -843,7 +968,7 @@ public sealed class WorldGenerator {
     }
 
     private void PlaceRuinedPortals(Chunk chunk, int ox, int oy, int oz) {
-        const int portalSectorSize = 512; // Редкий разрушенный портал
+        const int portalSectorSize = 320; // Разрушенный портал (раньше 512)
         int sectorX = (int)MathF.Floor((float)ox / portalSectorSize);
         int sectorZ = (int)MathF.Floor((float)oz / portalSectorSize);
 
@@ -1160,8 +1285,10 @@ public sealed class WorldGenerator {
     /// <summary>Высота твердой поверхности центрального острова Энда в мировых координатах (для спавна).</summary>
     public int EndSurfaceHeight(int wx, int wz) {
         float distC = MathF.Sqrt(wx * wx + wz * wz);
-        if (distC >= 42f) return 40;
-        float top = 46f + MathF.Max(0f, (24f - distC) * 0.6f);
+        if (distC >= 60f) return -1; // вне главного острова (пустота)
+        // Почти плоская арена: лёгкий наклон к краю, без холма в центре,
+        // чтобы Слизень Края мог свободно перемещаться.
+        float top = 56f + MathF.Max(0f, (50f - distC) * 0.05f);
         return (int)MathF.Floor(top);
     }
 
@@ -1179,30 +1306,35 @@ public sealed class WorldGenerator {
         // Детерминированные высоты колонн взаимозависимы от мира, но не меняются при перерисовании чанка
         var pillarHeights = new int[pillarCount];
         for (int i = 0; i < pillarCount; i++) {
-            pillarHeights[i] = 72 + (Math.Abs((Seed + i * 53) * 40503 ^ (i * 1777)) % 32); // 72..103
+            pillarHeights[i] = 56 + (Math.Abs((Seed + i * 53) * 40503 ^ (i * 1777)) % 36); // 56..92
         }
 
         for (int lx = 0; lx < Chunk.SizeX; lx++) {
             for (int lz = 0; lz < Chunk.SizeZ; lz++) {
                 int wx = ox + lx, wz = oz + lz;
                 float distC = MathF.Sqrt(wx * wx + wz * wz);
-                float islandTop = distC < 42f ? 46f + MathF.Max(0f, (24f - distC) * 0.6f) : -1f;
+                float islandTop = EndSurfaceHeight(wx, wz); // -1 вне главного острова
 
-                // Парящий островок (детерминированная сетка — один и тот же в соседних чанках)
+                // Парящий островок (детерминированная сетка — крупные острова, дальше от центра)
                 bool onIsland = false;
                 float isleTop = -1f;
-                if (distC >= 46f) {
-                    int ciX = (int)MathF.Floor((wx + 36f) / 72f);
-                    int ciZ = (int)MathF.Floor((wz + 36f) / 72f);
-                    int cX = ciX * 72 - 36, cZ = ciZ * 72 - 36;
+                int chorusH = 0;   // высота хорус-дерева (только на побочных островах)
+                if (distC >= 170f) {
+                    int ciX = (int)MathF.Floor((wx + 100f) / 200f);
+                    int ciZ = (int)MathF.Floor((wz + 100f) / 200f);
+                    int cX = ciX * 200 - 100, cZ = ciZ * 200 - 100;
                     int hc = Math.Abs(ciX * 73856093 ^ ciZ * 83492791 ^ Seed * 92821);
-                    if (hc % 100 < 50) {
+                    if (hc % 100 < 55) {
                         float fdx = wx - cX, fdz = wz - cZ;
                         float fr = MathF.Sqrt(fdx * fdx + fdz * fdz);
-                        float radius = 12 + (hc / 53) % 13; // 12..24
+                        float radius = 28 + (hc / 53) % 21; // 28..48 — крупные островки
                         if (fr < radius) {
                             onIsland = true;
-                            isleTop = 62f + (hc / 11) % 42; // 62..103
+                            isleTop = 68f + (hc / 11) % 46; // 68..113
+                            // Хорус-деревья редко и ближе к центру островка (не сплошной массой)
+                            if (fr < radius * 0.4f && (hc / 7) % 100 < 12) {
+                                chorusH = 2 + (hc / 13) % 4; // 2..5 блоков ствола
+                            }
                         }
                     }
                 }
@@ -1211,13 +1343,16 @@ public sealed class WorldGenerator {
                     int wy = oy + ly;
                     ushort blockId = 0;
 
-                    if (islandTop >= 0f && wy <= (int)MathF.Floor(islandTop) && wy >= (int)MathF.Floor(islandTop) - 4) {
+                    if (islandTop >= 0f && wy <= (int)MathF.Floor(islandTop) && wy >= (int)MathF.Floor(islandTop) - 9) {
                         blockId = GameData.BEndStone.Id;
-                    } else if (onIsland && wy <= (int)MathF.Floor(isleTop) && wy >= (int)MathF.Floor(isleTop) - 4) {
+                    } else if (onIsland && wy <= (int)MathF.Floor(isleTop) && wy >= (int)MathF.Floor(isleTop) - 9) {
                         blockId = GameData.BEndStone.Id;
-                    } else if (wy == (int)MathF.Floor(islandTop) + 1 && islandTop >= 0f) {
-                        // Декоративный эндовый факел / цветок на поверхности (иногда)
-                        if ((wx * 7 + wz * 13) % 29 == 0) blockId = GameData.BChorusFlower.Id;
+                    } else if (onIsland && chorusH > 0 && wy >= (int)MathF.Floor(isleTop) + 1 && wy <= (int)MathF.Floor(isleTop) + chorusH) {
+                        // Ствол хоруса (нормальное дерево) на побочном острове
+                        blockId = GameData.BChorusPlant.Id;
+                    } else if (onIsland && chorusH > 0 && wy == (int)MathF.Floor(isleTop) + chorusH + 1) {
+                        // Цветок хоруса на верхушке
+                        blockId = GameData.BChorusFlower.Id;
                     }
 
                     chunk.SetVoxel(Chunk.Index(lx, ly, lz), MakeVoxel(blockId));
@@ -1225,18 +1360,25 @@ public sealed class WorldGenerator {
             }
         }
 
-        // Обсидиановые колонны с эндер-кристаллами
+        // Толстые обсидиановые колонны 2×2 с эндер-кристаллами (тяжело забраться)
         for (int i = 0; i < pillarCount; i++) {
             float ang = i * MathF.Tau / pillarCount;
             int px = (int)MathF.Round(pillarRadius * MathF.Cos(ang));
             int pz = (int)MathF.Round(pillarRadius * MathF.Sin(ang));
             int baseY = EndSurfaceHeight(px, pz);
             int topY = pillarHeights[i];
-            for (int wy = baseY; wy <= topY; wy++) {
-                SetWorldBlock(chunk, ox, oy, oz, px, wy, pz, GameData.BObsidianPillar.Id);
+            for (int dx = 0; dx <= 1; dx++) {
+                for (int dz = 0; dz <= 1; dz++) {
+                    for (int wy = baseY; wy <= topY; wy++) {
+                        SetWorldBlock(chunk, ox, oy, oz, px + dx, wy, pz + dz, GameData.BObsidianPillar.Id);
+                    }
+                }
             }
+            // Кристалл в углу 2×2 на вершине; остальные клетки — воздух
             SetWorldBlock(chunk, ox, oy, oz, px, topY + 1, pz, GameData.BEnderCrystal.Id);
-            // Сверху кристалла — воздух
+            SetWorldBlock(chunk, ox, oy, oz, px + 1, topY + 1, pz, 0);
+            SetWorldBlock(chunk, ox, oy, oz, px, topY + 1, pz + 1, 0);
+            SetWorldBlock(chunk, ox, oy, oz, px + 1, topY + 1, pz + 1, 0);
             SetWorldBlock(chunk, ox, oy, oz, px, topY + 2, pz, 0);
         }
     }

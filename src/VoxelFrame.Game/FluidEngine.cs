@@ -22,6 +22,11 @@ public sealed class FluidEngine {
     public const int MaxLavaDistance = 3;
     public const byte FallingLevel = 8; // Вертикальный падающий поток
 
+    /// <summary>Защита от утечки памяти: если жидкость залила слишком много клеток
+    /// (например, поставленная в воздухе вода каскадом течёт по склонам),
+    /// новые клетки не создаются — симуляция останавливается на этом пределе.</summary>
+    private const int MaxActiveFluidCells = 12000;
+
     private readonly GameWorld _world;
     private float _waterTimer;
     private float _lavaTimer;
@@ -189,7 +194,9 @@ public sealed class FluidEngine {
         // ── 3. Стекание вниз (вертикальный водопад / лавапад) ───────────────────
         Vec3i down = pos + new Vec3i(0, -1, 0);
         var downVox = _world.GetVoxel(down);
-        bool canFlowDown = CanFlowInto(downVox.TypeId);
+        // В пустоте (ниже VoidY) падение прекращается — иначе вода в Энде,
+        // поставленная на столбе, падала бы в бездну бесконечно и вешала игру.
+        bool canFlowDown = down.Y > FallingBlock.VoidY && CanFlowInto(downVox.TypeId);
 
         if (canFlowDown) {
             WashBlock(down, downVox.TypeId, fluidId);
@@ -303,7 +310,7 @@ public sealed class FluidEngine {
         // Если с двух или более сторон настоящие источники -> превращаемся в полноценный источник!
         if (sourceCount >= 2) {
             _world.PlacePlacedBlock(pos, GameData.BWater, 0);
-            _activeWater.Add(pos);
+            if (_activeWater.Count < MaxActiveFluidCells) _activeWater.Add(pos);
             NotifyNeighbors(pos);
         }
     }
@@ -389,7 +396,10 @@ public sealed class FluidEngine {
     }
 
     private void ScheduleFluid(Vec3i pos, ushort fluidId) {
-        if (fluidId == GameData.BWater.Id) _activeWater.Add(pos);
-        else if (fluidId == GameData.BLava.Id) _activeLava.Add(pos);
+        if (fluidId == GameData.BWater.Id) {
+            if (_activeWater.Count < MaxActiveFluidCells) _activeWater.Add(pos);
+        } else if (fluidId == GameData.BLava.Id) {
+            if (_activeLava.Count < MaxActiveFluidCells) _activeLava.Add(pos);
+        }
     }
 }

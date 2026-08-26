@@ -13,7 +13,7 @@ namespace VoxelFrame.Game;
 /// </summary>
 public static class SaveSystem {
     public const uint Magic = 0x56465331;   // "VFS1"
-    public const int Version = 15;
+    public const int Version = 16;
 
     public static string CurrentWorldPath = "";
     public static int SelectedWorldSlot = 1;
@@ -113,12 +113,14 @@ public static class SaveSystem {
                 bw.Write(idx);
                 bw.Write(e!.Value.Item.Definition.Id);
                 bw.Write(e.Value.Quantity);
+                if (GameData.GetToolTier(e!.Value.Item.Definition.Id) > 0) bw.Write(e.Value.Item.Durability);
             }
 
             if (p.OffhandEntry != null) {
                 bw.Write(true);
                 bw.Write(p.OffhandEntry.Value.Item.Definition.Id);
                 bw.Write(p.OffhandEntry.Value.Quantity);
+                if (GameData.GetToolTier(p.OffhandEntry.Value.Item.Definition.Id) > 0) bw.Write(p.OffhandEntry.Value.Item.Durability);
             } else {
                 bw.Write(false);
             }
@@ -307,7 +309,7 @@ public static class SaveSystem {
         if (version < 2 || version > Version) throw new InvalidDataException($"Версия сохранения {version} не поддерживается");
 
         string worldName = version >= 7 ? br.ReadString() : Path.GetFileNameWithoutExtension(path);
-        if (version >= 15) return LoadWorlds(br, headless);
+        if (version >= 15) return LoadWorlds(br, headless, version);
         int seed = br.ReadInt32();
         float timeOfDay = br.ReadSingle();
         if (version < 13) br.ReadDouble(); // legacy smoke mass (удалена в v13)
@@ -355,8 +357,10 @@ public static class SaveSystem {
             ushort defId = br.ReadUInt16();
             int qty = br.ReadInt32();
             if (version >= 5 && version < 13) br.ReadSingle(); // legacy condition (удалена в v13)
+            int dur = version >= 16 && GameData.GetToolTier(defId) > 0 ? br.ReadInt32() : 0;
             if (GameData.Items.TryGetValue(defId, out var def)) {
                 var item = GameData.NewItem(def);
+                if (dur > 0) item.Durability = dur;
                 session.Player.Inventory.InsertAt(index, new ItemEntry(item, qty));
             }
         }
@@ -367,8 +371,10 @@ public static class SaveSystem {
                 ushort defId = br.ReadUInt16();
                 int qty = br.ReadInt32();
                 if (version < 13) br.ReadSingle(); // legacy condition (удалена в v13)
+                int dur = version >= 16 && GameData.GetToolTier(defId) > 0 ? br.ReadInt32() : 0;
                 if (GameData.Items.TryGetValue(defId, out var def)) {
                     var item = GameData.NewItem(def);
+                    if (dur > 0) item.Durability = dur;
                     session.Player.OffhandEntry = new ItemEntry(item, qty);
                 }
             }
@@ -437,7 +443,9 @@ public static class SaveSystem {
         for (int i = 0; i < fallingCount; i++) {
             ushort typeId = br.ReadUInt16();
             var pos = ReadVec3(br);
-            session.World.FallingBlocks.Add(new FallingBlock(GameData.GetBlock(typeId), pos));
+            // Повреждённый/нулевой id падающего блока пропускаем, а не роняем загрузку
+            if (typeId != 0 && GameData.TryGetBlock(typeId, out var fallingBlock))
+                session.World.FallingBlocks.Add(new FallingBlock(fallingBlock, pos));
         }
 
         int burningCount = br.ReadInt32();
@@ -544,7 +552,7 @@ public static class SaveSystem {
 
     // ── Загрузка формата v15: все измерения ─────────────────────────────────
 
-    private static GameSession LoadWorlds(BinaryReader br, bool headless) {
+    private static GameSession LoadWorlds(BinaryReader br, bool headless, int version) {
         int masterSeed = br.ReadInt32();
         float timeOfDay = br.ReadSingle();
         var savedGameMode = (GameMode)br.ReadInt32();
@@ -574,16 +582,22 @@ public static class SaveSystem {
             int index = br.ReadInt32();
             ushort defId = br.ReadUInt16();
             int qty = br.ReadInt32();
+            int dur = version >= 16 && GameData.GetToolTier(defId) > 0 ? br.ReadInt32() : 0;
             if (GameData.Items.TryGetValue(defId, out var def)) {
-                p.Inventory.InsertAt(index, new ItemEntry(GameData.NewItem(def), qty));
+                var item = GameData.NewItem(def);
+                if (dur > 0) item.Durability = dur;
+                p.Inventory.InsertAt(index, new ItemEntry(item, qty));
             }
         }
 
         if (br.ReadBoolean()) {
             ushort defId = br.ReadUInt16();
             int qty = br.ReadInt32();
+            int dur = version >= 16 && GameData.GetToolTier(defId) > 0 ? br.ReadInt32() : 0;
             if (GameData.Items.TryGetValue(defId, out var def)) {
-                p.OffhandEntry = new ItemEntry(GameData.NewItem(def), qty);
+                var item = GameData.NewItem(def);
+                if (dur > 0) item.Durability = dur;
+                p.OffhandEntry = new ItemEntry(item, qty);
             }
         }
 
@@ -687,7 +701,9 @@ public static class SaveSystem {
         for (int i = 0; i < fallingCount; i++) {
             ushort typeId = br.ReadUInt16();
             var pos = ReadVec3(br);
-            world.FallingBlocks.Add(new FallingBlock(GameData.GetBlock(typeId), pos));
+            // Повреждённый/нулевой id падающего блока пропускаем, а не роняем загрузку
+            if (typeId != 0 && GameData.TryGetBlock(typeId, out var fallingBlock))
+                world.FallingBlocks.Add(new FallingBlock(fallingBlock, pos));
         }
 
         int burningCount = br.ReadInt32();

@@ -14,12 +14,13 @@ public sealed class ItemDefinition {
 }
 
 /// <summary>
-/// Один предмет. Удалён трекинг прочности (Condition) — инструменты больше
-/// не изнашиваются.
+/// Один предмет. Прочность инструментов/оружия хранится в <see cref="Durability"/>
+/// (0 у не-инструментов). Сбрасывается до максимума при создании (GameData.NewItem).
 /// </summary>
 public sealed class ItemInstance {
     public ItemDefinition Definition { get; }
     public ulong InstanceId { get; }
+    public int Durability { get; set; }
 
     public ItemInstance(ItemDefinition definition, ulong instanceId) {
         Definition = definition;

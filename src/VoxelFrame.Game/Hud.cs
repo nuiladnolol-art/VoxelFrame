@@ -83,7 +83,7 @@ public static class Hud {
             Fonts.DrawShadowed("Слизень Края", bx + 6, by - 26, 20f, new Color(255, 255, 255, 235));
         }
 
-        // Инфо-панель: Координаты, Направление взгляда, Биом, Время, FPS
+        // Инфо-панель: Координаты, Направление взгляда, Биом, Время, FPS (F3)
         int px = (int)MathF.Floor(player.Position.X);
         int py = (int)MathF.Floor(player.Position.Y);
         int pz = (int)MathF.Floor(player.Position.Z);
@@ -139,6 +139,15 @@ public static class Hud {
                 if (entry.Value.Quantity > 1) {
                     Fonts.DrawShadowed($"×{entry.Value.Quantity}", rect.X + 3f, rect.Y + rect.Height - 20f, 15f, Color.White);
                 }
+                // Полоска прочности инструмента/оружия
+                int maxDur = GameData.GetMaxToolDurability(entry.Value.Item.Definition.Id);
+                if (GameData.GetToolTier(entry.Value.Item.Definition.Id) > 0 && entry.Value.Item.Durability < maxDur) {
+                    float frac = Math.Clamp((float)entry.Value.Item.Durability / maxDur, 0f, 1f);
+                    float bw = rect.Width - 8f;
+                    Raylib.DrawRectangle((int)(rect.X + 4), (int)(rect.Y + rect.Height - 6), (int)bw, 3, new Color(20, 20, 25, 190));
+                    var barCol = frac > 0.5f ? new Color(90, 220, 120, 255) : frac > 0.25f ? new Color(240, 200, 70, 255) : new Color(235, 75, 60, 255);
+                    Raylib.DrawRectangle((int)(rect.X + 4), (int)(rect.Y + rect.Height - 6), (int)(bw * frac), 3, barCol);
+                }
             }
         }
 
@@ -174,20 +183,22 @@ public static class Hud {
             }
 
             float swing = 0f;
+            float hStretch = 1f;
             if (held.Item.Definition.Id == GameData.BowItem.Id && player.BowCharge > 0f) {
-                // Натягивание лука к центру экрана с дрожью
+                // Лук не уезжает к центру экрана — приподнимается вверх-влево и тянется в ширину
                 float pull = player.BowCharge;
-                float shake = pull * (Random.Shared.NextSingle() - 0.5f) * 4f;
-                handX = w / 2f + 10f - pull * 60f + shake;
-                handY = h / 2f + 20f - pull * 30f + shake;
-                swing = -0.2f - pull * 0.4f;
+                float shake = pull * (Random.Shared.NextSingle() - 0.5f) * 3f;
+                handX += shake - pull * 22f;   // немного влево
+                handY += shake - pull * 14f;   // немного вверх
+                swing = 0.14f + pull * 0.22f;  // наклон: левый конец лука вверх (вверх-влево)
+                hStretch = 1f + pull * 0.6f;   // визуально растягивается по горизонтали
             } else if (player.BreakProgress > 0f && player.BreakDuration > 0f) {
                 swing = MathF.Sin(player.BreakProgress / player.BreakDuration * MathF.PI) * 0.7f;
             } else if (player.AttackTimer > 0f) {
                 swing = MathF.Sin((1f - player.AttackTimer / Player.AttackCooldown) * MathF.PI) * 0.9f;
             }
             var handRect = new Rectangle(handX, handY, handSize, handSize);
-            DrawHandHeldItem(held.Item.Definition, handRect, 1f, swing);
+            DrawHandHeldItem(held.Item.Definition, handRect, 1f, swing, hStretch);
         }
 
         // Здоровье (сердечки слева), Сытость (окорочка справа) и Кислород (в режиме Выживания)
@@ -335,9 +346,13 @@ public static class Hud {
         }
     }
 
-    /// <summary>Отрисовка 3D блока или объемного экструдированного 3D предмета в руке.</summary>
-    private static void DrawHandHeldItem(VoxelFrame.Core.Inventory.ItemDefinition def, Rectangle slot, float scale, float rotation) {
-        if (GameData.TryGetBlockByItem(def.Id, out var block) && block != null && block.Id != GameData.BTorch.Id && block.Id != GameData.BWheatCrop.Id && block.Id != GameData.BTallGrass.Id && !GameData.IsDoor(block.Id)) {
+    /// <summary>Отрисовка 3D блока или объемного экструдированного 3D предмета в руке.
+    /// hStretch > 1 визуально растягивает предмет по горизонтали (натяжение лука).</summary>
+    private static void DrawHandHeldItem(VoxelFrame.Core.Inventory.ItemDefinition def, Rectangle slot, float scale, float rotation, float hStretch = 1f) {
+        if (GameData.TryGetBlockByItem(def.Id, out var block) && block != null &&
+            block.Id != GameData.BTorch.Id && block.Id != GameData.BWheatCrop.Id && block.Id != GameData.BTallGrass.Id &&
+            block.Id != GameData.BChorusPlant.Id && block.Id != GameData.BChorusFlower.Id && block.Id != GameData.BEnderCrystal.Id &&
+            !GameData.IsDoor(block.Id)) {
             // ── 3D Изометрический куб блока в руке ─────────────────────────
             float cx = slot.X + slot.Width * 0.45f;
             float cy = slot.Y + slot.Height * 0.45f;
@@ -387,25 +402,36 @@ public static class Hud {
                 tile / TextureAtlas.Cols * TextureAtlas.TilePx,
                 TextureAtlas.TilePx, TextureAtlas.TilePx);
             float size = MathF.Min(slot.Width, slot.Height) * scale * 1.15f;
-            var origin = new System.Numerics.Vector2(size / 2f, size / 2f);
+            float drawW = size * hStretch;                       // растянутая ширина
+            float itemCx = slot.X + slot.Width / 2f + size / 2f; // центр предмета (как было)
+            float itemCy = slot.Y + slot.Height / 2f + size / 2f;
+            var origin = new System.Numerics.Vector2(drawW / 2f, size / 2f);
             float rotDeg = rotation * (180f / MathF.PI);
 
             // Мягкая динамическая тень, строго синхронизированная с поворотом предмета
-            var shadowDest = new Rectangle(slot.X + slot.Width / 2f + 3f, slot.Y + slot.Height / 2f + 3f, size, size);
+            var shadowDest = new Rectangle(itemCx - drawW / 2f + 3f, itemCy - size / 2f + 3f, drawW, size);
             unsafe {
                 Raylib.DrawTexturePro(TextureAtlas.Atlas, src, shadowDest, origin, rotDeg, new Color((byte)30, (byte)30, (byte)30, (byte)120));
             }
 
             // Основной лицевой слой предмета
-            var frontDest = new Rectangle(slot.X + slot.Width / 2f, slot.Y + slot.Height / 2f, size, size);
+            var frontDest = new Rectangle(itemCx - drawW / 2f, itemCy - size / 2f, drawW, size);
             unsafe {
                 Raylib.DrawTexturePro(TextureAtlas.Atlas, src, frontDest, origin, rotDeg, Color.White);
             }
         }
     }
 
-    /// <summary>Расширенный экран отладки F3.</summary>
+    /// <summary>Расширенный экран отладки F3. Никогда не роняет игру: любые сбои глушатся.</summary>
     private static void DrawF3DebugOverlay(GameSession session, Player player, int px, int py, int pz, string biomeName, string facing, int w, int h) {
+        try {
+            DrawF3DebugOverlayCore(session, player, px, py, pz, biomeName, facing, w, h);
+        } catch {
+            // Отладочный слой не должен ронять игру
+        }
+    }
+
+    private static void DrawF3DebugOverlayCore(GameSession session, Player player, int px, int py, int pz, string biomeName, string facing, int w, int h) {
         // Левая панель F3
         float y = 10f;
         void LineL(string text, Color? col = null) {
@@ -415,7 +441,7 @@ public static class Hud {
             y += 20f;
         }
 
-        LineL($"VoxelFrame 0.9.2 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
+        LineL($"VoxelFrame 0.9.3 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
         LineL($"XYZ: {player.Position.X:F3} / {player.Position.Y:F5} / {player.Position.Z:F3}", new Color(255, 240, 120, 255));
         LineL($"Block: {px} {py} {pz} [{(px & 15)} {(py & 15)} {(pz & 15)} in sub-chunk]");
         LineL($"Chunk: {px >> 4} {py >> 4} {pz >> 4} in chunk [{px >> 4}, {pz >> 4}]");
@@ -427,8 +453,8 @@ public static class Hud {
         if (session.HasTarget) {
             var tb = session.TargetBlock;
             var vox = session.World.GetVoxel(tb);
-            var block = GameData.GetBlock(vox.TypeId);
-            LineL($"Targeted Block: {tb.X}, {tb.Y}, {tb.Z} ({block.Name})", new Color(255, 200, 100, 255));
+            var blockName = GameData.TryGetBlock(vox.TypeId, out var blk) ? blk.Name : "воздух";
+            LineL($"Targeted Block: {tb.X}, {tb.Y}, {tb.Z} ({blockName})", new Color(255, 200, 100, 255));
         }
 
         // Правая панель F3

@@ -100,11 +100,14 @@ public sealed class HostileMob {
                 return;
             }
         }
-        // Эндэрмен повреждается водой и телепортируется прочь
+        // Эндэрмен повреждается водой и НЕМЕДЛЕННО телепортируется на сухое место
         if (feetVox.TypeId == GameData.BWater.Id && Type == HostileType.Enderman) {
             Health -= 3f * dt;
             HurtTime = 0.3f;
-            TryTeleport(world);
+            if (TeleportCooldown <= 0f) {
+                TeleportCooldown = 0.3f;
+                TeleportToDrySpot(world);   // на сушу — чтобы не ходить по воде
+            }
             if (Health <= 0f) {
                 Die(world, session);
                 return;
@@ -207,11 +210,20 @@ public sealed class HostileMob {
             } else if (Type == HostileType.ZombiePigman) {
                 speed = 2.8f; // Быстрый свинозомби
             } else if (Type == HostileType.Enderman) {
-                speed = 2.6f;
-                // Враждебный эндэрмен периодически телепортируется, чтобы перепозиционироваться
-                if (dist > 3.5f && TeleportCooldown <= 0f) {
-                    TeleportCooldown = 3.2f + (float)_random.NextDouble() * 2.5f;
-                    TryTeleport(world);
+                speed = 3.315f; // эндэрмены быстрее (5.2 → 3.9 → 3.315, −25% и ещё −15%)
+                // Телепорт к игроку (за спину), когда тот далеко — иначе эндэрмен бегает кругами и не догоняет
+                if (dist > 5f && TeleportCooldown <= 0f) {
+                    TeleportCooldown = 2.5f + (float)_random.NextDouble() * 2f;
+                    TeleportNearPlayer(world, player);
+                } else {
+                    // Эндэрмен НЕ ходит по воде: если впереди вода — поворачиваем в сторону
+                    var aheadCell = new Vec3i(
+                        (int)MathF.Floor(Position.X + moveDir.X * 1.3f),
+                        (int)MathF.Floor(Position.Y + 1f),
+                        (int)MathF.Floor(Position.Z + moveDir.Z * 1.3f));
+                    if (world.GetVoxel(aheadCell).TypeId == GameData.BWater.Id) {
+                        moveDir = Vector3.Normalize(new Vector3(-moveDir.Z, 0f, moveDir.X));
+                    }
                 }
             } else if (Type == HostileType.Blaze) {
                 speed = 1.5f;
@@ -261,7 +273,7 @@ public sealed class HostileMob {
                 var playerCenter = player.Position + new Vector3(0f, 0.60f, 0f);
                 if (HasLineOfSight(world, mobCenter, playerCenter) || HasLineOfSight(world, mobCenter, player.Eye)) {
                     AttackCooldown = 1.2f;
-                    player.ApplyDamage(7f, session, Position);
+                    player.ApplyDamage(4.76f, session, Position); // урон эндермена −20%, затем ещё −15%
                 }
             }
 
@@ -329,10 +341,22 @@ public sealed class HostileMob {
 
         Velocity.X = moveDir.X * speed;
         Velocity.Z = moveDir.Z * speed;
+
+        // В какой жидкости находится моб (ноги)
+        var mobFeetCell = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z));
+        var mobFeetVox = world.GetVoxel(mobFeetCell);
+        bool mobInWater = mobFeetVox.TypeId == GameData.BWater.Id;
+        bool mobInLava = mobFeetVox.TypeId == GameData.BLava.Id;
+        // Все мобы плавают в воде; свинозомби (уроженец Нижнего мира) — и в лаве
+        bool mobFloats = mobInWater || (mobInLava && Type == HostileType.ZombiePigman);
+
         if (isSpiderClimbing) {
             Velocity.Y = 3.6f; // Лазание вверх по стене
         } else if (Type == HostileType.Blaze) {
             // Левитация ифрита
+        } else if (mobFloats) {
+            // Плавание: плавно тянет вверх к поверхности, не даёт утонуть
+            Velocity.Y += (4.5f - Velocity.Y) * MathF.Min(1f, dt * 3f);
         } else {
             Velocity.Y -= 22f * dt;
         }
@@ -439,6 +463,65 @@ public sealed class HostileMob {
         return false;
     }
 
+    /// <summary>Телепорт эндэрмена на СУХОЕ место рядом (не в воду/лаву) — он не должен ходить по воде.</summary>
+    private void TeleportToDrySpot(GameWorld world) {
+        var half = GetHalfSize(Type);
+        for (int attempt = 0; attempt < 24; attempt++) {
+            float angle = (float)_random.NextDouble() * MathF.Tau;
+            float r = 4f + (float)_random.NextDouble() * 16f;
+            int tx = (int)MathF.Floor(Position.X + MathF.Cos(angle) * r);
+            int tz = (int)MathF.Floor(Position.Z + MathF.Sin(angle) * r);
+            int baseY = (int)MathF.Floor(Position.Y);
+            for (int dy = -5; dy <= 5; dy++) {
+                int by = baseY + dy;
+                var floor = new Vec3i(tx, by, tz);
+                var foot = new Vec3i(tx, by + 1, tz);
+                var head = new Vec3i(tx, by + 2, tz);
+                if (!world.IsSolidAt(floor)) continue;
+                if (world.IsSolidAt(foot) || world.IsSolidAt(head)) continue;
+                // Ноги должны быть на суше
+                ushort footT = world.GetVoxel(foot).TypeId;
+                if (footT == GameData.BWater.Id || footT == GameData.BLava.Id) continue;
+                var pos = new Vector3(tx + 0.5f, by + 1.0f + half.Y, tz + 0.5f);
+                if (!Collision.IntersectsSolid(world, pos - half, pos + half)) {
+                    Position = pos;
+                    Velocity = Vector3.Zero;
+                    return;
+                }
+            }
+        }
+    }
+
+    /// <summary>Телепорт эндэрмена ВБЛИЗИ игрока (2.5–5 блоков), чтобы он догонял и атаковал, а не бегал кругами.</summary>
+    private void TeleportNearPlayer(GameWorld world, Player player) {
+        var half = GetHalfSize(Type);
+        for (int attempt = 0; attempt < 16; attempt++) {
+            float angle = (float)_random.NextDouble() * MathF.Tau;
+            float r = 2.5f + (float)_random.NextDouble() * 2.5f;
+            float dx = MathF.Cos(angle) * r;
+            float dz = MathF.Sin(angle) * r;
+            int tx = (int)MathF.Floor(player.Position.X + dx);
+            int tz = (int)MathF.Floor(player.Position.Z + dz);
+            int baseY = (int)MathF.Floor(player.Position.Y);
+            for (int dy = -3; dy <= 3; dy++) {
+                int by = baseY + dy;
+                var floor = new Vec3i(tx, by, tz);
+                var foot = new Vec3i(tx, by + 1, tz);
+                var head = new Vec3i(tx, by + 2, tz);
+                if (!world.IsSolidAt(floor)) continue;
+                if (world.IsSolidAt(foot) || world.IsSolidAt(head)) continue;
+                ushort footT = world.GetVoxel(foot).TypeId;
+                if (footT == GameData.BWater.Id || footT == GameData.BLava.Id) continue; // не в воду
+                var pos = new Vector3(tx + 0.5f, by + 1.0f + half.Y, tz + 0.5f);
+                if (!Collision.IntersectsSolid(world, pos - half, pos + half)) {
+                    Position = pos;
+                    Velocity = Vector3.Zero;
+                    return;
+                }
+            }
+        }
+    }
+
     private void Explode(GameWorld world, GameSession session) {
         var center = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z));
         session.AddMessage("КРИПЕР ВЗОРВАЛСЯ!");
@@ -486,6 +569,9 @@ public sealed class ArrowProjectile {
     public HostileMob? Shooter;
     public bool FromPlayer;
     public bool IsFire;
+    public bool IsEnderPearl;
+    public bool IsEyeOfEnder;
+    public bool IsSlimeSpit;
     public float Damage = 4f;
 
     public ArrowProjectile(Vector3 position, Vector3 velocity, HostileMob? shooter = null) {
@@ -503,6 +589,26 @@ public sealed class ArrowProjectile {
             Velocity.Y -= 12.0f * dt;
         }
         var nextPos = Position + Velocity * dt;
+
+        // Жемчуг Эндера и Око Эндера не наносят урона сущностям — отдельный блок-коллендер.
+        if (IsEnderPearl || IsEyeOfEnder) {
+            int pbx = (int)MathF.Floor(nextPos.X);
+            int pby = (int)MathF.Floor(nextPos.Y);
+            int pbz = (int)MathF.Floor(nextPos.Z);
+            if (world.IsSolidAt(new Vec3i(pbx, pby, pbz))) {
+                if (IsEnderPearl) {
+                    player.TeleportTo(nextPos, world);
+                    player.ApplyDamage(3f, session, nextPos);
+                    session.AddMessage("Жемчуг Эндера телепортировал вас! -3 HP");
+                } else {
+                    // Око Эндера, коснувшись земли/блока, возвращается пикапом (остаётся в инвентаре)
+                    world.SpawnPickup(GameData.EyeOfEnderItem.Id, 1, new Vec3i(pbx, pby, pbz));
+                }
+                Alive = false;
+            }
+            Position = nextPos;
+            return;
+        }
 
         if (FromPlayer) {
             // Стрела игрока поражает враждебных мобов
@@ -549,6 +655,8 @@ public sealed class ArrowProjectile {
                 if (IsFire) {
                     player.FireTicks = MathF.Max(player.FireTicks, 5.0f);
                     session.AddMessage($"Огненный шар ифрита обжёг вас! -{Damage:F0} HP");
+                } else if (IsSlimeSpit) {
+                    session.AddMessage($"Слизень Края плюнул в вас! -{Damage:F0} HP");
                 } else {
                     session.AddMessage($"В вас попала стрела! -{Damage:F0} HP");
                 }

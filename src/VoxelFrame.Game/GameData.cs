@@ -291,7 +291,7 @@ public static class GameData {
         .With(b => { b.IsSolid = false; b.IsOpaque = false; b.IsUnbreakable = true; });
     public static readonly BlockType BObsidianPillar = Block(49, "Обсидиановая колонна", ObsidianM, drop: ObsidianItem);
     public static readonly BlockType BEnderCrystal = Block(50, "Эндер-кристалл", GlassM, drop: EnderCrystalItem)
-        .With(b => { b.IsOpaque = false; });
+        .With(b => { b.IsOpaque = false; b.IsSolid = false; b.IsUnbreakable = true; b.LightLevel = 12; });
     public static readonly BlockType BChorusPlant = Block(51, "Растение хоруса", Oak, drop: ChorusFruitItem, flammable: true, burnTime: 5f);
     public static readonly BlockType BChorusFlower = Block(52, "Цветок хоруса", Oak, drop: ChorusFruitItem, flammable: true, burnTime: 3f)
         .With(b => { b.IsOpaque = false; });
@@ -339,6 +339,13 @@ public static class GameData {
     /// <summary>Возвращает блок по его Id.</summary>
     public static BlockType GetBlock(ushort id) => _byId.TryGetValue(id, out var b) ? b : throw new KeyNotFoundException($"Блок #{id}");
 
+    /// <summary>Безопасно пытается получить блок по Id, не бросая исключения (воздух/пустые id → false).</summary>
+    public static bool TryGetBlock(ushort id, out BlockType block) {
+        if (_byId.TryGetValue(id, out var b)) { block = b; return true; }
+        block = null!;
+        return false;
+    }
+
     public static bool TryGetBlockByItem(ushort itemId, out BlockType? block) {
         if (_blockByItem.TryGetValue(itemId, out ushort bid)) {
             block = _byId[bid];
@@ -369,7 +376,11 @@ public static class GameData {
     public static readonly Dictionary<ushort, ItemDefinition> Items = new();
     private static ulong _nextInstanceId;
 
-    public static ItemInstance NewItem(ItemDefinition def) => new(def, _nextInstanceId++);
+    public static ItemInstance NewItem(ItemDefinition def) {
+        var inst = new ItemInstance(def, _nextInstanceId++);
+        inst.Durability = GetToolTier(def.Id) > 0 ? GetMaxToolDurability(def.Id) : 0;
+        return inst;
+    }
 
     // ── Shape-based крафт ──────────────────────────────────────────────────────
     /// <summary>Ключ — нормализованный паттерн сетки 3×3. Значение — (выходной предмет, количество).</summary>

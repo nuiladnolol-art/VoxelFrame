@@ -235,7 +235,7 @@ public static partial class Screens {
             if (MenuError.Length > 0)
                 Fonts.DrawCentered(MenuError, w / 2f, h * 0.68f, 18f, new Color(255, 120, 120, 255));
 
-            Fonts.Draw("VoxelFrame Alpha 0.9.2", 10f, h - 25f, 14f, new Color(200, 200, 200, 180));
+            Fonts.Draw("VoxelFrame Alpha 0.9.3", 10f, h - 25f, 14f, new Color(200, 200, 200, 180));
             Fonts.Draw("SenStol Studio", w - 180f, h - 25f, 14f, new Color(200, 200, 200, 180));
         }
 
@@ -595,6 +595,39 @@ public static partial class Screens {
         Fonts.Draw(pct, w / 2f - tw / 2f, barY + 4f, 18f, Color.White);
 
         Fonts.DrawCentered($"Чанков: {session.LoadDone}/{session.LoadTotal}", w / 2f, barY + 40f, 16f, new Color(170, 176, 190, 255));
+    }
+
+    /// <summary>Титры после победы над Слизнем Края и выхода из Энда (прокрутка снизу вверх).</summary>
+    public static void DrawCredits(GameSession session) {
+        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        Raylib.ClearBackground(Color.Black);
+
+        string[] lines = {
+            "VoxelFrame",
+            "",
+            "Спасибо, что прошли игру!",
+            "",
+            "Вы победили Слизня Края",
+            "и освободили измерение Энд.",
+            "",
+            "Мир ждёт новых приключений",
+            "и великих построек.",
+            "",
+            "Играйте дальше!",
+        };
+
+        float elapsed = 32f - session.CreditsTimer;
+        float y = h + 60f - elapsed * 55f;
+        const float lineH = 46f;
+        for (int i = 0; i < lines.Length; i++) {
+            float ly = y + i * lineH;
+            if (ly < -50f || ly > h + 50f) continue;
+            bool isTitle = i == 0;
+            float size = isTitle ? 52f : 30f;
+            float mw = Fonts.Measure(lines[i], size);
+            Color col = isTitle ? new Color(255, 220, 120, 255) : new Color(220, 225, 235, 255);
+            Fonts.DrawShadowed(lines[i], w / 2f - mw / 2f, ly, size, col);
+        }
     }
 
     // ── Инвентарь (сетка слотов, предмет за курсором) ─────────────────────────

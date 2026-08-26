@@ -185,7 +185,8 @@ public sealed partial class GameWorld : IDisposable {
     /// <summary>Является ли блок таргетируемым прицелом (жидкости пропускаются по умолчанию).</summary>
     public bool IsTargetableBlock(Vec3i w, bool hitFluids = false) {
         ushort type = GetVoxel(w).TypeId;
-        return type != 0 && (hitFluids || (type != GameData.BWater.Id && type != GameData.BLava.Id));
+        return type != 0 && type != GameData.BEnderCrystal.Id &&
+               (hitFluids || (type != GameData.BWater.Id && type != GameData.BLava.Id));
     }
 
     public bool IsOpaqueAt(Vec3i w) {
@@ -233,6 +234,9 @@ public sealed partial class GameWorld : IDisposable {
         if (block.Id == GameData.BChest.Id) {
             PlacedChests.Add(w);
             Chests[w] = new Container();
+        } else if (block.Id == GameData.BEnderCrystal.Id) {
+            // Установленный игроком эндер-кристалл тоже становится взрывающейся сущностью
+            TrySpawnCrystalEntityAt(w);
         }
     }
 
@@ -386,6 +390,7 @@ public sealed partial class GameWorld : IDisposable {
             Add(GameData.TorchItem, rng.Next(4, 10));
             if (rng.NextDouble() < 0.15) Add(GameData.EnchantedBookItem, 1);
             if (rng.NextDouble() < 0.10) Add(GameData.MusicDiscItem, 1);
+            if (rng.NextDouble() < 0.06) Add(GameData.TotemItem, 1); // редкий тотем в глубоких сокровищницах
         } else {
             Add(GameData.BreadItem, rng.Next(2, 5));
             Add(GameData.WheatSeedsItem, rng.Next(3, 8));
@@ -469,6 +474,9 @@ public sealed partial class GameWorld : IDisposable {
         int surf = Generator.SurfaceHeight(baseSpawn.X, baseSpawn.Z);
         return new Vector3(baseSpawn.X + 0.5f, surf + 1.95f, baseSpawn.Z + 0.5f);
     }
+
+    /// <summary>Ближайшая к точке крепость Энда (для Ока Эндера).</summary>
+    public Vector3? FindNearestEndStronghold(Vector3 from) => Generator.FindNearestEndStronghold(from);
 
     /// <summary>Загрузка чанка из сохранения: типы + частичные объёмы содержимого + маски ориентации/слоев.</summary>
     public void LoadChunk(Vec3i cc, ushort[] types, Dictionary<int, byte>? masks = null) {
@@ -588,15 +596,18 @@ public sealed partial class GameWorld : IDisposable {
         var cc = gc.Coord;
         var list = new List<Vec3i>();
         for (int i = 0; i < Chunk.VoxelCount; i++) {
-            ushort t = gc.Chunk.Get(i).TypeId;
-            if (t == GameData.BTorch.Id || t == GameData.BWheatCrop.Id || t == GameData.BTallGrass.Id)
-                list.Add(ChunkLocalToWorld(cc, i));
+            var vox = gc.Chunk.Get(i);
+            ushort t = vox.TypeId;
+            bool isDecor = t == GameData.BTorch.Id || t == GameData.BWheatCrop.Id || t == GameData.BTallGrass.Id
+                || (t == GameData.BEndPortalFrame.Id && (vox.SubGridLayerMask & 1) != 0);
+            if (isDecor) list.Add(ChunkLocalToWorld(cc, i));
         }
         _decor[cc] = list;
     }
 
     private void UpdateDecor(Vec3i cc, Vec3i w, in VoxelData voxel) {
-        bool isDecor = voxel.TypeId == GameData.BTorch.Id || voxel.TypeId == GameData.BWheatCrop.Id || voxel.TypeId == GameData.BTallGrass.Id;
+        bool isDecor = voxel.TypeId == GameData.BTorch.Id || voxel.TypeId == GameData.BWheatCrop.Id || voxel.TypeId == GameData.BTallGrass.Id
+            || (voxel.TypeId == GameData.BEndPortalFrame.Id && (voxel.SubGridLayerMask & 1) != 0);
         if (!_decor.TryGetValue(cc, out var list)) {
             if (!isDecor) return;
             _decor[cc] = list = new List<Vec3i>();
@@ -1040,11 +1051,15 @@ public sealed partial class GameWorld : IDisposable {
                 var feetVoxel = GetVoxel(feetCell);
                 if (feetVoxel.TypeId == GameData.BWater.Id || feetVoxel.TypeId == GameData.BLava.Id) continue;
 
-                // Проверка освещения: спавн только в глубокой темноте (свет <= 6). Факелы гарантированно защищают дом!
-                byte blockLight = GetBlockLight(feetCell);
-                byte sunLight = GetSunLight(feetCell);
-                float effectiveLight = MathF.Max(blockLight, sunLight * skyFactor);
-                if (blockLight >= 6 || effectiveLight > 6.0f) continue;
+                // Проверка освещения: в Обычном мире спавн только в глубокой темноте (свет <= 6),
+                // факелы гарантированно защищают дом. В Нижнем и Энде мобы (ифрит, эндэрмен)
+                // спавнятся независимо от света — как в Minecraft.
+                if (Dimension == Dimension.Overworld) {
+                    byte blockLight = GetBlockLight(feetCell);
+                    byte sunLight = GetSunLight(feetCell);
+                    float effectiveLight = MathF.Max(blockLight, sunLight * skyFactor);
+                    if (blockLight >= 6 || effectiveLight > 6.0f) continue;
+                }
 
                 HostileType type;
                 if (Dimension == Dimension.Nether) {
@@ -1056,8 +1071,8 @@ public sealed partial class GameWorld : IDisposable {
                     // Энд почти полностью населён эндэрменами
                     type = HostileType.Enderman;
                 } else {
-                    // Обычное измерение: эндэрмены появляются лишь изредка в темноте
-                    type = (HostileType)_random.Next(0, 4);
+                    // Обычное измерение: эндэрмен появляется лишь изредка, в глубокой темноте
+                    type = _random.NextDouble() < 0.03 ? HostileType.Enderman : (HostileType)_random.Next(0, 4);
                 }
 
                 var half = HostileMob.GetHalfSize(type);

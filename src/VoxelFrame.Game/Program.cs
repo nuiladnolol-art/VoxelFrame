@@ -270,6 +270,7 @@ internal static class Program {
             CrashDiag("08_post_decos");
             renderer.DrawClouds(session.Camera);
             renderer.DrawWeather(session.Camera);
+            renderer.DrawPickups(session.Camera); // последними: прозрачные части предмета не режут ни мобов, ни облака
             Raylib.EndMode3D();
             CrashDiag("09_post_endmode3d");
 
@@ -280,6 +281,15 @@ internal static class Program {
             }
 
             switch (session.Ui) {
+                case UiState.Credits:
+                    if (cursorCaptured) {
+                        Raylib.EnableCursor();
+                        cursorCaptured = false;
+                    }
+                    session.CreditsTimer -= dt;
+                    Screens.DrawCredits(session);
+                    if (session.CreditsTimer <= 0f) session.Ui = UiState.Playing;
+                    break;
                 case UiState.Playing:
                     if (Raylib.IsKeyPressed(KeyboardKey.T)) {
                         session.Ui = UiState.Chat;
@@ -392,11 +402,17 @@ internal static class Program {
             }
         }
 
+        // Сохранение при закрытии окна/выходе: текущее измерение (в т.ч. Энд) и
+        // позиция игрока не теряются, даже если закрыть окно крестиком без паузы.
+        if (session != null && session.World != null) {
+            try { session.SaveTo(SaveSystem.SavePath); } catch { /* не критично */ }
+        }
+
         // Освобождаем GPU-ресурсы ДО CloseWindow: контекст OpenGL ещё текущий,
         // удаление шейдеров и мешей корректно. Раньше Dispose пропускали из-за
         // зависания — ресурсы текли до смерти процесса.
         try { renderer?.Dispose(); renderer = null; } catch (Exception ex) { FlushCrashLog(ex); }
-        try { session?.World.Dispose(); session = null; } catch (Exception ex) { FlushCrashLog(ex); }
+        try { session?.World?.Dispose(); session = null; } catch (Exception ex) { FlushCrashLog(ex); }
         SaveSystem.SaveSettings();
         SoundSystem.Shutdown();
         TextureAtlas.Unload();

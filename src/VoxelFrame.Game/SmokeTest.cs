@@ -18,30 +18,38 @@ internal static class SmokeTest {
         Console.WriteLine("== VoxelFrame smoke test (headless) ==");
         Program.RegisterTiles();
         TextureAtlas.GenerateAtlasFile();
+        var swAll = System.Diagnostics.Stopwatch.StartNew();
         try {
-            TestWorldGen();
-            TestMovement();
-            TestBreakAndPlace();
-            TestMining();
-            TestCrafting();
-            TestFire();
-            TestFood();
-            TestAnimals();
-            TestDayNight();
-            TestSaveLoad();
-            TestSunPropagation();
-            TestSaveBackupRecovery();
-            TestCollapse();
-            TestAlphaMobsAndFluids();
-            TestBiomesAnimalsCharcoalTools();
-            TestEndSlime();
-            TestEndSaveLoad();
-            TestMultiWorldSaveLoad();
+            Timed("gen", TestWorldGen);
+            Timed("movement", TestMovement);
+            Timed("break", TestBreakAndPlace);
+            Timed("mining", TestMining);
+            Timed("crafting", TestCrafting);
+            Timed("fire", TestFire);
+            Timed("food", TestFood);
+            Timed("animals", TestAnimals);
+            Timed("daynight", TestDayNight);
+            Timed("saveload", TestSaveLoad);
+            Timed("sunprop", TestSunPropagation);
+            Timed("backup", TestSaveBackupRecovery);
+            Timed("collapse", TestCollapse);
+            Timed("mobs", TestAlphaMobsAndFluids);
+            Timed("biomes", TestBiomesAnimalsCharcoalTools);
+            Timed("endslime", TestEndSlime);
+            Timed("endsave", TestEndSaveLoad);
+            Timed("multi", TestMultiWorldSaveLoad);
         } catch (Exception ex) {
             Fail($"необработанное исключение: {ex}");
         }
-        Console.WriteLine($"{_passed} passed, {_failed} failed.");
+        Console.WriteLine($"TOTAL {swAll.Elapsed.TotalSeconds:F1}s; {_passed} passed, {_failed} failed.");
         return _failed == 0 ? 0 : 1;
+    }
+
+    private static void Timed(string name, Action test) {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        test();
+        sw.Stop();
+        Console.WriteLine($"    [{name}] {sw.Elapsed.TotalSeconds:F2}s");
     }
 
     private static void Check(bool condition, string what) {
@@ -653,6 +661,11 @@ internal static class SmokeTest {
         var center = new Vector3(0.5f, endw.Generator.EndSurfaceHeight(0, 0), 0.5f);
         endw.EndBoss = new EndSlime(new Vector3(20f, 80f, 10f), center, endw.Seed) { Health = 90f };
 
+        // Инструмент с потраченной прочностью — проверяем, что она кругосветно сохраняется
+        var wornTool = GameData.NewItem(GameData.IronPickaxeItem);
+        wornTool.Durability = 77;
+        s.Player.Inventory.Slots[3] = new ItemEntry(wornTool, 1);
+
         string path = Path.Combine(Path.GetTempPath(), $"voxelframe_mw_{Guid.NewGuid():N}.dat");
         s.SaveTo(path);
         Check(File.Exists(path), "сохранение всех миров записано");
@@ -670,6 +683,8 @@ internal static class SmokeTest {
               "блок в Энде сохранён");
         Check(loaded.EndWorld.EndBoss is { Alive: true } lb && Math.Abs(lb.Health - 90f) < 1e-3f,
               "босс Энда сохранён при сохранении из Энда");
+        Check(loaded.Player.Inventory.Slots[3] is { } lt && lt.Item.Definition.Id == GameData.IronPickaxeItem.Id && lt.Item.Durability == 77,
+              "прочность инструмента сохранена и загружена");
 
         File.Delete(path);
     }

@@ -85,7 +85,8 @@ namespace VoxelFrame.Game;
                     bool isFluid = v.TypeId == GameData.BWater.Id || v.TypeId == GameData.BLava.Id;
                     bool isWater = v.TypeId == GameData.BWater.Id;
                     bool isFoliage = v.TypeId == GameData.BTallGrass.Id || v.TypeId == GameData.BWheatCrop.Id;
-                    bool isTranslucent = isFluid || isFoliage || GameData.IsDoor(v.TypeId) || v.TypeId == GameData.BGlass.Id || v.TypeId == GameData.BBed.Id || v.TypeId == GameData.BBedHead.Id;
+                    bool isTranslucent = isFluid || isFoliage || GameData.IsDoor(v.TypeId) || v.TypeId == GameData.BGlass.Id || v.TypeId == GameData.BBed.Id || v.TypeId == GameData.BBedHead.Id
+                        || v.TypeId == GameData.BNetherPortal.Id || v.TypeId == GameData.BEndPortal.Id;
                     if (pass == 0 && isTranslucent) continue;
                     if (pass == 1 && !isTranslucent) continue;
 
@@ -252,14 +253,14 @@ namespace VoxelFrame.Game;
 
                             if (f == 2) { // Верхняя грань (+Y)
                                 ushort topNeighbor = GetTypeIdAtOffset(neighbors, gc, lx, ly, lz, 0, 1, 0);
-                                if (topNeighbor != v.TypeId && (topNeighbor == 0 || !GameData.GetBlock(topNeighbor).IsOpaque)) {
+                                if (topNeighbor != v.TypeId && !IsFaceOccluding(topNeighbor)) {
                                     renderFace = true;
                                     yBottom = selfH;
                                     yTop = selfH;
                                 }
                             } else if (f == 3) { // Нижняя грань (-Y)
                                 ushort bottomNeighbor = GetTypeIdAtOffset(neighbors, gc, lx, ly, lz, 0, -1, 0);
-                                if (bottomNeighbor != v.TypeId && (bottomNeighbor == 0 || !GameData.GetBlock(bottomNeighbor).IsOpaque)) {
+                                if (bottomNeighbor != v.TypeId && !IsFaceOccluding(bottomNeighbor)) {
                                     renderFace = true;
                                     yBottom = 0f;
                                     yTop = 0f;
@@ -275,7 +276,7 @@ namespace VoxelFrame.Game;
                                         yBottom = neighborH;
                                         yTop = selfH;
                                     }
-                                } else if (nType == 0 || (!GameData.GetBlock(nType).IsOpaque && nType != v.TypeId)) {
+                                } else if (!IsFaceOccluding(nType) && nType != v.TypeId) {
                                     renderFace = true;
                                     yBottom = 0f;
                                     yTop = selfH;
@@ -322,22 +323,72 @@ namespace VoxelFrame.Game;
                         continue;
                     }
 
+                    // ── Портал в Нижний мир / в Энд: полупрозрачный мерцающий экран ──
+                    if (v.TypeId == GameData.BNetherPortal.Id || v.TypeId == GameData.BEndPortal.Id) {
+                        byte portalTile = (byte)(v.TypeId == GameData.BNetherPortal.Id ? TextureAtlas.TNetherPortal : TextureAtlas.TEndPortal);
+                        var (u0, v0, u1, v1) = TileUv(portalTile);
+                        float worldOffsetX = gc.Coord.X * Chunk.SizeX;
+                        float worldOffsetY = gc.Coord.Y * Chunk.SizeY;
+                        float worldOffsetZ = gc.Coord.Z * Chunk.SizeZ;
+                        const byte alpha = 200;
+
+                        for (int f = 0; f < 6; f++) {
+                            var (dx, dy, dz, nx, ny, nz) = Faces[f];
+                            ushort neighborType = GetTypeIdAtOffset(neighbors, gc, lx, ly, lz, dx, dy, dz);
+                            // Не рисуем грани, примыкающие к этому же порталу, и грани, упёртые в непрозрачный блок
+                            if (neighborType == v.TypeId) continue;
+                            if (IsFaceOccluding(neighborType)) continue;
+
+                            if (verts.Count / 3 + 4 > MaxVertices) Flush();
+                            int baseVertex = verts.Count / 3;
+
+                            var (sun, blockL) = GetFaceLight(neighbors, gc, lx, ly, lz, dx, dy, dz);
+                            float faceDir = f switch {
+                                2 => 1.0f,       // Верхняя грань (+Y)
+                                3 => 0.55f,      // Нижняя грань (-Y)
+                                0 or 1 => 0.82f, // Боковые грани (±X)
+                                _ => 0.68f       // Боковые грани (±Z)
+                            };
+                            byte shadeDir = (byte)(255f * faceDir);
+
+                            foreach (var (fx, fy, fz, fu, fv) in FaceVerts[f]) {
+                                float actualFy = fy;
+                                verts.Add(worldOffsetX + lx + fx);
+                                verts.Add(worldOffsetY + ly + actualFy);
+                                verts.Add(worldOffsetZ + lz + fz);
+                                norms.Add(nx); norms.Add(ny); norms.Add(nz);
+                                uvs.Add(u0 + (u1 - u0) * fu);
+                                uvs.Add(v0 + (v1 - v0) * fv);
+                                cols.Add((byte)(255f * sun)); cols.Add((byte)(255f * blockL)); cols.Add(shadeDir); cols.Add(alpha);
+                            }
+
+                            indices.Add((ushort)(baseVertex + 0));
+                            indices.Add((ushort)(baseVertex + 1));
+                            indices.Add((ushort)(baseVertex + 2));
+                            indices.Add((ushort)(baseVertex + 0));
+                            indices.Add((ushort)(baseVertex + 2));
+                            indices.Add((ushort)(baseVertex + 3));
+                        }
+                        continue;
+                    }
+
                     if (!block.IsSolid && !block.IsOpaque && !isFluid) continue;   // факелы рисуются как 3D-декор
 
                     var tiles = TextureAtlas.BlockTiles(v.TypeId);
                     for (int f = 0; f < 6; f++) {
                         var (dx, dy, dz, nx, ny, nz) = Faces[f];
                         ushort neighborType = GetTypeIdAtOffset(neighbors, gc, lx, ly, lz, dx, dy, dz);
-                        
+
                         bool visible;
                         if (v.TypeId == GameData.BGlass.Id) {
-                            visible = neighborType != GameData.BGlass.Id && !IsOpaqueAtOffset(neighbors, lx, ly, lz, dx, dy, dz);
+                            visible = neighborType != GameData.BGlass.Id && !IsFaceOccluding(neighborType);
                         } else if (v.TypeId == GameData.BLeaves.Id) {
                             // Листва не рисует внутренние соприкасающиеся грани с соседней листвой (буст FPS в 3-4 раза в лесу)
-                            visible = neighborType != GameData.BLeaves.Id && (neighborType == 0 || !GameData.GetBlock(neighborType).IsOpaque || neighborType == GameData.BWater.Id);
+                            visible = neighborType != GameData.BLeaves.Id && !IsFaceOccluding(neighborType);
                         } else {
-                            // Твердый блок показывает грань если рядом воздух, стекло, листва или полупрозрачная вода
-                            visible = neighborType == 0 || !GameData.GetBlock(neighborType).IsOpaque || neighborType == GameData.BWater.Id;
+                            // Твёрдый блок показывает грань, если рядом воздух, стекло, листва или жидкость
+                            // (вода/лава не заслоняют грань — иначе блок «исчезает» у лавы).
+                            visible = !IsFaceOccluding(neighborType);
                         }
                         if (!visible) continue;
 
@@ -549,6 +600,15 @@ namespace VoxelFrame.Game;
             return wy < surf;
         }
         return (nChunk.Chunk.Get(nlx, nly, nlz).Flags & VoxelFlags.Solid) != 0;
+    }
+
+    /// <summary>
+    /// Заслоняет ли блок грань соседа. Жидкости (вода/лава) НЕ заслоняют:
+    /// грань блока должна быть видна сквозь них, иначе блок «исчезает» у лавы.
+    /// </summary>
+    private static bool IsFaceOccluding(ushort typeId) {
+        if (typeId == 0 || typeId == GameData.BWater.Id || typeId == GameData.BLava.Id) return false;
+        return GameData.GetBlock(typeId).IsOpaque;
     }
 
     private static bool IsOpaqueAtOffset(GameChunk?[,,] neighbors, int lx, int ly, int lz, int ox, int oy, int oz) {

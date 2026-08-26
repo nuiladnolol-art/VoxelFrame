@@ -5,7 +5,7 @@ using VoxelFrame.Core.World;
 
 namespace VoxelFrame.Game;
 
-public enum UiState { Playing, Inventory, Crafting, Paused, Workbench, Furnace, Chest, Loading, Death, Chat }
+public enum UiState { Playing, Inventory, Crafting, Paused, Workbench, Furnace, Chest, Loading, Death, Chat, Credits }
 public enum Dimension { Overworld, Nether, End }
 public enum WeatherType { Clear, Rain, Thunder }
 public enum GameMode { Survival, Creative }
@@ -26,6 +26,9 @@ public sealed class GameSession {
     public GameMode GameMode = GameMode.Survival;
     public bool KeepInventory = false;
     public int MasterSeed;
+
+    // Титры при выходе из Энда после победы над боссом
+    public float CreditsTimer;
 
     // Чат и команды
     public string ChatInput = "";
@@ -162,6 +165,7 @@ public sealed class GameSession {
 
     public void SwitchDimension(Dimension targetDim) {
         if (World.Dimension == targetDim) return;
+        var fromDim = World.Dimension;
 
         // Сохраняем текущий мир в соответствующее поле
         switch (World.Dimension) {
@@ -191,33 +195,54 @@ public sealed class GameSession {
                 EndWorld = new GameWorld(World.Seed ^ 0x2E1D0FF) { Dimension = Dimension.End };
             }
             World = EndWorld;
-            int targetX = 0, targetZ = 0;
-            int targetY = World.Generator.EndSurfaceHeight(targetX, targetZ);
-            if (targetY <= 0) targetY = 60;
+            // Парящая платформа у края главного острова (воздушная часть),
+            // чтобы видеть плоскую арену с боссом и колоннами.
+            int islandTop = World.Generator.EndSurfaceHeight(0, 0);
+            if (islandTop <= 0) islandTop = 60;
+            const int padX = 0, padZ = 65;   // чуть за краем острова (радиус 60)
+            int targetY = islandTop + 1;
 
-            World.EnsureLoadedAroundSync(new Vector3(targetX, targetY, targetZ), 2);
-            EnsureSafePortalPlatform(World, targetX, targetY, targetZ, GameData.BEndPortal);
+            World.EnsureLoadedAroundSync(new Vector3(padX, targetY, padZ), 2);
+            // В Энде никакого портала на входе: выход откроется только после победы над Слизнем Края.
+            EnsureSafeEndSpawnPad(World, padX, targetY, padZ);
 
-            Player.Position = new Vector3(targetX + 0.5f, targetY + 1.0f, targetZ + 0.5f);
+            Player.Position = new Vector3(padX + 0.5f, targetY + 1.0f, padZ + 0.5f);
             Player.Velocity = Vector3.Zero;
             Player.PortalTimer = -2.5f;
             AddMessage("Вы вошли в Энд!");
         } else {
+            bool endBossDefeated = fromDim == Dimension.End && World.EndBossDefeated;
             World = OverworldWorld ?? new GameWorld(World.Seed) { Dimension = Dimension.Overworld };
-            int targetX = (int)MathF.Floor(Player.Position.X * 8f);
-            int targetZ = (int)MathF.Floor(Player.Position.Z * 8f);
 
-            World.EnsureLoadedAroundSync(new Vector3(targetX, 64f, targetZ), 2);
-            int surfaceY = World.Generator.SurfaceHeight(targetX, targetZ);
-            if (surfaceY <= 0) surfaceY = 64;
-            int targetY = surfaceY + 1;
+            if (fromDim == Dimension.End) {
+                // Выход из Энда: просто возвращаем на точку спавна, БЕЗ портала в Обычном мире
+                World.EnsureLoadedAroundSync(new Vector3(World.SpawnBlock.X, World.SpawnBlock.Y, World.SpawnBlock.Z), 2);
+                Player.Position = World.GetSafeRespawnPosition(World.SpawnBlock);
+                Player.Velocity = Vector3.Zero;
+                Player.PortalTimer = -2.5f;
+                AddMessage("Вы вернулись в Обычный мир!");
+                // После победы над Слизнем Края — показываем титры
+                if (endBossDefeated) {
+                    Ui = UiState.Credits;
+                    CreditsTimer = 32f;
+                }
+            } else {
+                // Возврат из Нижнего мира: координаты портала (как в Minecraft)
+                int targetX = (int)MathF.Floor(Player.Position.X * 8f);
+                int targetZ = (int)MathF.Floor(Player.Position.Z * 8f);
 
-            EnsureSafePortalPlatform(World, targetX, targetY, targetZ, GameData.BNetherPortal);
+                World.EnsureLoadedAroundSync(new Vector3(targetX, 64f, targetZ), 2);
+                int surfaceY = World.Generator.SurfaceHeight(targetX, targetZ);
+                if (surfaceY <= 0) surfaceY = 64;
+                int targetY = surfaceY + 1;
 
-            Player.Position = new Vector3(targetX + 0.5f, targetY + 1.0f, targetZ + 0.5f);
-            Player.Velocity = Vector3.Zero;
-            Player.PortalTimer = -2.5f;
-            AddMessage("Вы вернулись в Обычный мир!");
+                EnsureSafePortalPlatform(World, targetX, targetY, targetZ, GameData.BNetherPortal);
+
+                Player.Position = new Vector3(targetX + 0.5f, targetY + 1.0f, targetZ + 0.5f);
+                Player.Velocity = Vector3.Zero;
+                Player.PortalTimer = -2.5f;
+                AddMessage("Вы вернулись в Обычный мир!");
+            }
         }
     }
 
@@ -244,13 +269,25 @@ public sealed class GameSession {
         }
     }
 
+    /// <summary>Надёжная площадка для точки входа в Энд: обсидиановый пол без портала.</summary>
+    private static void EnsureSafeEndSpawnPad(GameWorld world, int px, int py, int pz) {
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                world.PlacePlacedBlock(new Vec3i(px + dx, py - 1, pz + dz), GameData.BObsidian);
+                for (int dy = 0; dy <= 4; dy++) {
+                    world.RemoveBlock(new Vec3i(px + dx, py + dy, pz + dz));
+                }
+            }
+        }
+    }
+
     public void Tick(float dt, in PlayerInput input) {
         TotalPlaySeconds += dt;
         for (int i = 0; i < _messages.Count; i++)
             _messages[i] = (_messages[i].Text, _messages[i].Age + dt);
         _messages.RemoveAll(m => m.Age > 6f);
 
-        if (Ui == UiState.Paused || Ui == UiState.Death) return;
+        if (Ui == UiState.Paused || Ui == UiState.Death || Ui == UiState.Credits) return;
 
         // Погодный цикл (дождь, гроза, ясная погода)
         if (World.Dimension == Dimension.Overworld) {
@@ -337,6 +374,7 @@ public sealed class GameSession {
         World.TickHostileMobs(dt, Player, this);
         var endIslandTop = World.Generator.EndSurfaceHeight(0, 0);
         var endIslandCenter = new Vector3(0.5f, endIslandTop, 0.5f);
+        World.TickEndCrystals(dt, Player, this);
         World.TickEndSlime(dt, Player, this, endIslandCenter, endIslandTop);
 
         DayNight.Tick(dt);

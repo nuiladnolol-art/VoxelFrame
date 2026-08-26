@@ -287,8 +287,10 @@ public sealed class WorldRenderer : IDisposable {
             Color fogC = GetFogColor();
             fogVec = new Vector3(fogC.R / 255f, fogC.G / 255f, fogC.B / 255f);
             float maxRenderDist = SaveSystem.RenderDistanceSetting * (float)Chunk.SizeX;
-            fogStart = (_world.Dimension == Dimension.Nether) ? 20.0f : MathF.Max(15.0f, maxRenderDist * 0.55f);
-            fogEnd = (_world.Dimension == Dimension.Nether) ? 68.0f : MathF.Max(28.0f, maxRenderDist * 0.96f);
+            bool nether = _world.Dimension == Dimension.Nether;
+            bool end = _world.Dimension == Dimension.End;
+            fogStart = nether ? 20.0f : end ? 40.0f : MathF.Max(15.0f, maxRenderDist * 0.55f);
+            fogEnd = nether ? 68.0f : end ? 140.0f : MathF.Max(28.0f, maxRenderDist * 0.96f);
         }
 
         if (_fogColorLoc != -1) {
@@ -367,6 +369,10 @@ public sealed class WorldRenderer : IDisposable {
             Raylib.ClearBackground(new Color(45, 10, 10, 255));
             return;
         }
+        if (_world.Dimension == Dimension.End) {
+            Raylib.ClearBackground(new Color(10, 6, 20, 255)); // Пурпурно-чёрная пустота Энда
+            return;
+        }
         float f = _session.DayNight.SkyFactor;
         if (_session.Weather != WeatherType.Clear) {
             f *= 0.45f; // Пасмурное грозовое небо
@@ -381,6 +387,7 @@ public sealed class WorldRenderer : IDisposable {
     /// <summary>3D Небесные светила (Солнце, Луна, звёзды в мировом пространстве).</summary>
     public void Draw3DSky(Camera3D camera) {
         if (_world.Dimension == Dimension.Nether) return;
+        if (_world.Dimension == Dimension.End) return; // в Энде нет солнца/луны — только пустота
 
         float f = _session.DayNight.SkyFactor;
         if (_session.Weather != WeatherType.Clear) f *= 0.45f;
@@ -423,9 +430,10 @@ public sealed class WorldRenderer : IDisposable {
         }
     }
 
-    /// <summary>Воксельные облака в небе (Alpha 1.2.6 style, оптимизированные).</summary>
+    /// <summary>Воксельные облака в небе (Alpha 1.2.6 style, оптимизированные). Только в Обычном мире.</summary>
     public void DrawClouds(Camera3D camera) {
         if (SaveSystem.CloudsMode == 0) return;
+        if (_world.Dimension != Dimension.Overworld) return; // в Энде и Незере облаков нет
 
         float time = (float)Raylib.GetTime();
         float cloudY = 108f;
@@ -438,8 +446,8 @@ public sealed class WorldRenderer : IDisposable {
         int baseZ = (int)MathF.Floor(pPos.Z / step) * step;
 
         float wind = time * 2.5f;
-        var cloudColor = new Color(255, 255, 255, fancy ? 190 : 160);
-        var cloudBottom = new Color(205, 215, 230, 190);
+        var cloudColor = new Color(222, 226, 234, fancy ? 120 : 95);
+        var cloudBottom = new Color(185, 195, 210, 110);
 
         for (int x = -gridR; x <= gridR; x++) {
             for (int z = -gridR; z <= gridR; z++) {
@@ -582,6 +590,11 @@ public sealed class WorldRenderer : IDisposable {
                         Raylib.DrawCube(new Vector3(flamePos.X, flamePos.Y - 0.05f, flamePos.Z), 0.14f, 0.12f, 0.14f, headCol);
                     }
                     DrawFlame(flamePos, 0.22f, dt);
+                } else if (v.TypeId == GameData.BEndPortalFrame.Id && (v.SubGridLayerMask & 1) != 0) {
+                    // В рамку вставлено око Эндера — рисуем зелёный самоцвет на её верхней грани
+                    var gemPos = new Vector3(pos.X + 0.5f, pos.Y + 1.14f, pos.Z + 0.5f);
+                    var gemCol = ShadeColor(new Color(120, 235, 140, 255), light, p);
+                    Raylib.DrawCube(gemPos, 0.46f, 0.30f, 0.46f, gemCol);
                 }
             }
             foreach (var pos in _world.Fire.Burning.Keys) {
@@ -651,14 +664,18 @@ public sealed class WorldRenderer : IDisposable {
         if (_session.Weather != WeatherType.Clear) f *= 0.45f;
         return (_world.Dimension == Dimension.Nether)
             ? new Color(45, 10, 10, 255)
-            : LerpColor(C(16, 18, 40, 255), C(178, 208, 244, 255), f);
+            : _world.Dimension == Dimension.End
+                ? new Color(24, 12, 44, 255)
+                : LerpColor(C(16, 18, 40, 255), C(178, 208, 244, 255), f);
     }
 
     public float GetFogFactor(Vector3 pos) {
         float dist = Vector3.Distance(_session.Camera.Position, pos);
         float maxRenderDist = SaveSystem.RenderDistanceSetting * (float)Chunk.SizeX;
-        float fogStart = (_world.Dimension == Dimension.Nether) ? 20.0f : MathF.Max(15.0f, maxRenderDist * 0.60f);
-        float fogEnd = (_world.Dimension == Dimension.Nether) ? 68.0f : MathF.Max(28.0f, maxRenderDist * 0.96f);
+        bool nether = _world.Dimension == Dimension.Nether;
+        bool end = _world.Dimension == Dimension.End;
+        float fogStart = nether ? 20.0f : end ? 40.0f : MathF.Max(15.0f, maxRenderDist * 0.60f);
+        float fogEnd = nether ? 68.0f : end ? 140.0f : MathF.Max(28.0f, maxRenderDist * 0.96f);
         float fogFactor = Math.Clamp((dist - fogStart) / (fogEnd - fogStart), 0.0f, 1.0f);
         return MathF.Pow(fogFactor, 1.35f);
     }
@@ -683,24 +700,8 @@ public sealed class WorldRenderer : IDisposable {
 
     public void DrawEntities(Camera3D camera) {
         float time = (float)Raylib.GetTime();
-        // 1. Draw Item Pickups as Billboards with ambient lighting and fog
-        foreach (var p in _world.Pickups) {
-            if (p.Quantity <= 0) continue;
-            
-            DrawSoftShadow(p.Position, 0.22f);
-            
-            float bob = MathF.Sin(p.BobPhase + (float)Raylib.GetTime() * 3f) * 0.12f;
-            var pos = p.Position + new Vector3(0f, bob + 0.25f, 0f);
-            byte tile = TextureAtlas.ItemTile(p.Definition.Id);
-            var src = new Rectangle(
-                tile % TextureAtlas.Cols * TextureAtlas.TilePx,
-                tile / TextureAtlas.Cols * TextureAtlas.TilePx,
-                TextureAtlas.TilePx, TextureAtlas.TilePx);
-            
-            var light = GetLightFactor(p.Position);
-            Color tint = ShadeColor(Color.White, light, p.Position);
-            Raylib.DrawBillboardRec(camera, TextureAtlas.Atlas, src, pos, new Vector2(0.4f, 0.4f), tint);
-        }
+        // Пикапы рисуются ПОСЛЕ всех мобов (см. конец метода): прозрачные пиксели
+        // текстуры не должны отсекать сущности позади по глубине.
 
         // 2. Draw Animals (Pig, Cow, Sheep) with 3D model, animations and fog
         foreach (var a in _world.Animals) {
@@ -1174,14 +1175,71 @@ public sealed class WorldRenderer : IDisposable {
             Raylib.DrawCube(boss.Position + new Vector3(bodyW * 0.25f, 0.25f, eyeFz), 0.5f, 0.5f, 0.12f, eyeColor);
         }
 
-        // 4. Draw Flying Arrows (стрелы скелетов) with lighting and fog
+        // 3.2 End Crystals (сущности — парят, светятся, взрываются от касания)
+        foreach (var cry in _world.EndCrystals) {
+            if (!cry.Alive) continue;
+            float bob = MathF.Sin(time * 2.2f + cry.BobPhase) * 0.07f;
+            var cPos = cry.Position + new Vector3(0f, bob, 0f);
+            float rot = time * 1.4f + cry.BobPhase;
+            var cl = GetLightFactor(cPos);
+
+            // Свечение ядра (аддитивное)
+            Raylib.BeginBlendMode(BlendMode.Additive);
+            Raylib.DrawCube(cPos, 0.7f, 0.7f, 0.7f, new Color(200, 255, 235, 80));
+            Raylib.EndBlendMode();
+
+            // Заметный вращающийся кристалл-«алмаз» из кубов (как в Minecraft)
+            Rlgl.PushMatrix();
+            Rlgl.Translatef(cPos.X, cPos.Y, cPos.Z);
+            Rlgl.Rotatef(rot * 180f / MathF.PI, 0f, 1f, 0f);
+            var crystalCol = ShadeColor(new Color(215, 245, 255, 240), cl, cPos);
+            var crystalDark = ShadeColor(new Color(140, 185, 210, 240), cl, cPos);
+            var crystalCore = ShadeColor(new Color(255, 255, 255, 255), cl, cPos);
+
+            Raylib.DrawCube(Vector3.Zero, 0.46f, 0.46f, 0.46f, crystalCore);
+            Raylib.DrawCube(new Vector3(0f, 0.50f, 0f), 0.30f, 0.32f, 0.30f, crystalCol);
+            Raylib.DrawCube(new Vector3(0f, -0.50f, 0f), 0.30f, 0.32f, 0.30f, crystalCol);
+            Raylib.DrawCube(new Vector3(0.50f, 0f, 0f), 0.32f, 0.30f, 0.30f, crystalCol);
+            Raylib.DrawCube(new Vector3(-0.50f, 0f, 0f), 0.32f, 0.30f, 0.30f, crystalCol);
+            Raylib.DrawCube(new Vector3(0f, 0f, 0.50f), 0.30f, 0.30f, 0.32f, crystalDark);
+            Raylib.DrawCube(new Vector3(0f, 0f, -0.50f), 0.30f, 0.30f, 0.32f, crystalDark);
+
+            // Вращающееся кольцо из 4 кубов
+            float ringRot = rot * 1.7f;
+            for (int i = 0; i < 4; i++) {
+                float a = ringRot + i * (MathF.PI / 2f);
+                var ringPos = new Vector3(MathF.Cos(a) * 0.62f, 0f, MathF.Sin(a) * 0.62f);
+                Raylib.DrawCube(ringPos, 0.26f, 0.12f, 0.26f, crystalCol);
+            }
+            Rlgl.PopMatrix();
+        }
+
+        // 4. Draw Flying Arrows / Жемчуг / Око Эндера with lighting and fog
         foreach (var arr in _world.Arrows) {
             if (!arr.Alive) continue;
             var arrLight = GetLightFactor(arr.Position);
             var fwd = arr.Velocity.LengthSquared() > 0.01f ? Vector3.Normalize(arr.Velocity) : Vector3.UnitZ;
-            Raylib.DrawCube(arr.Position, 0.06f, 0.06f, 0.55f, ShadeColor(new Color(175, 140, 95, 255), arrLight, arr.Position));
-            Raylib.DrawCube(arr.Position + fwd * 0.26f, 0.10f, 0.10f, 0.10f, ShadeColor(new Color(190, 190, 190, 255), arrLight, arr.Position));
-            Raylib.DrawCube(arr.Position - fwd * 0.24f, 0.12f, 0.12f, 0.12f, ShadeColor(new Color(245, 245, 245, 255), arrLight, arr.Position));
+            Color bodyCol, tipCol, backCol;
+            if (arr.IsSlimeSpit) {
+                bodyCol = new Color(90, 200, 70, 255);    // плевок Слизня Края: тёмно-зелёный
+                tipCol = new Color(160, 255, 120, 255);
+                backCol = new Color(40, 110, 30, 255);
+            } else if (arr.IsEnderPearl) {
+                bodyCol = new Color(40, 200, 150, 255);   // жемчужно-зелёный
+                tipCol = new Color(150, 255, 210, 255);
+                backCol = new Color(20, 110, 85, 255);
+            } else if (arr.IsEyeOfEnder) {
+                bodyCol = new Color(200, 60, 60, 255);    // око: красное тело, янтарное яблоко
+                tipCol = new Color(255, 200, 60, 255);
+                backCol = new Color(110, 25, 20, 255);
+            } else {
+                bodyCol = new Color(175, 140, 95, 255);
+                tipCol = new Color(190, 190, 190, 255);
+                backCol = new Color(245, 245, 245, 255);
+            }
+            Raylib.DrawCube(arr.Position, 0.08f, 0.08f, 0.55f, ShadeColor(bodyCol, arrLight, arr.Position));
+            Raylib.DrawCube(arr.Position + fwd * 0.26f, 0.12f, 0.12f, 0.12f, ShadeColor(tipCol, arrLight, arr.Position));
+            Raylib.DrawCube(arr.Position - fwd * 0.24f, 0.14f, 0.14f, 0.14f, ShadeColor(backCol, arrLight, arr.Position));
         }
 
         // 5. Falling blocks with lighting and fog
@@ -1191,6 +1249,34 @@ public sealed class WorldRenderer : IDisposable {
             var tint = ShadeColor(BlockTint(f.Block.Id), fallLight, f.Position);
             Raylib.DrawCube(f.Position, 1.0f, 1.0f, 1.0f, tint);
             Raylib.DrawCubeWires(f.Position, 1.002f, 1.002f, 1.002f, ShadeColor(new Color(20, 20, 25, 180), fallLight, f.Position));
+        }
+
+    }
+
+    /// <summary>
+    /// Выброшенные предметы (billboard'ы) — рисуются ПОСЛЕДНИМИ в кадре (после неба,
+    /// облаков и всех сущностей). Включён depth-тест: непрозрачные пиксели корректно
+    /// закрывают то, что позади, а прозрачные смешиваются с ним (моб/облако видны
+    /// сквозь прозрачную часть предмета), потому что ничто не рисуется после них.
+    /// </summary>
+    public void DrawPickups(Camera3D camera) {
+        Rlgl.EnableDepthTest();
+        foreach (var p in _world.Pickups) {
+            if (p.Quantity <= 0) continue;
+
+            DrawSoftShadow(p.Position, 0.22f);
+
+            float bob = MathF.Sin(p.BobPhase + (float)Raylib.GetTime() * 3f) * 0.12f;
+            var pos = p.Position + new Vector3(0f, bob + 0.25f, 0f);
+            byte tile = TextureAtlas.ItemTile(p.Definition.Id);
+            var src = new Rectangle(
+                tile % TextureAtlas.Cols * TextureAtlas.TilePx,
+                tile / TextureAtlas.Cols * TextureAtlas.TilePx,
+                TextureAtlas.TilePx, TextureAtlas.TilePx);
+
+            var light = GetLightFactor(p.Position);
+            Color tint = ShadeColor(Color.White, light, p.Position);
+            Raylib.DrawBillboardRec(camera, TextureAtlas.Atlas, src, pos, new Vector2(0.4f, 0.4f), tint);
         }
     }
 
