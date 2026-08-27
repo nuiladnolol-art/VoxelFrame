@@ -898,6 +898,13 @@ public static class GameData {
         AddShapeRecipe(new ItemDefinition?[] { null, BlazePowderItem, null, null, EnderPearlItem, null, null, null, null }, EyeOfEnderItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { EnderPearlItem, null, null, BlazePowderItem, null, null, null, null, null }, EyeOfEnderItem, 1);
         AddShapeRecipe(new ItemDefinition?[] { null, EnderPearlItem, null, null, BlazePowderItem, null, null, null, null }, EyeOfEnderItem, 1);
+
+        // Древесные опилки: 2 доски -> 4 опилок; 1 доска + 1 палка -> 2 опилок
+        AddShapeRecipe(new ItemDefinition?[] { PlankItem, PlankItem, null, null, null, null, null, null, null }, SawdustItem, 4);
+        AddShapeRecipe(new ItemDefinition?[] { PlankItem, null, null, StickItem, null, null, null, null, null }, SawdustItem, 2);
+
+        // Каша из опилок: 2 опилки + 1 доска + 1 семена пшеницы
+        AddShapeRecipe(new ItemDefinition?[] { SawdustItem, SawdustItem, null, PlankItem, WheatSeedsItem, null, null, null, null }, SawdustPorridgeItem, 1);
     }
 
     private static void InitSmeltingRecipes() {

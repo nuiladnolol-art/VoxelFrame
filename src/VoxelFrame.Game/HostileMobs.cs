@@ -171,7 +171,7 @@ public sealed class HostileMob {
                 speed = 3.4f;
                 // Паук лазает по стенам
                 var aheadWall = new Vec3i((int)MathF.Floor(Position.X + dir.X * 0.7f), (int)MathF.Floor(Position.Y + 0.5f), (int)MathF.Floor(Position.Z + dir.Z * 0.7f));
-                if (world.IsSolidAt(aheadWall)) {
+                if (world.IsSolidAt(aheadWall) && !GameData.IsDoor(world.GetVoxel(aheadWall).TypeId)) {
                     Velocity.Y = 4.5f;
                 }
             } else if (Type == HostileType.Creeper) {
@@ -240,7 +240,11 @@ public sealed class HostileMob {
                 var aheadHead = new Vec3i(aheadX, feetPos.Y + 1, aheadZ);
                 var currentHead = feetPos + new Vec3i(0, 1, 0);
 
-                if (world.IsSolidAt(aheadFoot)) {
+                // Дверь — не препятствие для мобов: идём сквозь неё (коллизия ignoreDoors).
+                bool isDoorAhead = GameData.IsDoor(world.GetVoxel(aheadFoot).TypeId) ||
+                                   GameData.IsDoor(world.GetVoxel(aheadHead).TypeId);
+
+                if (world.IsSolidAt(aheadFoot) && !isDoorAhead) {
                     if (!world.IsSolidAt(aheadHead) && !world.IsSolidAt(currentHead) && MathF.Abs(Velocity.Y) < 0.1f) {
                         Velocity.Y = 8.5f; // Прыжок на 1 блок вверх
                     } else if (world.IsSolidAt(aheadHead)) {
@@ -361,7 +365,7 @@ public sealed class HostileMob {
             Velocity.Y -= 22f * dt;
         }
 
-        bool grounded = Collision.Move(world, ref Position, new Vector3(HalfSizeX, HalfSizeY, HalfSizeZ), ref Velocity, dt);
+        bool grounded = Collision.Move(world, ref Position, new Vector3(HalfSizeX, HalfSizeY, HalfSizeZ), ref Velocity, dt, ignoreDoors: true);
         if (grounded && Velocity.Y < 0f) Velocity.Y = 0f;
     }
 
@@ -378,7 +382,9 @@ public sealed class HostileMob {
             var cell = new Vec3i((int)MathF.Floor(cur.X), (int)MathF.Floor(cur.Y), (int)MathF.Floor(cur.Z));
             if (world.IsSolidAt(cell)) return false;
             var v = world.GetVoxel(cell);
-            if (v.TypeId != 0 && (GameData.GetBlock(v.TypeId).IsOpaque || GameData.IsDoor(v.TypeId))) return false;
+            // Открытая дверь не загораживает обзор — мобы видят сквозь неё.
+            if (v.TypeId != 0 && (GameData.GetBlock(v.TypeId).IsOpaque ||
+                (GameData.IsDoor(v.TypeId) && (v.SubGridLayerMask & 8) == 0))) return false;
         }
         return true;
     }
@@ -438,7 +444,7 @@ public sealed class HostileMob {
                 if (!world.IsSolidAt(floor)) continue;
                 if (world.IsSolidAt(foot) || world.IsSolidAt(head)) continue;
                 var pos = new Vector3(tx + 0.5f, by + 1.0f + half.Y, tz + 0.5f);
-                if (!Collision.IntersectsSolid(world, pos - half, pos + half)) {
+                if (!Collision.IntersectsSolid(world, pos - half, pos + half, ignoreDoors: true)) {
                     Position = pos;
                     Velocity = Vector3.Zero;
                     return true;
@@ -453,7 +459,7 @@ public sealed class HostileMob {
                 if (!world.IsSolidAt(floor)) continue;
                 if (world.IsSolidAt(foot) || world.IsSolidAt(head)) continue;
                 var pos = new Vector3(tx + 0.5f, by + 1.0f + half.Y, tz + 0.5f);
-                if (!Collision.IntersectsSolid(world, pos - half, pos + half)) {
+                if (!Collision.IntersectsSolid(world, pos - half, pos + half, ignoreDoors: true)) {
                     Position = pos;
                     Velocity = Vector3.Zero;
                     return true;
@@ -483,7 +489,7 @@ public sealed class HostileMob {
                 ushort footT = world.GetVoxel(foot).TypeId;
                 if (footT == GameData.BWater.Id || footT == GameData.BLava.Id) continue;
                 var pos = new Vector3(tx + 0.5f, by + 1.0f + half.Y, tz + 0.5f);
-                if (!Collision.IntersectsSolid(world, pos - half, pos + half)) {
+                if (!Collision.IntersectsSolid(world, pos - half, pos + half, ignoreDoors: true)) {
                     Position = pos;
                     Velocity = Vector3.Zero;
                     return;
@@ -513,7 +519,7 @@ public sealed class HostileMob {
                 ushort footT = world.GetVoxel(foot).TypeId;
                 if (footT == GameData.BWater.Id || footT == GameData.BLava.Id) continue; // не в воду
                 var pos = new Vector3(tx + 0.5f, by + 1.0f + half.Y, tz + 0.5f);
-                if (!Collision.IntersectsSolid(world, pos - half, pos + half)) {
+                if (!Collision.IntersectsSolid(world, pos - half, pos + half, ignoreDoors: true)) {
                     Position = pos;
                     Velocity = Vector3.Zero;
                     return;

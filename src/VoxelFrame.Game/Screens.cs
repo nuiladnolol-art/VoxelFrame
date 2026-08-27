@@ -235,7 +235,7 @@ public static partial class Screens {
             if (MenuError.Length > 0)
                 Fonts.DrawCentered(MenuError, w / 2f, h * 0.68f, 18f, new Color(255, 120, 120, 255));
 
-            Fonts.Draw("VoxelFrame Alpha 0.9.3", 10f, h - 25f, 14f, new Color(200, 200, 200, 180));
+            Fonts.Draw("VoxelFrame Alpha 0.9.4", 10f, h - 25f, 14f, new Color(200, 200, 200, 180));
             Fonts.Draw("SenStol Studio", w - 180f, h - 25f, 14f, new Color(200, 200, 200, 180));
         }
 
@@ -1222,8 +1222,9 @@ public static partial class Screens {
         ItemDefinition Output,
         int Count,
         (ItemDefinition Item, int Count)[] Ingredients,
-        ItemDefinition?[] Shape,
-        bool Needs3x3);
+        ItemDefinition?[]? Shape,
+        bool Needs3x3,
+        bool IsSmelt = false);
 
     private static int _recipeScroll = 0;
 
@@ -1249,24 +1250,28 @@ public static partial class Screens {
         new("Каменная кирка", GameData.StonePickaxeItem, 1, new[] { (GameData.CobblestoneItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.CobblestoneItem, GameData.CobblestoneItem, GameData.CobblestoneItem, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
         new("Железная кирка", GameData.IronPickaxeItem, 1, new[] { (GameData.IronIngotItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.IronIngotItem, GameData.IronIngotItem, GameData.IronIngotItem, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
         new("Алмазная кирка", GameData.DiamondPickaxeItem, 1, new[] { (GameData.DiamondItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.DiamondItem, GameData.DiamondItem, GameData.DiamondItem, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Золотая кирка", GameData.GoldPickaxeItem, 1, new[] { (GameData.GoldIngotItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.GoldIngotItem, GameData.GoldIngotItem, GameData.GoldIngotItem, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
 
         // Топоры
         new("Деревянный топор", GameData.WoodAxeItem, 1, new[] { (GameData.PlankItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.PlankItem, GameData.PlankItem, null, GameData.PlankItem, GameData.StickItem, null, null, GameData.StickItem, null }, true),
         new("Каменный топор", GameData.StoneAxeItem, 1, new[] { (GameData.CobblestoneItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.CobblestoneItem, GameData.CobblestoneItem, null, GameData.CobblestoneItem, GameData.StickItem, null, null, GameData.StickItem, null }, true),
         new("Железный топор", GameData.IronAxeItem, 1, new[] { (GameData.IronIngotItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.IronIngotItem, GameData.IronIngotItem, null, GameData.IronIngotItem, GameData.StickItem, null, null, GameData.StickItem, null }, true),
         new("Алмазный топор", GameData.DiamondAxeItem, 1, new[] { (GameData.DiamondItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.DiamondItem, GameData.DiamondItem, null, GameData.DiamondItem, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Золотой топор", GameData.GoldAxeItem, 1, new[] { (GameData.GoldIngotItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.GoldIngotItem, GameData.GoldIngotItem, null, GameData.GoldIngotItem, GameData.StickItem, null, null, GameData.StickItem, null }, true),
 
         // Мечи
         new("Деревянный меч", GameData.WoodSwordItem, 1, new[] { (GameData.PlankItem, 2), (GameData.StickItem, 1) }, new ItemDefinition?[] { null, GameData.PlankItem, null, null, GameData.PlankItem, null, null, GameData.StickItem, null }, true),
         new("Каменный меч", GameData.StoneSwordItem, 1, new[] { (GameData.CobblestoneItem, 2), (GameData.StickItem, 1) }, new ItemDefinition?[] { null, GameData.CobblestoneItem, null, null, GameData.CobblestoneItem, null, null, GameData.StickItem, null }, true),
         new("Железный меч", GameData.IronSwordItem, 1, new[] { (GameData.IronIngotItem, 2), (GameData.StickItem, 1) }, new ItemDefinition?[] { null, GameData.IronIngotItem, null, null, GameData.IronIngotItem, null, null, GameData.StickItem, null }, true),
         new("Алмазный меч", GameData.DiamondSwordItem, 1, new[] { (GameData.DiamondItem, 2), (GameData.StickItem, 1) }, new ItemDefinition?[] { null, GameData.DiamondItem, null, null, GameData.DiamondItem, null, null, GameData.StickItem, null }, true),
+        new("Золотой меч", GameData.GoldSwordItem, 1, new[] { (GameData.GoldIngotItem, 2), (GameData.StickItem, 1) }, new ItemDefinition?[] { null, GameData.GoldIngotItem, null, null, GameData.GoldIngotItem, null, null, GameData.StickItem, null }, true),
 
         // Лопаты
         new("Деревянная лопата", GameData.WoodShovelItem, 1, new[] { (GameData.PlankItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.PlankItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
         new("Каменная лопата", GameData.StoneShovelItem, 1, new[] { (GameData.CobblestoneItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.CobblestoneItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
         new("Железная лопата", GameData.IronShovelItem, 1, new[] { (GameData.IronIngotItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.IronIngotItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
         new("Алмазная лопата", GameData.DiamondShovelItem, 1, new[] { (GameData.DiamondItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.DiamondItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Золотая лопата", GameData.GoldShovelItem, 1, new[] { (GameData.GoldIngotItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.GoldIngotItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
 
         // Оружие, охота и снаряжение
         new("Кремень", GameData.FlintItem, 1, new[] { (GameData.GravelItem, 3) }, new ItemDefinition?[] { GameData.GravelItem, GameData.GravelItem, GameData.GravelItem, null, null, null, null, null, null }, true),
@@ -1282,6 +1287,28 @@ public static partial class Screens {
         new("Каменная мотыга", GameData.StoneHoeItem, 1, new[] { (GameData.CobblestoneItem, 2), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.CobblestoneItem, GameData.CobblestoneItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
         new("Железная мотыга", GameData.IronHoeItem, 1, new[] { (GameData.IronIngotItem, 2), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.IronIngotItem, GameData.IronIngotItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
         new("Алмазная мотыга", GameData.DiamondHoeItem, 1, new[] { (GameData.DiamondItem, 2), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.DiamondItem, GameData.DiamondItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+        new("Золотая мотыга", GameData.GoldHoeItem, 1, new[] { (GameData.GoldIngotItem, 2), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.GoldIngotItem, GameData.GoldIngotItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
+
+        // Прочие блоки и предметы
+        new("Шерсть", GameData.WhiteWoolItem, 1, new[] { (GameData.StringItem, 4) }, new ItemDefinition?[] { GameData.StringItem, GameData.StringItem, GameData.StringItem, GameData.StringItem }, false),
+        new("Деревянная дверь (3 шт)", GameData.DoorItem, 3, new[] { (GameData.PlankItem, 6) }, new ItemDefinition?[] { GameData.PlankItem, GameData.PlankItem, null, GameData.PlankItem, GameData.PlankItem, null, GameData.PlankItem, GameData.PlankItem, null }, true),
+        new("Золотое яблоко", GameData.GoldenAppleItem, 1, new[] { (GameData.GoldIngotItem, 8), (GameData.AppleItem, 1) }, new ItemDefinition?[] { GameData.GoldIngotItem, GameData.GoldIngotItem, GameData.GoldIngotItem, GameData.GoldIngotItem, GameData.AppleItem, GameData.GoldIngotItem, GameData.GoldIngotItem, GameData.GoldIngotItem, GameData.GoldIngotItem }, true),
+        new("Светокамень", GameData.GlowstoneItem, 1, new[] { (GameData.GlowstoneDustItem, 4) }, new ItemDefinition?[] { GameData.GlowstoneDustItem, GameData.GlowstoneDustItem, GameData.GlowstoneDustItem, GameData.GlowstoneDustItem }, false),
+        new("Рельсы (16 шт)", GameData.RailItem, 16, new[] { (GameData.IronIngotItem, 6), (GameData.StickItem, 1) }, new ItemDefinition?[] { GameData.IronIngotItem, null, GameData.IronIngotItem, GameData.IronIngotItem, GameData.StickItem, GameData.IronIngotItem, GameData.IronIngotItem, null, GameData.IronIngotItem }, true),
+        new("Факелы (4 шт, древесный уголь)", GameData.TorchItem, 4, new[] { (GameData.CharcoalItem, 1), (GameData.StickItem, 1) }, new ItemDefinition?[] { GameData.CharcoalItem, null, GameData.StickItem, null }, false),
+        new("Порох ифрита (2 шт)", GameData.BlazePowderItem, 2, new[] { (GameData.BlazeRodItem, 1) }, new ItemDefinition?[] { GameData.BlazeRodItem, null, null, null }, false),
+        new("Око Эндера", GameData.EyeOfEnderItem, 1, new[] { (GameData.BlazePowderItem, 1), (GameData.EnderPearlItem, 1) }, new ItemDefinition?[] { GameData.BlazePowderItem, null, GameData.EnderPearlItem, null }, false),
+
+        // Плавка в печке
+        new("Железный слиток", GameData.IronIngotItem, 1, new[] { (GameData.IronOreItem, 1) }, null, false, IsSmelt: true),
+        new("Золотой слиток", GameData.GoldIngotItem, 1, new[] { (GameData.GoldOreItem, 1) }, null, false, IsSmelt: true),
+        new("Стекло", GameData.GlassItem, 1, new[] { (GameData.SandItem, 1) }, null, false, IsSmelt: true),
+        new("Уголь", GameData.CoalItem, 1, new[] { (GameData.CoalOreItem, 1) }, null, false, IsSmelt: true),
+        new("Камень", GameData.StoneItem, 1, new[] { (GameData.CobblestoneItem, 1) }, null, false, IsSmelt: true),
+        new("Древесный уголь", GameData.CharcoalItem, 1, new[] { (GameData.LogItem, 1) }, null, false, IsSmelt: true),
+        new("Жареная свинина", GameData.CookedPorkItem, 1, new[] { (GameData.RawPorkItem, 1) }, null, false, IsSmelt: true),
+        new("Жареный стейк", GameData.CookedBeefItem, 1, new[] { (GameData.RawBeefItem, 1) }, null, false, IsSmelt: true),
+        new("Жареная баранина", GameData.CookedMuttonItem, 1, new[] { (GameData.RawMuttonItem, 1) }, null, false, IsSmelt: true),
     };
 
     private static void DrawRecipeBookSection(GameSession session, float rx, float ry, float rw, float rh, ItemEntry?[] targetGrid, bool is3x3) {
@@ -1336,13 +1363,18 @@ public static partial class Screens {
             Color nameCol = canCraft ? Color.White : new Color(160, 165, 175, 200);
             Fonts.Draw(r.Name, itemRec.X + 38f, itemRec.Y + 4f, 13f, nameCol);
 
-            // Стоимость или тег верстака
-            string costText = r.Needs3x3 && !is3x3 ? "[Верстак 3×3]" : string.Join(" + ", r.Ingredients.Select(ing => $"{ing.Count}×{ing.Item.Name[..Math.Min(5, ing.Item.Name.Length)]}"));
+            // Стоимость или тег верстака / печки
+            string costText = r.IsSmelt ? "[Плавка в печке]"
+                : r.Needs3x3 && !is3x3 ? "[Верстак 3×3]"
+                : string.Join(" + ", r.Ingredients.Select(ing => $"{ing.Count}×{ing.Item.Name[..Math.Min(5, ing.Item.Name.Length)]}"));
             Color costCol = canCraft ? new Color(160, 230, 170, 220) : new Color(200, 120, 120, 200);
             Fonts.Draw(costText, itemRec.X + 38f, itemRec.Y + 22f, 11f, costCol);
 
             if (hov && leftClick) {
-                if (r.Needs3x3 && !is3x3) {
+                if (r.IsSmelt) {
+                    var fuel = r.Ingredients[0].Item;
+                    session.AddMessage($"Плавка: поместите {fuel.Name} в верхнюю ячейку печки, а топливо (уголь, бревно и т.п.) — в нижнюю.");
+                } else if (r.Needs3x3 && !is3x3) {
                     session.AddMessage("Этот предмет можно скрафтить только на верстаке 3×3!");
                 } else if (!canCraft) {
                     session.AddMessage($"Не хватает ингредиентов для создания: {r.Name}");
@@ -1360,6 +1392,7 @@ public static partial class Screens {
         int gridSize = is3x3 ? 3 : 2;
 
         var shape = recipe.Shape;
+        if (shape == null) return; // рецепты плавки в сетку крафта не раскладываются
         int shapeW = recipe.Needs3x3 ? 3 : 2;
         int shapeH = recipe.Needs3x3 ? 3 : 2;
 

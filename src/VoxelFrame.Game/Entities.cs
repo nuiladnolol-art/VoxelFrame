@@ -7,7 +7,7 @@ namespace VoxelFrame.Game;
 
 /// <summary>ААBB-коллизия с твёрдыми блоками: движение по осям по отдельности.</summary>
 public static class Collision {
-    public static bool IntersectsSolid(GameWorld world, Vector3 min, Vector3 max) {
+    public static bool IntersectsSolid(GameWorld world, Vector3 min, Vector3 max, bool ignoreDoors = false) {
         const float eps = 0.001f;
         int x0 = (int)MathF.Floor(min.X + eps), x1 = (int)MathF.Floor(max.X - eps);
         int y0 = (int)MathF.Floor(min.Y + eps), y1 = (int)MathF.Floor(max.Y - eps);
@@ -21,12 +21,15 @@ public static class Collision {
                     if ((v.Flags & VoxelFlags.Solid) == 0) continue;
 
                     if (GameData.IsDoor(v.TypeId)) {
+                        // Мобы (ignoreDoors) проходят сквозь двери, не застревая.
+                        if (ignoreDoors) continue;
+                        // Открытая дверь проходима для всех, закрытая — тонкая панель.
                         bool isOpen = (v.SubGridLayerMask & 8) != 0;
                         if (isOpen) continue;
                     }
 
                     // Получаем точные границы AABB блока
-                    GetBlockAabb(v.TypeId, x, y, z, out float bx0, out float by0, out float bz0, out float bx1, out float by1, out float bz1);
+                    GetBlockAabb(v, x, y, z, out float bx0, out float by0, out float bz0, out float bx1, out float by1, out float bz1);
 
                     // Проверяем реальное пересечение AABB сущности [min, max] и AABB блока [b0, b1]
                     if (max.X > bx0 + eps && min.X < bx1 - eps &&
@@ -40,9 +43,10 @@ public static class Collision {
         return false;
     }
 
-    private static void GetBlockAabb(ushort typeId, int x, int y, int z, out float bx0, out float by0, out float bz0, out float bx1, out float by1, out float bz1) {
+    private static void GetBlockAabb(in VoxelData v, int x, int y, int z, out float bx0, out float by0, out float bz0, out float bx1, out float by1, out float bz1) {
         bx0 = x; by0 = y; bz0 = z;
         bx1 = x + 1f; by1 = y + 1f; bz1 = z + 1f;
+        ushort typeId = v.TypeId;
 
         if (typeId == GameData.BBed.Id || typeId == GameData.BBedHead.Id) {
             by1 = y + 0.5625f; // 9/16 блока
@@ -52,22 +56,35 @@ public static class Collision {
             bx0 = x + 0.0625f; bx1 = x + 0.9375f;
             by1 = y + 0.875f;  // 14/16 блока
             bz0 = z + 0.0625f; bz1 = z + 0.9375f;
+        } else if (GameData.IsDoor(typeId)) {
+            // Тонкая дверная панель 3/16 — совпадает с визуалом в ChunkMesher
+            // (биты 0..1 — facing, бит 8 — открыта, при открытии панель повёрнута на 90°).
+            byte facing = (byte)(v.SubGridLayerMask & 3);
+            bool isOpen = (v.SubGridLayerMask & 8) != 0;
+            byte effFacing = isOpen ? (byte)((facing + 1) & 3) : facing;
+            const float T = 0.1875f;
+            switch (effFacing) {
+                case 0: bz0 = z + (1f - T); bz1 = z + 1f; break;
+                case 1: bx0 = x; bx1 = x + T; break;
+                case 2: bz0 = z; bz1 = z + T; break;
+                default: bx0 = x + (1f - T); bx1 = x + 1f; break;
+            }
         }
     }
 
     /// <summary>Сдвигает тело с учётом коллизий; возвращает признак «стоит на земле».</summary>
-    public static bool Move(GameWorld world, ref Vector3 pos, Vector3 half, ref Vector3 vel, float dt, bool sneaking = false, float stepHeight = 0.60f) {
+    public static bool Move(GameWorld world, ref Vector3 pos, Vector3 half, ref Vector3 vel, float dt, bool sneaking = false, float stepHeight = 0.60f, bool ignoreDoors = false) {
         bool onGround = false;
 
         // 1. Если крадемся (Shift) на земле — независимое удержание на краю по X и Z для плавного скольжения
         if (sneaking) {
             float testX = pos.X + vel.X * dt;
             float testZ = pos.Z + vel.Z * dt;
-            bool groundX = IntersectsSolid(world, new Vector3(testX, pos.Y - 0.1f, pos.Z) - half, new Vector3(testX, pos.Y - 0.1f, pos.Z) + half);
+            bool groundX = IntersectsSolid(world, new Vector3(testX, pos.Y - 0.1f, pos.Z) - half, new Vector3(testX, pos.Y - 0.1f, pos.Z) + half, ignoreDoors);
             if (!groundX) {
                 vel.X = 0f;
             }
-            bool groundZ = IntersectsSolid(world, new Vector3(pos.X, pos.Y - 0.1f, testZ) - half, new Vector3(pos.X, pos.Y - 0.1f, testZ) + half);
+            bool groundZ = IntersectsSolid(world, new Vector3(pos.X, pos.Y - 0.1f, testZ) - half, new Vector3(pos.X, pos.Y - 0.1f, testZ) + half, ignoreDoors);
             if (!groundZ) {
                 vel.Z = 0f;
             }
@@ -76,14 +93,14 @@ public static class Collision {
         // 2. Движение по X (с поддержкой авто-подъема / step-up на полублоки, грядки, кровати)
         if (vel.X != 0f) {
             pos.X += vel.X * dt;
-            if (IntersectsSolid(world, pos - half, pos + half)) {
+            if (IntersectsSolid(world, pos - half, pos + half, ignoreDoors)) {
                 bool stepped = false;
                 if (stepHeight > 0f && vel.Y <= 0.01f) {
                     for (float dy = 0.05f; dy <= stepHeight; dy += 0.05f) {
                         var steppedPos = new Vector3(pos.X, pos.Y + dy, pos.Z);
-                        if (!IntersectsSolid(world, steppedPos - half, steppedPos + half)) {
+                        if (!IntersectsSolid(world, steppedPos - half, steppedPos + half, ignoreDoors)) {
                             // Проверяем, что на новой высоте под ногами есть опора
-                            bool hasSupport = IntersectsSolid(world, new Vector3(steppedPos.X, steppedPos.Y - 0.05f, steppedPos.Z) - half, new Vector3(steppedPos.X, steppedPos.Y - 0.05f, steppedPos.Z) + half);
+                            bool hasSupport = IntersectsSolid(world, new Vector3(steppedPos.X, steppedPos.Y - 0.05f, steppedPos.Z) - half, new Vector3(steppedPos.X, steppedPos.Y - 0.05f, steppedPos.Z) + half, ignoreDoors);
                             if (hasSupport) {
                                 pos.Y += dy;
                                 stepped = true;
@@ -102,14 +119,14 @@ public static class Collision {
         // 3. Движение по Z (с поддержкой авто-подъема / step-up на полублоки, грядки, кровати)
         if (vel.Z != 0f) {
             pos.Z += vel.Z * dt;
-            if (IntersectsSolid(world, pos - half, pos + half)) {
+            if (IntersectsSolid(world, pos - half, pos + half, ignoreDoors)) {
                 bool stepped = false;
                 if (stepHeight > 0f && vel.Y <= 0.01f) {
                     for (float dy = 0.05f; dy <= stepHeight; dy += 0.05f) {
                         var steppedPos = new Vector3(pos.X, pos.Y + dy, pos.Z);
-                        if (!IntersectsSolid(world, steppedPos - half, steppedPos + half)) {
+                        if (!IntersectsSolid(world, steppedPos - half, steppedPos + half, ignoreDoors)) {
                             // Проверяем, что на новой высоте под ногами есть опора
-                            bool hasSupport = IntersectsSolid(world, new Vector3(steppedPos.X, steppedPos.Y - 0.05f, steppedPos.Z) - half, new Vector3(steppedPos.X, steppedPos.Y - 0.05f, steppedPos.Z) + half);
+                            bool hasSupport = IntersectsSolid(world, new Vector3(steppedPos.X, steppedPos.Y - 0.05f, steppedPos.Z) - half, new Vector3(steppedPos.X, steppedPos.Y - 0.05f, steppedPos.Z) + half, ignoreDoors);
                             if (hasSupport) {
                                 pos.Y += dy;
                                 stepped = true;
@@ -127,7 +144,7 @@ public static class Collision {
 
         // 4. Движение по Y
         pos.Y += vel.Y * dt;
-        if (IntersectsSolid(world, pos - half, pos + half)) {
+        if (IntersectsSolid(world, pos - half, pos + half, ignoreDoors)) {
             if (vel.Y < 0f) onGround = true;
             pos.Y -= vel.Y * dt;
             vel.Y = 0f;
@@ -135,7 +152,7 @@ public static class Collision {
 
         // 5. Проверка касания земли чуть ниже стоп
         if (!onGround && vel.Y <= 0f) {
-            if (IntersectsSolid(world, new Vector3(pos.X, pos.Y - 0.05f, pos.Z) - half, new Vector3(pos.X, pos.Y - 0.05f, pos.Z) + half)) {
+            if (IntersectsSolid(world, new Vector3(pos.X, pos.Y - 0.05f, pos.Z) - half, new Vector3(pos.X, pos.Y - 0.05f, pos.Z) + half, ignoreDoors)) {
                 onGround = true;
             }
         }
@@ -333,9 +350,13 @@ public sealed class Animal {
             var aheadHead = new Vec3i(aheadX, feetPos.Y + 1, aheadZ);
             var currentHead = feetPos + new Vec3i(0, 1, 0);
 
-            if (world.IsSolidAt(aheadFoot) && !world.IsSolidAt(aheadHead) && !world.IsSolidAt(currentHead) && MathF.Abs(Velocity.Y) < 0.1f) {
+            // Дверь — не препятствие для животных: идут сквозь неё.
+            bool isDoorAhead = GameData.IsDoor(world.GetVoxel(aheadFoot).TypeId) ||
+                               GameData.IsDoor(world.GetVoxel(aheadHead).TypeId);
+
+            if (world.IsSolidAt(aheadFoot) && !isDoorAhead && !world.IsSolidAt(aheadHead) && !world.IsSolidAt(currentHead) && MathF.Abs(Velocity.Y) < 0.1f) {
                 Velocity.Y = 7.5f;
-            } else if (world.IsSolidAt(aheadFoot) && world.IsSolidAt(aheadHead)) {
+            } else if (world.IsSolidAt(aheadFoot) && !isDoorAhead && world.IsSolidAt(aheadHead)) {
                 // Стена: повернуть в другую сторону
                 float angle = (float)_random.NextDouble() * MathF.Tau;
                 WanderDir = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
@@ -344,7 +365,7 @@ public sealed class Animal {
 
         Velocity.Y -= 22f * dt;
 
-        bool grounded = Collision.Move(world, ref Position, new Vector3(HalfSizeX, HalfSizeY, HalfSizeZ), ref Velocity, dt);
+        bool grounded = Collision.Move(world, ref Position, new Vector3(HalfSizeX, HalfSizeY, HalfSizeZ), ref Velocity, dt, ignoreDoors: true);
         if (grounded && Velocity.Y < 0f) {
             Velocity.Y = 0f;
         }

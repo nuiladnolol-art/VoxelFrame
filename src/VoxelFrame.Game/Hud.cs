@@ -307,10 +307,8 @@ public static class Hud {
             if (valForThisIcon >= 2f) {
                 DrawItemIconByTile(filledTile, dest);
             } else if (valForThisIcon >= 0.5f) {
-                var src = new Rectangle(
-                    filledTile % TextureAtlas.Cols * TextureAtlas.TilePx,
-                    filledTile / TextureAtlas.Cols * TextureAtlas.TilePx,
-                    TextureAtlas.TilePx / 2f, TextureAtlas.TilePx);
+                var src = TextureAtlas.TilePixelRect(filledTile);
+                src.Width = TextureAtlas.TilePx / 2f; // левая половина тайла (пол-сердечка)
                 var destHalf = new Rectangle(x, y, size / 2f, size);
                 unsafe {
                     Raylib.DrawTexturePro(TextureAtlas.Atlas, src, destHalf, new System.Numerics.Vector2(0, 0), 0f, Color.White);
@@ -320,10 +318,7 @@ public static class Hud {
     }
 
     private static void DrawItemIconByTile(byte tile, Rectangle dest) {
-        var src = new Rectangle(
-            tile % TextureAtlas.Cols * TextureAtlas.TilePx,
-            tile / TextureAtlas.Cols * TextureAtlas.TilePx,
-            TextureAtlas.TilePx, TextureAtlas.TilePx);
+        var src = TextureAtlas.TilePixelRect(tile);
         unsafe {
             Raylib.DrawTexturePro(TextureAtlas.Atlas, src, dest, new System.Numerics.Vector2(0, 0), 0f, Color.White);
         }
@@ -332,10 +327,7 @@ public static class Hud {
     /// <summary>Иконка предмета (тайл атласа) в прямоугольнике слота.</summary>
     public static void DrawItemIcon(VoxelFrame.Core.Inventory.ItemDefinition def, Rectangle slot, float scale) {
         byte tile = TextureAtlas.ItemTile(def.Id);
-        var src = new Rectangle(
-            tile % TextureAtlas.Cols * TextureAtlas.TilePx,
-            tile / TextureAtlas.Cols * TextureAtlas.TilePx,
-            TextureAtlas.TilePx, TextureAtlas.TilePx);
+        var src = TextureAtlas.TilePixelRect(tile);
         float size = MathF.Min(slot.Width, slot.Height) * scale;
         var dest = new Rectangle(
             slot.X + (slot.Width - size) / 2f,
@@ -397,10 +389,7 @@ public static class Hud {
         } else {
             // ── 2D/3D Предмет в руке ──────────────────────────────────────────
             byte tile = TextureAtlas.ItemTile(def.Id);
-            var src = new Rectangle(
-                tile % TextureAtlas.Cols * TextureAtlas.TilePx,
-                tile / TextureAtlas.Cols * TextureAtlas.TilePx,
-                TextureAtlas.TilePx, TextureAtlas.TilePx);
+            var src = TextureAtlas.TilePixelRect(tile);
             float size = MathF.Min(slot.Width, slot.Height) * scale * 1.15f;
             float drawW = size * hStretch;                       // растянутая ширина
             float itemCx = slot.X + slot.Width / 2f + size / 2f; // центр предмета (как было)
@@ -441,7 +430,7 @@ public static class Hud {
             y += 20f;
         }
 
-        LineL($"VoxelFrame 0.9.3 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
+        LineL($"VoxelFrame 0.9.4 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
         LineL($"XYZ: {player.Position.X:F3} / {player.Position.Y:F5} / {player.Position.Z:F3}", new Color(255, 240, 120, 255));
         LineL($"Block: {px} {py} {pz} [{(px & 15)} {(py & 15)} {(pz & 15)} in sub-chunk]");
         LineL($"Chunk: {px >> 4} {py >> 4} {pz >> 4} in chunk [{px >> 4}, {pz >> 4}]");

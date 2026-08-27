@@ -208,8 +208,15 @@ public sealed class FluidEngine {
         }
 
         // ── 4. Горизонтальное растекание ────────────────────────────────────────
-        // Эффективный уровень, от которого отталкиваемся при растекании
-        int spreadBaseLevel = (currentLevel == 0 || currentLevel == FallingLevel) ? 0 : currentLevel;
+        // Эффективный уровень, от которого отталкиваемся при растекании.
+        // Источник (0) растекается на весь радиус. Упавшая жидкость — НЕ источник:
+        // она растекается лишь на 2-3 блока, иначе вода, поставленная на высоте,
+        // на каждом перепаде склона заново обнуляет дистанцию и разливается цунами.
+        int spreadBaseLevel = currentLevel switch {
+            0 => 0,
+            FallingLevel => Math.Max(1, maxDistance - 3),
+            _ => currentLevel,
+        };
 
         if (spreadBaseLevel < maxDistance) {
             byte nextLevel = (byte)(spreadBaseLevel + 1);
@@ -267,9 +274,13 @@ public sealed class FluidEngine {
             var nv = _world.GetVoxel(nPos);
             if (nv.TypeId == fluidId) {
                 byte nLevel = nv.SubGridLayerMask;
-                if (nLevel == 0 || nLevel == FallingLevel) {
-                    // Источник или падающий столб дает уровень 1
+                if (nLevel == 0) {
+                    // Настоящий источник дает уровень 1
                     minParentLevel = Math.Min(minParentLevel, 0);
+                } else if (nLevel == FallingLevel) {
+                    // Падающий столб — НЕ источник: питает лишь ближайшие клетки,
+                    // иначе водопад на склоне разливался бы цунами (обнуление дистанции).
+                    minParentLevel = Math.Min(minParentLevel, Math.Max(1, maxDistance - 3));
                 } else if (nLevel < currentLevel || currentLevel == FallingLevel) {
                     minParentLevel = Math.Min(minParentLevel, (int)nLevel);
                 }

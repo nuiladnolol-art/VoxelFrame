@@ -114,6 +114,32 @@ public sealed partial class GameWorld : IDisposable {
                 }
             }
         }
+        // Игрок появился здесь мгновенно (телепорт/респавн/загрузка) — свет
+        // считаем сразу, чтобы не было тёмных непросчитанных чанков на кадрах.
+        RelightAroundSync(pc, radius);
+    }
+
+    /// <summary>
+    /// Синхронно пересчитывает освещение всех загруженных чанков вокруг точки.
+    /// Два прохода сходятся по швам на границах соседей. Вызывается только при
+    /// мгновенных появлениях игрока, поэтому лёгкий хитч здесь допустим.
+    /// </summary>
+    public void RelightAroundSync(Vec3i centerChunk, int radius) {
+        for (int pass = 0; pass < 2; pass++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    for (int dy = -1; dy <= 2; dy++) {
+                        var cc = new Vec3i(centerChunk.X + dx, centerChunk.Y + dy, centerChunk.Z + dz);
+                        if (!_chunks.TryGetValue(cc, out var gc)) continue;
+                        if (pass == 0) _lightDirty.Remove(gc);
+                        gc.RecomputeAllSurfaces();
+                        LightEngine.RecomputeSun(gc, this);
+                        LightEngine.RecomputeBlock(gc, this);
+                        _meshDirty.Add(gc);
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -1071,8 +1097,8 @@ public sealed partial class GameWorld : IDisposable {
                     // Энд почти полностью населён эндэрменами
                     type = HostileType.Enderman;
                 } else {
-                    // Обычное измерение: эндэрмен появляется лишь изредка, в глубокой темноте
-                    type = _random.NextDouble() < 0.03 ? HostileType.Enderman : (HostileType)_random.Next(0, 4);
+                    // Обычное измерение: эндэрмены спавнятся довольно часто в глубокой темноте
+                    type = _random.NextDouble() < 0.15 ? HostileType.Enderman : (HostileType)_random.Next(0, 4);
                 }
 
                 var half = HostileMob.GetHalfSize(type);

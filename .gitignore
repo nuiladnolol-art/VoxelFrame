@@ -4,6 +4,7 @@ obj/
 dist/
 versions/
 publish/
+payload.zip
 
 # Saves & Local Data
 saves/

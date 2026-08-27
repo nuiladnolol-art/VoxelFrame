@@ -424,24 +424,24 @@ public sealed class WorldGenerator {
                     ushort cur = chunk.Get(idx).TypeId;
                     if (cur == 0 || cur == GameData.BBedrock.Id) continue;
 
-                    // 1. Cheese Caves (Редкие огромные залы и просторные гроты)
+                    // 1. Cheese Caves (Просторные гроты и залы)
                     float cheese = _caveCheese.Fractal(wx * 0.012f, wy * 0.018f + 100f, wz * 0.012f, 3, 0.5f);
-                    bool isCheese = (wy < 36 ? cheese > 0.62f : cheese > 0.68f) && wy < surface - 3;
+                    bool isCheese = (wy < 36 ? cheese > 0.50f : cheese > 0.58f) && wy < surface - 3;
 
-                    // 2. Spaghetti Caves (Узкие извилистые туннели — редкие)
+                    // 2. Spaghetti Caves (Узкие извилистые туннели)
                     float sp1 = _caveSpaghetti1.Get(wx * 0.022f + wy * 0.014f, wz * 0.022f);
                     float sp2 = _caveSpaghetti2.Get(wx * 0.022f, wz * 0.022f + wy * 0.014f + 500f);
-                    bool isSpaghetti = (sp1 * sp1 + sp2 * sp2) < 0.012f && wy < surface - 2;
+                    bool isSpaghetti = (sp1 * sp1 + sp2 * sp2) < 0.018f && wy < surface - 2;
 
-                    // 3. Noodle Caves (Узкие вертикальные расщелины — редкие)
+                    // 3. Noodle Caves (Узкие вертикальные расщелины)
                     float noodle = _caveNoodle.Get(wx * 0.015f + 2000f, wz * 0.015f + wy * 0.028f);
-                    bool isNoodle = MathF.Abs(noodle) < 0.012f && wy > 6 && wy < surface - 2;
+                    bool isNoodle = MathF.Abs(noodle) < 0.018f && wy > 6 && wy < surface - 2;
 
                     // 4. Каньон / Разлом (глубокий вертикальный разрез)
                     bool inRavine = isRavine && wy >= 9 && wy <= surface - 4;
 
                     // Выходы пещер и разломов на поверхность
-                    bool surfaceBreach = wy >= surface - 3 && (isSpaghetti || isNoodle || inRavine) && cheese > 0.5f;
+                    bool surfaceBreach = wy >= surface - 3 && (isSpaghetti || isNoodle || inRavine) && cheese > 0.48f;
 
                     if (isCheese || isSpaghetti || isNoodle || inRavine || surfaceBreach) {
                         ushort replaceWith;
@@ -653,8 +653,8 @@ public sealed class WorldGenerator {
     /// Деревни появляются на равнинах и в лесах вне пустынь и водоёмов.
     /// </summary>
     private void PlaceVillages(Chunk chunk, int ox, int oz) {
-        // Размер сектора деревни: 10×10 чанков = 320×320 блоков (деревни ближе друг к другу)
-        const int villageSectorChunks = 10;
+        // Размер сектора деревни: 14×14 чанков = 448×448 блоков (деревни стали реже)
+        const int villageSectorChunks = 14;
         const int villageSectorBlocks = villageSectorChunks * Chunk.SizeX;
 
         int chunkX = ox / Chunk.SizeX;
@@ -667,7 +667,7 @@ public sealed class WorldGenerator {
         // Генерируем позицию деревни в секторе через шум
         var rng = new Random(_seed ^ (sectorX * 73856093) ^ (sectorZ * 19349663));
         float villageSeed = _mineshaftNoise.Get(sectorX * 31.73f + 123.456f, sectorZ * 31.73f + 654.321f);
-        if (villageSeed < 0.50f) return; // ~50% секторов получают деревни
+        if (villageSeed < 0.30f) return; // ~30% секторов получают деревни
 
         // Центр деревни в мировых координатах
         int villageWX = sectorX * villageSectorBlocks + rng.Next(24, villageSectorBlocks - 24);
@@ -974,7 +974,7 @@ public sealed class WorldGenerator {
 
         var rng = new Random(_seed ^ (sectorX * 458921) ^ (sectorZ * 912837));
         float pSeed = _mineshaftNoise.Get(sectorX * 43.19f + 555.55f, sectorZ * 43.19f + 777.77f);
-        if (pSeed < 0.90f) return; // 10% chance
+        if (pSeed < 0.70f) return; // ~30% секторов получают разрушенный портал
 
         int portalWX = sectorX * portalSectorSize + rng.Next(24, portalSectorSize - 24);
         int portalWZ = sectorZ * portalSectorSize + rng.Next(24, portalSectorSize - 24);
@@ -1077,9 +1077,9 @@ public sealed class WorldGenerator {
         int sectorX = (int)MathF.Floor((float)ox / dungeonSector);
         int sectorZ = (int)MathF.Floor((float)oz / dungeonSector);
 
-        // Вероятность данжа в секторе (~15%)
+        // Вероятность данжа в секторе (~30%)
         float dSeed = _mineshaftNoise.Get(sectorX * 23.45f + 111f, sectorZ * 23.45f + 222f);
-        if (dSeed < 0.85f) return;
+        if (dSeed < 0.70f) return;
 
         var rng = new Random(_seed ^ (sectorX * 928374) ^ (sectorZ * 123891));
         int cx = sectorX * dungeonSector + rng.Next(64, dungeonSector - 64);

@@ -1292,6 +1292,10 @@ public sealed partial class Player {
                 } else {
                     world.SpawnPickup(drop.Id, dropCount, pos);
                 }
+                // При рубке бревна иногда высыпаются древесные опилки
+                if (block.Id == GameData.BLog.Id && DropRng.NextDouble() < 0.35) {
+                    world.SpawnPickup(GameData.SawdustItem.Id, 1, pos);
+                }
             } else if (block.Id == GameData.BLeaves.Id) {
                 double roll = DropRng.NextDouble();
                 ItemDefinition? leafDrop = roll < 0.12 ? GameData.AppleItem : roll < 0.30 ? GameData.StickItem : null;

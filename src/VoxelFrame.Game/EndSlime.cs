@@ -155,7 +155,7 @@ public sealed class EndSlime {
         }
 
         var half = new Vector3(HalfSizeXZ, HalfSizeY, HalfSizeXZ);
-        IsGrounded = Collision.Move(world, ref Position, half, ref Velocity, dt);
+        IsGrounded = Collision.Move(world, ref Position, half, ref Velocity, dt, ignoreDoors: true);
         if (IsGrounded && Velocity.Y < 0f) Velocity.Y = 0f;
 
         // Слизень ломает блоки на своём пути (кроме обсидиана, бедрока и кристаллов)

@@ -1093,7 +1093,23 @@ internal static class SmokeTest {
         }
         Check(w.GetVoxel(coveredGrass).TypeId == GameData.BDirt.Id, "трава под сплошным непрозрачным блоком отмирает и превращается в землю");
 
-        // 31. Двери: крафт (6 досок -> 3 двери) и 2-блочная установка
+        // 31. Древесные опилки и каша из опилок: рецепты доступны
+        var sawdustGrid = new ItemDefinition?[] {
+            GameData.PlankItem, GameData.PlankItem, null,
+            null, null, null, null, null, null
+        };
+        Check(GameData.ShapeRecipes.TryGetValue(GameData.NormalizeGrid(sawdustGrid), out var sawRes) &&
+              sawRes.Item.Id == GameData.SawdustItem.Id && sawRes.Count == 4, "крафт опилок (2 доски -> 4 опилок)");
+
+        var porridgeGrid = new ItemDefinition?[] {
+            GameData.SawdustItem, GameData.SawdustItem, null,
+            GameData.PlankItem, GameData.WheatSeedsItem, null,
+            null, null, null
+        };
+        Check(GameData.ShapeRecipes.TryGetValue(GameData.NormalizeGrid(porridgeGrid), out var porRes) &&
+              porRes.Item.Id == GameData.SawdustPorridgeItem.Id && porRes.Count == 1, "крафт каши из опилок (2 опилки + доска + семена)");
+
+        // 32. Двери: крафт (6 досок -> 3 двери) и 2-блочная установка
         var doorGrid = new ItemDefinition?[] {
             GameData.PlankItem, GameData.PlankItem, null,
             GameData.PlankItem, GameData.PlankItem, null,
@@ -1111,12 +1127,12 @@ internal static class SmokeTest {
         s.Player.TryPlaceBlock(w, s, doorPos, GameData.BDoorLower, GameData.DoorItem);
         Check(w.GetVoxel(doorPos).TypeId == GameData.BDoorLower.Id && w.GetVoxel(doorPos + new Vec3i(0, 1, 0)).TypeId == GameData.BDoorUpper.Id, "установка двери создает нижнюю и верхнюю половины");
 
-        // 32. Замедление скорости всех инструментов в 1.8 раза
+        // 33. Замедление скорости всех инструментов в 1.8 раза
         float handTime = GameData.GetMiningTime(GameData.BLog, null);
         float axeTime = GameData.GetMiningTime(GameData.BLog, GameData.IronAxeItem);
         Check(handTime >= 4.0f && axeTime >= 0.7f, "скорость инструментов замедлена в 1.8 раза");
 
-        // 33. Пресечение дюпа лута в сундуках
+        // 34. Пресечение дюпа лута в сундуках
         var dupeChestPos = new Vec3i(140, w.SpawnBlock.Y, 140);
         var chest1 = w.GetOrCreateChest(dupeChestPos, s); // первое открытие генерирует лут
         Check(chest1.Slots.Any(s => s != null), "первое открытие сгенерированного сундука дает нормальный лут");
@@ -1126,7 +1142,7 @@ internal static class SmokeTest {
         var trapChest = w.GetOrCreateChest(dupeChestPos, s);
         Check(trapChest.Slots.All(s => s == null), "повторное открытие того же места не генерирует лут повторно (дюп исключен)");
 
-        // 34. Безоговорочное выпадение вещей при смерти
+        // 35. Безоговорочное выпадение вещей при смерти
         s.Player.Inventory.Slots[0] = new ItemEntry(GameData.NewItem(GameData.DiamondItem), 5);
         s.Player.OffhandEntry = new ItemEntry(GameData.NewItem(GameData.TorchItem), 10);
         s.DiePlayer();

@@ -1216,10 +1216,24 @@ public static class TextureAtlas {
 
     public static byte ItemTile(ushort itemId) => _itemTiles.TryGetValue(itemId, out var t) ? t : (byte)TDirt;
 
-    /// <summary>UV-прямоугольник тайла в атласе [0..1].</summary>
-    public static Rectangle TileUv(byte tile) => new(
-        tile % Cols * TilePx / (float)AtlasW,
-        tile / Cols * TilePx / (float)AtlasH,
-        TilePx / (float)AtlasW,
-        TilePx / (float)AtlasH);
+    /// <summary>UV-прямоугольник тайла в атласе [0..1], утоплен на пол-текселя внутрь тайла.
+    /// Без этого на границах тайлов из-за точности интерполяции подтягиваются пиксели
+    /// соседних текстур — тонкая полоска справа/сверху («кровотечение атласа»).</summary>
+    public static Rectangle TileUv(byte tile) {
+        float du = 0.5f / AtlasW;   // пол-текселя в U
+        float dv = 0.5f / AtlasH;   // пол-текселя в V
+        return new Rectangle(
+            tile % Cols * TilePx / (float)AtlasW + du,
+            tile / Cols * TilePx / (float)AtlasH + dv,
+            TilePx / (float)AtlasW - 2f * du,
+            TilePx / (float)AtlasH - 2f * dv);
+    }
+
+    /// <summary>Прямоугольник тайла в пикселях атласа, утоплен на inset пикселей от границ
+    /// (для DrawTexturePro с пиксельными rect — та же защита от кровотечения атласа).</summary>
+    public static Rectangle TilePixelRect(byte tile, float inset = 0.5f) => new(
+        tile % Cols * TilePx + inset,
+        tile / Cols * TilePx + inset,
+        TilePx - 2f * inset,
+        TilePx - 2f * inset);
 }

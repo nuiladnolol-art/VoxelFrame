@@ -1269,10 +1269,7 @@ public sealed class WorldRenderer : IDisposable {
             float bob = MathF.Sin(p.BobPhase + (float)Raylib.GetTime() * 3f) * 0.12f;
             var pos = p.Position + new Vector3(0f, bob + 0.25f, 0f);
             byte tile = TextureAtlas.ItemTile(p.Definition.Id);
-            var src = new Rectangle(
-                tile % TextureAtlas.Cols * TextureAtlas.TilePx,
-                tile / TextureAtlas.Cols * TextureAtlas.TilePx,
-                TextureAtlas.TilePx, TextureAtlas.TilePx);
+            var src = TextureAtlas.TilePixelRect(tile);
 
             var light = GetLightFactor(p.Position);
             Color tint = ShadeColor(Color.White, light, p.Position);
