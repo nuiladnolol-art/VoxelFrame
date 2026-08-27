@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
+using System.Net.Http;
 using System.Reflection;
-using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -12,7 +14,24 @@ namespace VoxelFrame.Installer;
 
 internal static class Program {
     [STAThread]
-    private static void Main() {
+    private static void Main(string[] args) {
+        // Самообновление установщика: новая версия, запущенная с "--upgrade <старый exe> <pid>",
+        // дожидается выхода старого процесса, заменяет его собой и перезапускает.
+        if (args.Length >= 3 && args[0] == "--upgrade") {
+            int oldPid = int.TryParse(args[2], out int p) ? p : -1;
+            if (oldPid > 0) {
+                try { Process.GetProcessById(oldPid)?.WaitForExit(); } catch { }
+            }
+            string currentExe = Process.GetCurrentProcess().MainModule?.FileName ?? "";
+            string oldExe = args[1];
+            try {
+                File.Copy(currentExe, oldExe, true);
+                Process.Start(new ProcessStartInfo(oldExe) {
+                    WorkingDirectory = Path.GetDirectoryName(oldExe) ?? ""
+                });
+            } catch { }
+            return;
+        }
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new InstallerForm());
@@ -30,11 +49,37 @@ public class InstallerForm : Form {
     private Button btnInstall;
     private Button btnCancel;
     private Panel headerPanel;
+    private ComboBox cmbVersion;
+    private Button btnUpdateInstaller;
+    private readonly List<ReleaseInfo> _releases = new();
+    private readonly HttpClient _http = new();
+
+    private sealed class ReleaseInfo {
+        public string Tag = "";
+        public string Name = "";
+        public string GameZipUrl = "";
+        public string InstallerUrl = "";
+    }
+
+    /// <summary>Версия установщика (берётся из csproj: &lt;Version&gt;).</summary>
+    private static readonly Version ThisVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0);
+    private static string ThisVersionTag => $"v{ThisVersion.Major}.{ThisVersion.Minor}.{ThisVersion.Build}";
+
+    private static int CompareVersions(string a, string b) => ParseTag(a).CompareTo(ParseTag(b));
+
+    private static Version ParseTag(string tag) {
+        string t = tag.TrimStart('v', 'V');
+        var parts = t.Split('.');
+        int major = parts.Length > 0 && int.TryParse(parts[0], out var m) ? m : 0;
+        int minor = parts.Length > 1 && int.TryParse(parts[1], out var n) ? n : 0;
+        int build = parts.Length > 2 && int.TryParse(parts[2], out var b) ? b : 0;
+        return new Version(major, minor, build);
+    }
 
     public InstallerForm() {
         this.Text = "Установка VoxelFrame Launcher";
-        this.Size = new Size(620, 520);
-        this.MinimumSize = new Size(580, 480);
+        this.Size = new Size(620, 600);
+        this.MinimumSize = new Size(580, 540);
         this.FormBorderStyle = FormBorderStyle.FixedSingle;
         this.MaximizeBox = false;
         this.StartPosition = FormStartPosition.CenterScreen;
@@ -164,9 +209,44 @@ public class InstallerForm : Form {
         };
         this.Controls.Add(chkLaunchAfter);
 
+        // Версия для установки (автопроверка GitHub)
+        Label lblVersion = new Label {
+            Text = "Версия для установки (GitHub):",
+            Font = labelFont,
+            ForeColor = Color.FromArgb(220, 225, 235),
+            Location = new Point(contentX, 300),
+            Size = new Size(contentW, 22)
+        };
+        this.Controls.Add(lblVersion);
+
+        cmbVersion = new ComboBox {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Font = inputFont,
+            BackColor = Color.FromArgb(36, 40, 50),
+            ForeColor = Color.White,
+            Location = new Point(contentX, 325),
+            Size = new Size(contentW - 190, 26)
+        };
+        this.Controls.Add(cmbVersion);
+
+        btnUpdateInstaller = new Button {
+            Text = "Обновить установщик",
+            Font = new Font("Segoe UI", 8.5f, FontStyle.Regular),
+            BackColor = Color.FromArgb(210, 155, 45),
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat,
+            Cursor = Cursors.Hand,
+            Location = new Point(contentX + contentW - 185, 324),
+            Size = new Size(185, 27),
+            Visible = false
+        };
+        btnUpdateInstaller.FlatAppearance.BorderSize = 0;
+        btnUpdateInstaller.Click += async (s, e) => await SelfUpdateAsync();
+        this.Controls.Add(btnUpdateInstaller);
+
         // Прогресс-бар
         progressBar = new ProgressBar {
-            Location = new Point(contentX, 315),
+            Location = new Point(contentX, 365),
             Size = new Size(contentW, 18),
             Visible = false
         };
@@ -174,11 +254,11 @@ public class InstallerForm : Form {
 
         // Статус
         lblStatus = new Label {
-            Text = "Нажмите «Установить» для начала копирования файлов",
+            Text = "Проверка обновлений на GitHub...",
             Font = new Font("Segoe UI", 9, FontStyle.Regular),
             ForeColor = Color.FromArgb(140, 150, 165),
             TextAlign = ContentAlignment.MiddleCenter,
-            Location = new Point(contentX, 345),
+            Location = new Point(contentX, 395),
             Size = new Size(contentW, 22)
         };
         this.Controls.Add(lblStatus);
@@ -191,7 +271,7 @@ public class InstallerForm : Form {
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand,
-            Location = new Point(contentX, 385),
+            Location = new Point(contentX, 430),
             Size = new Size(contentW - 140, 50)
         };
         btnInstall.FlatAppearance.BorderSize = 0;
@@ -206,12 +286,145 @@ public class InstallerForm : Form {
             ForeColor = Color.FromArgb(200, 210, 225),
             FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand,
-            Location = new Point(contentX + contentW - 130, 385),
+            Location = new Point(contentX + contentW - 130, 430),
             Size = new Size(130, 50)
         };
         btnCancel.FlatAppearance.BorderSize = 0;
         btnCancel.Click += (s, e) => this.Close();
         this.Controls.Add(btnCancel);
+
+        // Автопроверка обновлений при запуске
+        this.Shown += async (s, e) => await CheckForUpdatesAsync();
+    }
+
+    /// <summary>Запрашивает список релизов с GitHub, заполняет выбор версии и проверяет обновление установщика.</summary>
+    private async Task CheckForUpdatesAsync() {
+        try {
+            _http.DefaultRequestHeaders.UserAgent.ParseAdd("VoxelFrame-Setup/1.0");
+            string json = await _http.GetStringAsync(
+                "https://api.github.com/repos/nuiladnolol-art/VoxelFrame/releases?per_page=8");
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+
+            _releases.Clear();
+            foreach (var rel in doc.RootElement.EnumerateArray()) {
+                if ((rel.TryGetProperty("draft", out var d) && d.GetBoolean()) ||
+                    (rel.TryGetProperty("prerelease", out var pr) && pr.GetBoolean()))
+                    continue;
+                var info = new ReleaseInfo {
+                    Tag = rel.TryGetProperty("tag_name", out var tg) ? tg.GetString() ?? "" : "",
+                    Name = rel.TryGetProperty("name", out var nm) ? nm.GetString() ?? "" : "",
+                };
+                if (rel.TryGetProperty("assets", out var assets)) {
+                    foreach (var asset in assets.EnumerateArray()) {
+                        string an = asset.TryGetProperty("name", out var n2) ? n2.GetString() ?? "" : "";
+                        string au = asset.TryGetProperty("browser_download_url", out var u2) ? u2.GetString() ?? "" : "";
+                        if (an.StartsWith("VoxelFrame-", StringComparison.OrdinalIgnoreCase) && an.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                            info.GameZipUrl = au;
+                        else if (an.StartsWith("VoxelFrame-Setup", StringComparison.OrdinalIgnoreCase) && an.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                            info.InstallerUrl = au;
+                    }
+                }
+                _releases.Add(info);
+            }
+
+            if (_releases.Count == 0) {
+                lblStatus.Text = "Не удалось получить список версий. Нажмите «Установить».";
+                return;
+            }
+
+            _releases.Sort((a, b) => CompareVersions(b.Tag, a.Tag));
+
+            cmbVersion.Items.Clear();
+            foreach (var r in _releases)
+                cmbVersion.Items.Add(string.IsNullOrEmpty(r.Name) ? r.Tag : $"{r.Tag} — {r.Name}");
+            cmbVersion.SelectedIndex = 0;
+
+            var latest = _releases[0];
+            lblStatus.Text = $"Готово. Последняя версия: {latest.Tag}";
+            lblStatus.ForeColor = Color.FromArgb(100, 220, 120);
+
+            // Предложение обновить сам установщик, если вышла новая версия
+            if (!string.IsNullOrEmpty(latest.InstallerUrl) && CompareVersions(latest.Tag, ThisVersionTag) > 0) {
+                btnUpdateInstaller.Text = $"Обновить установщик до {latest.Tag}";
+                btnUpdateInstaller.Visible = true;
+            }
+        } catch {
+            lblStatus.Text = "Нет соединения с GitHub. Будет установлена встроенная версия.";
+            lblStatus.ForeColor = Color.FromArgb(235, 200, 90);
+        }
+    }
+
+    /// <summary>
+    /// Возвращает ссылку на ZIP выбранной версии, если её нужно скачивать с GitHub.
+    /// Встроенный payload соответствует версии установщика — его качать не нужно.
+    /// </summary>
+    private string? GetSelectedGithubUrl() {
+        if (_releases.Count == 0 || cmbVersion.SelectedIndex < 0) return null;
+        var sel = _releases[cmbVersion.SelectedIndex];
+        if (string.IsNullOrEmpty(sel.GameZipUrl)) return null;
+        if (CompareVersions(sel.Tag, ThisVersionTag) == 0) return null;
+        return sel.GameZipUrl;
+    }
+
+    /// <summary>Скачивает и распаковывает игру в целевую папку; возвращает успех.</summary>
+    private async Task<bool> DownloadAndInstallAsync(string url, string targetDir) {
+        try {
+            string tempZip = Path.Combine(Path.GetTempPath(), "VoxelFrame_Install.zip");
+            var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+            response.EnsureSuccessStatusCode();
+            var totalBytes = response.Content.Headers.ContentLength ?? -1L;
+            await using (var fs = File.Create(tempZip))
+            await using (var contentStream = await response.Content.ReadAsStreamAsync()) {
+                byte[] buffer = new byte[81920];
+                long downloaded = 0;
+                int bytesRead;
+                while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0) {
+                    await fs.WriteAsync(buffer, 0, bytesRead);
+                    downloaded += bytesRead;
+                    if (totalBytes > 0) {
+                        int progress = Math.Clamp(15 + (int)((downloaded * 60) / totalBytes), 15, 80);
+                        progressBar.Invoke(() => progressBar.Value = progress);
+                    }
+                }
+            }
+            lblStatus.Invoke(() => lblStatus.Text = "Распаковка загруженных файлов...");
+            progressBar.Invoke(() => progressBar.Value = 85);
+            ZipFile.ExtractToDirectory(tempZip, targetDir, true);
+            try { File.Delete(tempZip); } catch { }
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    /// <summary>Скачивает новую версию установщика и подменяет текущий exe (самообновление).</summary>
+    private async Task SelfUpdateAsync() {
+        var latest = _releases.FirstOrDefault(r => !string.IsNullOrEmpty(r.InstallerUrl));
+        if (latest == null) return;
+        if (MessageBox.Show($"Доступна новая версия установщика ({latest.Tag}).\nОбновить сейчас?",
+                "Обновление установщика", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            return;
+        try {
+            lblStatus.Text = $"Скачивание установщика {latest.Tag}...";
+            btnUpdateInstaller.Enabled = false;
+            string temp = Path.Combine(Path.GetTempPath(), "VoxelFrame-Setup-update.exe");
+            var resp = await _http.GetAsync(latest.InstallerUrl, HttpCompletionOption.ResponseHeadersRead);
+            resp.EnsureSuccessStatusCode();
+            await using (var fs = File.Create(temp))
+            await using (var cs = await resp.Content.ReadAsStreamAsync())
+                await cs.CopyToAsync(fs);
+
+            string currentExe = Process.GetCurrentProcess().MainModule?.FileName ?? "";
+            int pid = Process.GetCurrentProcess().Id;
+            Process.Start(new ProcessStartInfo(temp) {
+                Arguments = $"\"--upgrade\" \"{currentExe}\" {pid}"
+            });
+            Application.Exit();
+        } catch (Exception ex) {
+            MessageBox.Show("Не удалось обновить установщик:\n" + ex.Message, "Ошибка",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            btnUpdateInstaller.Enabled = true;
+        }
     }
 
     private async Task StartInstallationAsync() {
@@ -231,12 +444,24 @@ public class InstallerForm : Form {
         lblStatus.Text = "Подготовка файлов...";
         lblStatus.ForeColor = Color.FromArgb(200, 220, 255);
 
+        // Ссылка на выбранную версию с GitHub (если она не совпадает со встроенной)
+        string? githubUrl = GetSelectedGithubUrl();
+        string githubTag = (_releases.Count > 0 && cmbVersion.SelectedIndex >= 0)
+            ? _releases[cmbVersion.SelectedIndex].Tag : "";
+
         try {
             await Task.Run(async () => {
                 Directory.CreateDirectory(targetDir);
                 bool installed = false;
 
-                // 1. Попытка извлечь встроенный payload.zip (автономный инсталлятор)
+                // 0. Автозагрузка выбранной версии с GitHub (свежие версии подтягиваются сами)
+                if (!string.IsNullOrEmpty(githubUrl)) {
+                    lblStatus.Invoke(() => lblStatus.Text = $"Скачивание {githubTag} с GitHub...");
+                    progressBar.Invoke(() => progressBar.Value = 15);
+                    installed = await DownloadAndInstallAsync(githubUrl, targetDir);
+                }
+
+                // 1. Попытка извлечь встроенный payload.zip (если GitHub недоступен)
                 var assembly = Assembly.GetExecutingAssembly();
                 string[] resNames = assembly.GetManifestResourceNames();
                 string? payloadRes = Array.Find(resNames, r => r.EndsWith("payload.zip", StringComparison.OrdinalIgnoreCase));
@@ -289,55 +514,31 @@ public class InstallerForm : Form {
                     }
                 }
 
-                // 3. Если файлов нет — загрузка последней версии с GitHub Releases
+                // 3. Последний fallback: запрос последней версии с GitHub Releases
                 if (!installed) {
-                    lblStatus.Invoke(() => lblStatus.Text = "Загрузка компонентов с GitHub Releases...");
-                    progressBar.Invoke(() => progressBar.Value = 20);
-                    using var http = new HttpClient();
-                    http.DefaultRequestHeaders.UserAgent.ParseAdd("VoxelFrame-Setup/1.0");
-                    string downloadUrl = "https://github.com/nuiladnolol-art/VoxelFrame/releases/download/v0.9.4/VoxelFrame-v0.9.4-win-x64.zip";
-
+                    string fallbackUrl = "";
                     try {
                         string apiUrl = "https://api.github.com/repos/nuiladnolol-art/VoxelFrame/releases/latest";
-                        string json = await http.GetStringAsync(apiUrl);
+                        string json = await _http.GetStringAsync(apiUrl);
                         using var doc = System.Text.Json.JsonDocument.Parse(json);
                         if (doc.RootElement.TryGetProperty("assets", out var assetsElem)) {
                             foreach (var asset in assetsElem.EnumerateArray()) {
                                 string name = asset.GetProperty("name").GetString() ?? "";
-                                // Игнорируем автогенерируемый GitHub'ом "Source code (zip)" (именуется по тегу, напр. v0.9.3.zip)
+                                // Игнорируем автогенерируемый GitHub'ом "Source code (zip)"
                                 if (name.Contains("VoxelFrame", StringComparison.OrdinalIgnoreCase)
                                     && name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) {
-                                    downloadUrl = asset.GetProperty("browser_download_url").GetString() ?? downloadUrl;
+                                    fallbackUrl = asset.GetProperty("browser_download_url").GetString() ?? "";
                                     break;
                                 }
                             }
                         }
                     } catch { }
 
-                    string tempZip = Path.Combine(Path.GetTempPath(), "VoxelFrame_Install.zip");
-                    var response = await http.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
-                    response.EnsureSuccessStatusCode();
-                    var totalBytes = response.Content.Headers.ContentLength ?? -1L;
-                    await using (var fs = File.Create(tempZip))
-                    await using (var contentStream = await response.Content.ReadAsStreamAsync()) {
-                        byte[] buffer = new byte[81920];
-                        long downloaded = 0;
-                        int bytesRead;
-                        while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0) {
-                            await fs.WriteAsync(buffer, 0, bytesRead);
-                            downloaded += bytesRead;
-                            if (totalBytes > 0) {
-                                int progress = Math.Clamp(20 + (int)((downloaded * 60) / totalBytes), 20, 80);
-                                progressBar.Invoke(() => progressBar.Value = progress);
-                            }
-                        }
+                    if (!string.IsNullOrEmpty(fallbackUrl)) {
+                        lblStatus.Invoke(() => lblStatus.Text = "Загрузка последней версии с GitHub Releases...");
+                        progressBar.Invoke(() => progressBar.Value = 20);
+                        installed = await DownloadAndInstallAsync(fallbackUrl, targetDir);
                     }
-
-                    lblStatus.Invoke(() => lblStatus.Text = "Распаковка загруженных файлов...");
-                    progressBar.Invoke(() => progressBar.Value = 85);
-                    ZipFile.ExtractToDirectory(tempZip, targetDir, true);
-                    try { File.Delete(tempZip); } catch { }
-                    installed = true;
                 }
 
                 // Создание деинсталлятора
