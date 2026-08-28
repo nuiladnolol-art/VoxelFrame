@@ -34,7 +34,7 @@ public static class SoundSystem {
     private static Sound _arrowHitSound;
     private static Sound _explosionSound;
     private static Sound _shieldBlockSound;
-    private static Sound _creeperHissSound;
+    private static Sound _babakherHissSound;
 
     // Интерактив, визуал и атмосфера
     private static Sound _eatSound;
@@ -78,7 +78,7 @@ public static class SoundSystem {
                 _arrowHitSound = LoadProceduralSound(CreateToneWav(44100 / 16, 650f, 320f, 0.40f));
                 _explosionSound = LoadProceduralSound(CreateNoiseWav(44100 / 2, 0.85f, highPass: false));
                 _shieldBlockSound = LoadProceduralSound(CreateToneWav(44100 / 10, 850f, 320f, 0.65f));
-                _creeperHissSound = LoadProceduralSound(CreateNoiseWav(44100 * 3 / 2, 0.85f, highPass: true));
+                _babakherHissSound = LoadProceduralSound(CreateNoiseWav(44100 * 3 / 2, 0.85f, highPass: true));
 
                 // Интерактив и атмосфера
                 _eatSound = LoadProceduralSound(CreateToneWav(44100 / 8, 280f, 420f, 0.45f));
@@ -196,7 +196,7 @@ public static class SoundSystem {
         Play(_explosionSound);
     }
     public static void PlayShieldBlock() => Play(_shieldBlockSound, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);
-    public static void PlayCreeperHiss() => Play(_creeperHissSound, 1.0f);
+    public static void PlayBabakherHiss() => Play(_babakherHissSound, 1.0f);
     public static void PlayCaveAmbiance() { /* Отключено по запросу */ }
     public static void PlayThunder() => Play(_thunderSound, 0.9f + (float)Random.Shared.NextDouble() * 0.2f);
     public static void PlayBackgroundMusic() { /* Отключено: устраняет гул и фризы аудиодрайвера */ }

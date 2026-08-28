@@ -151,7 +151,7 @@ public sealed class EndSlime {
             AttackCooldown = 1.2f;
             player.ApplyDamage(contactDmg, session, Position);
             session.AddMessage($"Слизень Края обрушился на вас! -{contactDmg:F0} HP");
-            SoundSystem.PlayCreeperHiss();
+            SoundSystem.PlayBabakherHiss();
         }
 
         var half = new Vector3(HalfSizeXZ, HalfSizeY, HalfSizeXZ);

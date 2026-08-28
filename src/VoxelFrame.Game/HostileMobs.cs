@@ -5,12 +5,12 @@ using VoxelFrame.Core.World;
 
 namespace VoxelFrame.Game;
 
-public enum HostileType { Zombie, Creeper, Skeleton, Spider, ZombiePigman, Blaze, Enderman }
+public enum HostileType { Zombie, Babakher, Skeleton, Spider, ZombiePigman, Blaze, Enderman, NetherLord, SwampGuardian, DesertGuardian }
 
 /// <summary>
-/// Враждебные мобы: Zombie, Creeper, Skeleton, Spider, ZombiePigman, Blaze, Enderman.
+/// Враждебные мобы: Zombie, Babakher, Skeleton, Spider, ZombiePigman, Blaze, Enderman.
 /// - Спавн в темноте ночью, в пещерах, в Нижнем и в Энде.
-/// - Аутентичный дроп (Зомби -> гнилая плоть, Крипер -> порох, Скелет -> стрелы/кости, Паук -> нить, Свинозомби -> золото/плоть, Ифрит -> стержни ифрита, Эндэрмен -> жемчуг Эндера).
+/// - Аутентичный дроп (Зомби -> гнилая плоть, Бабахер -> порох, Скелет -> стрелы/кости, Паук -> нить, Свинозомби -> золото/плоть, Ифрит -> стержни ифрита, Эндэрмен -> жемчуг Эндера).
 /// - Зомби и скелеты горят на солнце; Свинозомби и Ифриты неуязвимы к огню/лаве; Эндэрмен повреждается водой.
 /// </summary>
 public sealed class HostileMob {
@@ -22,7 +22,7 @@ public sealed class HostileMob {
     public float Health = 20f;
     public bool Alive = true;
     public bool IsAngry = false;
-    public float FuseTimer;   // для Крипера (1.5с отсчет до взрыва)
+    public float FuseTimer;   // для Бабахера (1.5с отсчет до взрыва)
     public float TeleportCooldown; // для Эндэрмена
     public float AttackCooldown;
     public float HurtTime;
@@ -37,6 +37,9 @@ public sealed class HostileMob {
     public static Vector3 GetHalfSize(HostileType type) => type switch {
         HostileType.Spider => new Vector3(0.65f, 0.35f, 0.65f),
         HostileType.Enderman => new Vector3(0.35f, 1.15f, 0.35f),
+        HostileType.NetherLord => new Vector3(0.5f, 1.3f, 0.5f),
+        HostileType.SwampGuardian => new Vector3(0.6f, 0.8f, 0.6f),
+        HostileType.DesertGuardian => new Vector3(0.5f, 1.0f, 0.5f),
         _ => new Vector3(0.4f, 0.85f, 0.4f)
     };
 
@@ -47,9 +50,12 @@ public sealed class HostileMob {
             HostileType.Spider => 16f,
             HostileType.Enderman => 40f, // Каноничные 40 HP
             HostileType.Skeleton => 20f,
-            HostileType.Creeper => 20f,
+            HostileType.Babakher => 20f,
             HostileType.ZombiePigman => 20f, // Каноничные 20 HP
             HostileType.Blaze => 20f,
+            HostileType.NetherLord => 120f,       // Мини-босс Ада
+            HostileType.SwampGuardian => 90f,     // Болотный страж
+            HostileType.DesertGuardian => 110f,   // Страж пустыни
             _ => 20f
         };
     }
@@ -92,7 +98,7 @@ public sealed class HostileMob {
         // Зомби и Скелеты горят при ярком солнечном свете днём (если над ними нет блоков и они не в воде)
         var feetPos = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y - HalfSizeY + 0.1f), (int)MathF.Floor(Position.Z));
         var feetVox = world.GetVoxel(feetPos);
-        if (feetVox.TypeId == GameData.BLava.Id && Type != HostileType.ZombiePigman && Type != HostileType.Blaze) {
+        if (feetVox.TypeId == GameData.BLava.Id && Type != HostileType.ZombiePigman && Type != HostileType.Blaze && Type != HostileType.NetherLord) {
             Health -= 8f * dt;
             HurtTime = 0.3f;
             if (Health <= 0f) {
@@ -174,7 +180,7 @@ public sealed class HostileMob {
                 if (world.IsSolidAt(aheadWall) && !GameData.IsDoor(world.GetVoxel(aheadWall).TypeId)) {
                     Velocity.Y = 4.5f;
                 }
-            } else if (Type == HostileType.Creeper) {
+            } else if (Type == HostileType.Babakher) {
                 speed = 2.4f;
                 var mobEye = Position + new Vector3(0f, 0.65f, 0f);
                 var playerCenter = player.Position + new Vector3(0f, 0.45f, 0f);
@@ -183,7 +189,7 @@ public sealed class HostileMob {
                 // Начинает шипеть и взводиться на расстоянии до 3.8 блоков при прямой видимости
                 if (dist < 3.8f && canSeePlayer) {
                     if (FuseTimer <= 0f) {
-                        SoundSystem.PlayCreeperHiss();
+                        SoundSystem.PlayBabakherHiss();
                     }
                     speed = 0.35f; // Замедляется при раздувании
                     FuseTimer += dt;
@@ -232,8 +238,9 @@ public sealed class HostileMob {
                 speed = 2.3f;
             }
 
-            // Умный прыжок и обход препятствий (для наземных мобов)
-            if (Type != HostileType.Spider && Type != HostileType.Blaze) {
+            // Умный прыжок и обход препятствий (для наземных мобов; мини-боссы просто идут)
+            if (Type != HostileType.Spider && Type != HostileType.Blaze &&
+                Type != HostileType.NetherLord && Type != HostileType.SwampGuardian && Type != HostileType.DesertGuardian) {
                 int aheadX = (int)MathF.Floor(Position.X + moveDir.X * (HalfSizeX + 0.35f));
                 int aheadZ = (int)MathF.Floor(Position.Z + moveDir.Z * (HalfSizeZ + 0.35f));
                 var aheadFoot = new Vec3i(aheadX, feetPos.Y, aheadZ);
@@ -307,6 +314,61 @@ public sealed class HostileMob {
                     var shotVel = shotDir * 20f;
                     world.Arrows.Add(new ArrowProjectile(eyePos + shotDir * 0.6f, shotVel, this) { Damage = 5f, IsFire = true });
                     SoundSystem.PlayBowShoot();
+                }
+            }
+
+            // ── Мини-босс: Повелитель Ада ── огненные шары (на дистанции) и мощный удар (вблизи)
+            if (Type == HostileType.NetherLord && AttackCooldown <= 0f) {
+                if (dist < 2.4f) {
+                    var mobCenter = Position + new Vector3(0f, 0.9f, 0f);
+                    if (HasLineOfSight(world, mobCenter, player.Position + new Vector3(0f, 0.6f, 0f))) {
+                        AttackCooldown = 1.1f;
+                        player.ApplyDamage(9f, session, Position);
+                    }
+                } else if (dist < 22f) {
+                    var eyePos = Position + new Vector3(0f, 1.15f, 0f);
+                    var targetPos = player.Position + new Vector3(0f, Player.EyeHeight * 0.5f, 0f);
+                    if (HasLineOfSight(world, eyePos, targetPos)) {
+                        AttackCooldown = 1.8f;
+                        var shotDir = Vector3.Normalize(targetPos - eyePos);
+                        world.Arrows.Add(new ArrowProjectile(eyePos + shotDir * 0.6f, shotDir * 22f, this) { Damage = 7f, IsFire = true });
+                        SoundSystem.PlayBowShoot();
+                    }
+                }
+            }
+
+            // ── Мини-босс: Болотный страж ── тяжёлый удар + прыжок на игрока
+            if (Type == HostileType.SwampGuardian && dist < 2.4f && AttackCooldown <= 0f) {
+                var mobCenter = Position + new Vector3(0f, 0.6f, 0f);
+                if (HasLineOfSight(world, mobCenter, player.Position + new Vector3(0f, 0.6f, 0f))) {
+                    AttackCooldown = 1.0f;
+                    player.ApplyDamage(7f, session, Position);
+                }
+            } else if (Type == HostileType.SwampGuardian && dist > 4f && dist < 14f && AttackCooldown <= 0f) {
+                // Прыжок к игроку (если на пути нет стены — подпрыгиваем)
+                if (MathF.Abs(Velocity.Y) < 0.1f) {
+                    AttackCooldown = 2.5f;
+                    Velocity.Y = 9f;
+                }
+            }
+
+            // ── Мини-босс: Страж пустыни ── песчаные снаряды + удар
+            if (Type == HostileType.DesertGuardian && AttackCooldown <= 0f) {
+                if (dist < 2.4f) {
+                    var mobCenter = Position + new Vector3(0f, 0.8f, 0f);
+                    if (HasLineOfSight(world, mobCenter, player.Position + new Vector3(0f, 0.6f, 0f))) {
+                        AttackCooldown = 1.0f;
+                        player.ApplyDamage(8f, session, Position);
+                    }
+                } else if (dist < 20f) {
+                    var eyePos = Position + new Vector3(0f, 0.9f, 0f);
+                    var targetPos = player.Position + new Vector3(0f, Player.EyeHeight * 0.5f, 0f);
+                    if (HasLineOfSight(world, eyePos, targetPos)) {
+                        AttackCooldown = 1.6f;
+                        var shotDir = Vector3.Normalize(targetPos - eyePos);
+                        world.Arrows.Add(new ArrowProjectile(eyePos + shotDir * 0.6f, shotDir * 19f, this) { Damage = 6f });
+                        SoundSystem.PlayBowShoot();
+                    }
                 }
             }
         } else {
@@ -397,7 +459,7 @@ public sealed class HostileMob {
             case HostileType.Zombie:
                 world.SpawnPickup(GameData.RottenFleshItem.Id, _random.Next(1, 3), pos);
                 break;
-            case HostileType.Creeper:
+            case HostileType.Babakher:
                 world.SpawnPickup(GameData.GunpowderItem.Id, _random.Next(1, 3), pos);
                 break;
             case HostileType.Skeleton:
@@ -416,6 +478,21 @@ public sealed class HostileMob {
                 break;
             case HostileType.Enderman:
                 world.SpawnPickup(GameData.EnderPearlItem.Id, _random.Next(1, 3), pos);
+                break;
+            case HostileType.NetherLord:
+                // Адский артефакт — часть Ключа Бездны
+                world.SpawnPickup(GameData.NetherArtifactItem.Id, 1, pos);
+                world.SpawnPickup(GameData.BlazeRodItem.Id, _random.Next(2, 5), pos);
+                break;
+            case HostileType.SwampGuardian:
+                // Болотный артефакт — часть Ключа Бездны
+                world.SpawnPickup(GameData.SwampArtifactItem.Id, 1, pos);
+                world.SpawnPickup(GameData.StringItem.Id, _random.Next(1, 4), pos);
+                break;
+            case HostileType.DesertGuardian:
+                // Пустынный артефакт — часть Ключа Бездны
+                world.SpawnPickup(GameData.DesertArtifactItem.Id, 1, pos);
+                world.SpawnPickup(GameData.GoldIngotItem.Id, _random.Next(1, 4), pos);
                 break;
         }
     }

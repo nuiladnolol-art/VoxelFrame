@@ -46,7 +46,10 @@ public static class TextureAtlas {
                      TBucket = 121, TWaterBucket = 122, TLavaBucket = 123,
                      TEndStone = 124, TEndPortalFrame = 125, TEndPortal = 126, TEnderCrystal = 127,
                      TChorusPlant = 128, TChorusFlower = 129,
-                     TEnderPearl = 130, TEyeOfEnder = 131, TBlazePowder = 132, TChorusFruit = 133, TEndSlime = 134;
+                     TEnderPearl = 130, TEyeOfEnder = 131, TBlazePowder = 132, TChorusFruit = 133, TEndSlime = 134,
+                     TNetherArtifact = 135, TSwampArtifact = 136, TDesertArtifact = 137, TVoidKey = 138,
+                     TVoidGate = 139,
+                     TPickaxeGold = 140, TAxeGold = 141, TSwordGold = 142, TShovelGold = 143, THoeGold = 144;
 
     public record struct BlockFaceTiles(byte PosX, byte NegX, byte PosY, byte NegY, byte PosZ, byte NegZ);
 
@@ -209,6 +212,38 @@ public static class TextureAtlas {
         [TBlazePowder] = "items/blaze_powder.png",
         [TChorusFruit] = "items/chorus_fruit.png",
         [TEndSlime] = "items/end_slime.png",
+        // Блоки без файлов ранее (сундук, кровать, грядка, посевы, двери, врата)
+        [TChestTop] = "blocks/chest_top.png",
+        [TChestSide] = "blocks/chest_side.png",
+        [TChestFront] = "blocks/chest_front.png",
+        [TBedHeadTop] = "blocks/bed_head_top.png",
+        [TBedFootTop] = "blocks/bed_foot_top.png",
+        [TBedSide] = "blocks/bed_side.png",
+        [TBedEnd] = "blocks/bed_end.png",
+        [TFarmland] = "blocks/farmland.png",
+        [TWheatCrop0] = "blocks/wheat_crop_0.png",
+        [TWheatCrop1] = "blocks/wheat_crop_1.png",
+        [TWheatCrop2] = "blocks/wheat_crop_2.png",
+        [TWheatCrop3] = "blocks/wheat_crop_3.png",
+        [TDoorLower] = "blocks/door_lower.png",
+        [TDoorUpper] = "blocks/door_upper.png",
+        [TDoorItem] = "items/door.png",
+        [TVoidGate] = "blocks/void_gate.png",
+        // Мотыги и золотые инструменты
+        [THoeWood] = "items/wooden_hoe.png",
+        [THoeStone] = "items/stone_hoe.png",
+        [THoeIron] = "items/iron_hoe.png",
+        [THoeDiamond] = "items/diamond_hoe.png",
+        [TPickaxeGold] = "items/golden_pickaxe.png",
+        [TAxeGold] = "items/golden_axe.png",
+        [TSwordGold] = "items/golden_sword.png",
+        [TShovelGold] = "items/golden_shovel.png",
+        [THoeGold] = "items/golden_hoe.png",
+        // Артефакты и ключ
+        [TNetherArtifact] = "items/nether_artifact.png",
+        [TSwampArtifact] = "items/swamp_artifact.png",
+        [TDesertArtifact] = "items/desert_artifact.png",
+        [TVoidKey] = "items/void_key.png",
     };
 
     public static Texture2D Atlas => _atlas;
@@ -425,6 +460,7 @@ public static class TextureAtlas {
         palette[TEndStone] = (new Color(224, 224, 200, 255), true);
         palette[TEndPortalFrame] = (new Color(72, 92, 62, 255), true);
         palette[TChorusPlant] = (new Color(126, 68, 140, 255), true);
+        palette[TVoidGate] = (new Color(52, 30, 80, 255), true);
         palette[TChorusFlower] = (new Color(176, 112, 188, 255), true);
 
         var rng = new Random(20260812);
@@ -826,6 +862,27 @@ public static class TextureAtlas {
                         if (isHead) { r = mr; g = mg; b = mb; a = 255; }
                         else if (isStick) { r = 130; g = 96; b = 52; a = 255; }
                         else { a = 0; }
+                    } else if (tile >= TPickaxeGold && tile <= THoeGold) {
+                        // Золотые инструменты: общие формы инструментов, золотой цвет
+                        int gt = tile - TPickaxeGold; // 0=кирка, 1=топор, 2=меч, 3=лопата, 4=мотыга
+                        (int mr, int mg, int mb) = (245, 200, 50);
+                        bool isStick = (px == 15 - py) && (py >= 6);
+                        bool isHead = false;
+                        switch (gt) {
+                            case 0: isHead = py <= 6 && px <= 11 && Math.Abs(px + py - 8) <= 3; break;                        // кирка
+                            case 1: isHead = px >= 3 && px <= 9 && py >= 2 && py <= 7 && (px <= 6 || py <= 5); break;         // топор
+                            case 2: { bool blade = (px == py || px == py + 1) && py >= 3 && py <= 12;
+                                      bool guard = (px + py == 20) && Math.Abs(px - py) <= 3;
+                                      isStick = (px == py) && py >= 12;
+                                      isHead = blade || guard; break; }                                                       // меч
+                            case 3: isHead = px >= 2 && px <= 7 && py >= 2 && py <= 7; break;                                 // лопата
+                            case 4: { bool bTop = py >= 2 && py <= 4 && px >= 4 && px <= 12;
+                                      bool bHook = px >= 4 && px <= 6 && py >= 4 && py <= 7;
+                                      isHead = bTop || bHook; break; }                                                        // мотыга
+                        }
+                        if (isHead) { r = mr; g = mg; b = mb; a = 255; }
+                        else if (isStick) { r = 130; g = 96; b = 52; a = 255; }
+                        else { a = 0; }
                     } else if (tile == TBread) {
                         // Хлеб: овальная форма, корочка сверху
                         float cx = 8f, cy = 9f;
@@ -1147,14 +1204,20 @@ public static class TextureAtlas {
                         if (shine) { r = 230; g = 255; b = 255; a = 255; }
                         else if (inGem) { r = 150; g = 225; b = 240; a = 235; }
                         else { a = 0; }
-                    } else if (tile >= TEnderPearl && tile <= TEndSlime) {
-                        // Энд: предметы (жемчуг, око, порох, плод, слизь) — объект с прозрачным фоном
+                    } else if (tile >= TEnderPearl && tile <= TVoidKey) {
+                        // Энд и артефакты: предметы с прозрачным фоном (жемчуг, око, порох, слизь, артефакты, ключ)
                         float cx = 8f, cy = 8f;
                         bool inObj = tile switch {
                             TEnderPearl => (px - cx) * (px - cx) + (py - cy) * (py - cy) <= 24,
                             TEyeOfEnder => (px - cx) * (px - cx) + (py - cy) * (py - cy) <= 26,
                             TBlazePowder => (px - cx) * (px - cx) + (py - 10) * (py - 10) <= 18 && px >= 3 && px <= 13 && py >= 6,
                             TChorusFruit => (px - cx) * (px - cx) * 0.8f + (py - cy) * (py - cy) * 1.1f <= 20,
+                            TNetherArtifact => (px - cx) * (px - cx) + (py - cy) * (py - cy) <= 24,
+                            TSwampArtifact => (px - cx) * (px - cx) + (py - cy) * (py - cy) <= 28,
+                            TDesertArtifact => MathF.Abs(px - cx) + MathF.Abs(py - cy) <= 7,
+                            TVoidKey => (px - cx) * (px - cx) + (py - 3) * (py - 3) <= 9
+                                        || (px >= 6 && px <= 10 && py >= 3 && py <= 14)
+                                        || (px >= 10 && px <= 13 && (py == 10 || py == 13)),
                             _ => (px - cx) * (px - cx) + (py - cy) * (py - cy) <= 30,
                         };
                         if (inObj) {
@@ -1163,7 +1226,10 @@ public static class TextureAtlas {
                                 TEyeOfEnder => (35, 175, 150),
                                 TBlazePowder => (235, 150, 40),
                                 TChorusFruit => (155, 85, 165),
-                                _ => (55, 40, 70),
+                                TNetherArtifact => (205, 70, 40),
+                                TSwampArtifact => (65, 145, 75),
+                                TDesertArtifact => (215, 175, 70),
+                                _ => (90, 60, 140),
                             };
                             r = mr; g = mg; b = mb; a = 255;
                             if (tile == TEyeOfEnder) {
@@ -1172,6 +1238,18 @@ public static class TextureAtlas {
                             } else if (tile == TEndSlime) {
                                 bool shine = (px - 8) * (px - 8) + (py - 6) * (py - 6) <= 4;
                                 if (shine) { r = 120; g = 95; b = 140; }
+                            } else if (tile == TNetherArtifact) {
+                                bool hot = (px - 8) * (px - 8) + (py - 8) * (py - 8) <= 5;
+                                if (hot) { r = 255; g = 200; b = 90; }
+                            } else if (tile == TSwampArtifact) {
+                                bool slime = (px - 8) * (px - 8) + (py - 6) * (py - 6) <= 4;
+                                if (slime) { r = 130; g = 215; b = 130; }
+                            } else if (tile == TDesertArtifact) {
+                                bool glint = (px - 7) * (px - 7) + (py - 6) * (py - 6) <= 3;
+                                if (glint) { r = 255; g = 240; b = 170; }
+                            } else if (tile == TVoidKey) {
+                                bool glow = (px - 8) * (px - 8) + (py - 3) * (py - 3) <= 4;
+                                if (glow) { r = 200; g = 170; b = 255; }
                             }
                         } else {
                             a = 0;
@@ -1181,6 +1259,13 @@ public static class TextureAtlas {
                         if (tile == TLogSide && py % 5 == 4) { r -= 30; g -= 24; b -= 14; }
                         if (tile == TLeaves && (px * 3 + py * 7) % 5 == 0) {
                             a = 0;
+                        }
+                        if (tile == TVoidGate) {
+                            // Врата Бездны: тёмный камень со светящейся фиолетовой руной
+                            bool rune = (MathF.Abs(px - 8) + MathF.Abs(py - 8) <= 4) && ((px + py) % 2 == 0);
+                            bool glow = (px - 8) * (px - 8) + (py - 8) * (py - 8) <= 12;
+                            if (rune) { r = 190; g = 150; b = 255; }
+                            else if (glow) { r += 30; g += 20; b += 45; }
                         }
                         if (px == 0 || py == 0) { r = r * 4 / 5; g = g * 4 / 5; b = b * 4 / 5; }
                     }

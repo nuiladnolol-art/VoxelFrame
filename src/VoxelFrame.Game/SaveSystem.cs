@@ -13,7 +13,7 @@ namespace VoxelFrame.Game;
 /// </summary>
 public static class SaveSystem {
     public const uint Magic = 0x56465331;   // "VFS1"
-    public const int Version = 16;
+    public const int Version = 17;
 
     public static string CurrentWorldPath = "";
     public static int SelectedWorldSlot = 1;
@@ -161,6 +161,10 @@ public static class SaveSystem {
     private static void WriteWorldData(BinaryWriter bw, GameWorld world) {
         // Босс Слизня Края (для не-Эндовых миров — false/null).
         bw.Write(world.EndBossDefeated);
+        // Мини-боссы (встречаются один раз за мир)
+        bw.Write(world.NetherBossSpawned);
+        bw.Write(world.SwampBossSpawned);
+        bw.Write(world.DesertBossSpawned);
         if (world.EndBoss is { Alive: true } eb) {
             bw.Write(true);
             bw.Write(eb.Health);
@@ -608,7 +612,7 @@ public static class SaveSystem {
             var dim = (Dimension)br.ReadInt32();
             int seed = br.ReadInt32();
             var spawn = new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32());
-            var w = ReadWorldData(br, seed, dim);
+            var w = ReadWorldData(br, seed, dim, version);
             w.SpawnBlock = spawn;
             switch (dim) {
                 case Dimension.Overworld: overworld = w; break;
@@ -637,11 +641,17 @@ public static class SaveSystem {
         return session;
     }
 
-    private static GameWorld ReadWorldData(BinaryReader br, int seed, Dimension dim) {
+    private static GameWorld ReadWorldData(BinaryReader br, int seed, Dimension dim, int version) {
         var world = new GameWorld(seed) { Dimension = dim };
 
         // Босс Слизня Края (только у Энда; для других измерений — false/null)
         world.EndBossDefeated = br.ReadBoolean();
+        // Мини-боссы (флаги встречи; в старых сейвах считаем ещё не встреченными)
+        if (version >= 17) {
+            world.NetherBossSpawned = br.ReadBoolean();
+            world.SwampBossSpawned = br.ReadBoolean();
+            world.DesertBossSpawned = br.ReadBoolean();
+        }
         if (br.ReadBoolean()) {
             float bossHp = br.ReadSingle();
             var bossPos = ReadVec3(br);

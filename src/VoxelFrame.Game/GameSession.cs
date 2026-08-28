@@ -1,12 +1,13 @@
 using System.Numerics;
 using Raylib_cs;
 using VoxelFrame.Core;
+using VoxelFrame.Core.Inventory;
 using VoxelFrame.Core.World;
 
 namespace VoxelFrame.Game;
 
 public enum UiState { Playing, Inventory, Crafting, Paused, Workbench, Furnace, Chest, Loading, Death, Chat, Credits }
-public enum Dimension { Overworld, Nether, End }
+public enum Dimension { Overworld, Nether, End, Void }
 public enum WeatherType { Clear, Rain, Thunder }
 public enum GameMode { Survival, Creative }
 
@@ -53,6 +54,7 @@ public sealed class GameSession {
     public GameWorld? NetherWorld;
     public GameWorld? OverworldWorld;
     public GameWorld? EndWorld;
+    public GameWorld? VoidWorld;   // Бездна — тайное измерение под Эндом (не сохраняется, генерируется заново)
 
     public Vec3i TargetBlock;
     public Vec3i PlaceCell;
@@ -190,6 +192,8 @@ public sealed class GameSession {
             Player.Velocity = Vector3.Zero;
             Player.PortalTimer = -2.5f;
             AddMessage("Вы вошли в Нижний мир!");
+            // Повелитель Ада встречает игрока при первом входе (роняет Адский артефакт)
+            World.SpawnMiniBoss(HostileType.NetherLord, new Vector3(targetX + 6.5f, targetY + 1.0f, targetZ + 0.5f));
         } else if (targetDim == Dimension.End) {
             if (EndWorld == null) {
                 EndWorld = new GameWorld(World.Seed ^ 0x2E1D0FF) { Dimension = Dimension.End };
@@ -244,6 +248,46 @@ public sealed class GameSession {
                 AddMessage("Вы вернулись в Обычный мир!");
             }
         }
+    }
+
+    /// <summary>Переход в Бездну (тайное измерение под Эндом) при выживании в пустоте.</summary>
+    public void EnterVoid() {
+        if (VoidWorld == null) {
+            VoidWorld = new GameWorld(World.Seed ^ 0x4E19D2B) { Dimension = Dimension.Void };
+        }
+        World = VoidWorld;
+        const int platformY = 21;
+        World.EnsureLoadedAroundSync(new Vector3(0.5f, platformY, 0.5f), 2);
+        Player.Position = new Vector3(0.5f, platformY + 0.5f, 0.5f);
+        Player.Velocity = Vector3.Zero;
+        Player.PortalTimer = -2.5f;
+        AddMessage("Вы провалились в Бездну. В центре — Врата, ждущие Ключ...");
+    }
+
+    /// <summary>Возврат из Бездны в Энд.</summary>
+    public void ReturnFromVoid() {
+        World = EndWorld ?? new GameWorld(World.Seed) { Dimension = Dimension.End };
+        var islandTop = World.Generator.EndSurfaceHeight(0, 0);
+        if (islandTop <= 0) islandTop = 60;
+        World.EnsureLoadedAroundSync(new Vector3(0.5f, islandTop + 2, 0.5f), 2);
+        Player.Position = new Vector3(0.5f, islandTop + 2f, 0.5f);
+        Player.Velocity = Vector3.Zero;
+        Player.PortalTimer = -2.5f;
+        AddMessage("Вы выбрались из Бездны обратно в Энд.");
+    }
+
+    /// <summary>Награда за открытие Врат Бездны: мощный лут.</summary>
+    public void GiveVoidReward() {
+        var inv = Player.Inventory;
+        void Give(ItemDefinition def, int qty) { if (qty > 0) inv.TryInsert(GameData.NewItem(def), qty); }
+        Give(GameData.DiamondItem, 12);
+        Give(GameData.GoldIngotItem, 24);
+        Give(GameData.TotemItem, 2);
+        Give(GameData.EnchantedBookItem, 2);
+        Give(GameData.GoldenAppleItem, 4);
+        Give(GameData.ObsidianItem, 32);
+        AddMessage("Врата Бездны открылись! Перед вами сокровище забытого измерения.");
+        AddMessage("Вы познали тайну, скрытую под Эндом.");
     }
 
     private static void EnsureSafePortalPlatform(GameWorld world, int px, int py, int pz, BlockType portalBlock) {
@@ -526,6 +570,49 @@ public sealed class GameSession {
                 AddChatMessage("Инвентарь игрока очищен", Color.Green);
                 break;
 
+            case "locate":
+                if (parts.Length < 3) {
+                    AddChatMessage("Использование: /locate biome <savanna|swamp|desert|forest|plains|ocean|river|beach>", Color.Yellow);
+                    AddChatMessage("Или: /locate structure <village|stronghold|portal|dungeon|pyramid|mineshaft>", Color.Yellow);
+                    break;
+                }
+                if (parts[1].Equals("biome", StringComparison.OrdinalIgnoreCase)) {
+                    BiomeType? targetBiome = parts[2].ToLowerInvariant() switch {
+                        "savanna" => BiomeType.Savanna,
+                        "swamp" => BiomeType.Swamp,
+                        "desert" => BiomeType.Desert,
+                        "forest" or "woods" => BiomeType.Forest,
+                        "plains" or "plain" => BiomeType.Plains,
+                        "ocean" => BiomeType.Ocean,
+                        "river" => BiomeType.River,
+                        "beach" => BiomeType.Beach,
+                        _ => null,
+                    };
+                    if (targetBiome == null) {
+                        AddChatMessage($"Неизвестный биом: {parts[2]}", Color.Red);
+                        break;
+                    }
+                    var biomePos = World.Generator.FindNearestBiome(Player.Position, targetBiome.Value);
+                    if (biomePos == null) {
+                        AddChatMessage("Биом не найден в радиусе поиска", Color.Red);
+                    } else {
+                        float dist = Vector3.Distance(Player.Position, biomePos.Value);
+                        AddChatMessage($"Биом «{WorldGenerator.GetBiomeName(targetBiome.Value)}» найден: X={biomePos.Value.X:F0}, Y={biomePos.Value.Y:F0}, Z={biomePos.Value.Z:F0} (дистанция {dist:F0} блоков)", Color.Green);
+                    }
+                } else if (parts[1].Equals("structure", StringComparison.OrdinalIgnoreCase)) {
+                    string sName = parts[2].ToLowerInvariant();
+                    var structPos = World.Generator.FindNearestStructure(Player.Position, sName);
+                    if (structPos == null) {
+                        AddChatMessage("Структура не найдена в радиусе поиска", Color.Red);
+                    } else {
+                        float dist = Vector3.Distance(Player.Position, structPos.Value);
+                        AddChatMessage($"Структура «{sName}» найдена: X={structPos.Value.X:F0}, Y={structPos.Value.Y:F0}, Z={structPos.Value.Z:F0} (дистанция {dist:F0} блоков)", Color.Green);
+                    }
+                } else {
+                    AddChatMessage($"Неизвестный тип локации: {parts[1]}", Color.Red);
+                }
+                break;
+
             case "help":
             case "?":
                 AddChatMessage("=== Доступные команды ===", Color.Gold);
@@ -533,6 +620,7 @@ public sealed class GameSession {
                 AddChatMessage("/gamerule keepInventory <true|false> — сохранение инвентаря", Color.White);
                 AddChatMessage("/time set <day|night|число> — сменить время", Color.White);
                 AddChatMessage("/weather <clear|rain|thunder> — изменить погоду", Color.White);
+                AddChatMessage("/locate <biome|structure> <название> — найти биом/структуру", Color.White);
                 AddChatMessage("/clear — очистить инвентарь", Color.White);
                 break;
 

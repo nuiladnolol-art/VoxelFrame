@@ -83,6 +83,7 @@ public sealed partial class Player {
     public bool IsBlocking { get; set; }
     public float PortalTimer { get; set; }
     public bool PortalLocked { get; set; }   // Блокирует повторный вход, пока игрок не покинет порталы
+    public float VoidFallTimer;              // Сколько игрок выживает в пустоте (путь в Бездну)
     public bool IsFlying { get; set; }
     public float SpaceDoubleTapTimer { get; set; }
 
@@ -518,11 +519,33 @@ public sealed partial class Player {
             HighestYInAir = Position.Y;
         }
 
-        // Падение в пустоту ниже предела — смерть (как у мобов)
+        // Падение в пустоту ниже предела.
+        // В Энде это путь в Бездну: пустота жжёт, но если выжить (хил/тотем) —
+        // проходишь порог и падаешь на платформу с Вратами. В самой Бездне — возврат.
         if (Position.Y < FallingBlock.VoidY) {
             HighestYInAir = Position.Y;
-            ApplyDamage(MaxHealth * 2f, session);
-            session.AddMessage("Вы упали в пустоту!");
+            var dim = session.World.Dimension;
+            if (dim == Dimension.End || dim == Dimension.Void) {
+                VoidFallTimer += dt;
+                if (VoidFallTimer >= 4f) {
+                    VoidFallTimer = 0f;
+                    if (dim == Dimension.Void) {
+                        session.ReturnFromVoid();
+                    } else {
+                        session.EnterVoid();
+                    }
+                } else {
+                    ApplyDamage(4f * dt, session);
+                    if (VoidFallTimer > 2f && (int)(VoidFallTimer * 5f) % 3 == 0) {
+                        session.AddMessage("Пустота тянет вниз... Хилитесь или держите тотем!");
+                    }
+                }
+            } else {
+                ApplyDamage(MaxHealth * 2f, session);
+                session.AddMessage("Вы упали в пустоту!");
+            }
+        } else {
+            VoidFallTimer = 0f;
         }
 
         // Проверка удушья под водой (дискретный урон 2 HP в секунду)
@@ -714,6 +737,16 @@ public sealed partial class Player {
                     session.ActiveFurnacePos = session.TargetBlock;
                     session.Ui = UiState.Furnace;
                     wantUse = false;
+                } else if (targetVox.TypeId == GameData.BVoidGate.Id) {
+                    // Врата Бездны: вставить Ключ Бездны (только в измерении Бездны)
+                    var heldVoidKey = SelectedEntry?.Item.Definition;
+                    if (heldVoidKey != null && heldVoidKey.Id == GameData.VoidKeyItem.Id && session.World.Dimension == Dimension.Void) {
+                        if (TryConsumeSelected(heldVoidKey, 1, session)) {
+                            session.GiveVoidReward();
+                            SoundSystem.PlayThunder();
+                            wantUse = false;
+                        }
+                    }
                 } else if (targetVox.TypeId == GameData.BChest.Id) {
                     session.ActiveChestPos = session.TargetBlock;
                     session.Ui = UiState.Chest;

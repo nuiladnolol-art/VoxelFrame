@@ -72,7 +72,7 @@ public sealed class WorldRenderer : IDisposable {
                 }
             }
 
-            // Динамический свет от раздувающегося белого крипера
+            // Динамический свет от раздувающегося белого бабахера
             if (creeperLightRadius > 0.1) {
                 float d = distance(fragWorldPos, creeperLightPos);
                 if (d < creeperLightRadius) {
@@ -239,12 +239,12 @@ public sealed class WorldRenderer : IDisposable {
             unsafe { Raylib.SetShaderValue(_material.Shader, _playerLightRadiusLoc, &lightRadius, ShaderUniformDataType.Float); }
         }
 
-        // Динамический свет раздувающегося белого крипера перед взрывом
+        // Динамический свет раздувающегося белого бабахера перед взрывом
         Vector3 creeperLightPos = Vector3.Zero;
         float creeperLightRadius = 0f;
         if (SaveSystem.DynamicLighting) {
             foreach (var h in _world.HostileMobs) {
-                if (h.Type == HostileType.Creeper && h.FuseTimer > 0f && h.Alive) {
+                if (h.Type == HostileType.Babakher && h.FuseTimer > 0f && h.Alive) {
                     float rad = 6.0f + (h.FuseTimer / 1.3f) * 6.5f; // Свечение от 6 до 12.5 блоков
                     if (rad > creeperLightRadius) {
                         creeperLightRadius = rad;
@@ -847,7 +847,7 @@ public sealed class WorldRenderer : IDisposable {
             Rlgl.PopMatrix();
         }
 
-        // 3. Draw Hostile Mobs (Zombie, Creeper, Skeleton, Spider) with light and fog shading
+        // 3. Draw Hostile Mobs (Zombie, Babakher, Skeleton, Spider) with light and fog shading
         foreach (var h in _world.HostileMobs) {
             if (!h.Alive) continue;
             DrawSoftShadow(h.Position - new Vector3(0f, h.HalfSizeY, 0f), 0.45f);
@@ -981,30 +981,57 @@ public sealed class WorldRenderer : IDisposable {
                     Raylib.DrawCube(legR, 0.55f, 0.08f, 0.08f, spiderColor);
                 }
 
-            } else if (h.Type == HostileType.Creeper) {
-                // ── CREEPER MODEL ─────────────────────────────────────────
+            } else if (h.Type == HostileType.Babakher) {
+                // ── БАБАХЕР MODEL ─────────────────────────────────────────
                 bool isFlashing = h.FuseTimer > 0f && (int)(h.FuseTimer * 12f) % 2 == 0;
-                var baseCreeper = isFlashing ? Color.White : (h.HurtTime > 0f ? new Color(240, 80, 80, 255) : new Color(30, 185, 55, 255));
-                var creeperGreen = isFlashing ? ShadeColor(Color.White, light, hPos) : ShadeColor(baseCreeper, light, hPos);
+                var baseBabakher = isFlashing ? Color.White : (h.HurtTime > 0f ? new Color(240, 80, 80, 255) : new Color(30, 185, 55, 255));
+                var babakherGreen = isFlashing ? ShadeColor(Color.White, light, hPos) : ShadeColor(baseBabakher, light, hPos);
                 var outlineColor = ShadeColor(new Color(15, 60, 20, 180), light, hPos);
 
                 float fuseScale = 1.0f + MathF.Min(0.25f, h.FuseTimer * 0.20f);
                 Rlgl.Scalef(fuseScale, fuseScale, fuseScale);
 
                 // Body
-                Raylib.DrawCube(new Vector3(0f, -0.025f, 0f), 0.5f, 0.65f, 0.35f, creeperGreen);
+                Raylib.DrawCube(new Vector3(0f, -0.025f, 0f), 0.5f, 0.65f, 0.35f, babakherGreen);
                 Raylib.DrawCubeWires(new Vector3(0f, -0.025f, 0f), 0.502f, 0.652f, 0.352f, outlineColor);
 
                 // Head
                 var headPos = new Vector3(0f, 0.54f, 0f);
-                Raylib.DrawCube(headPos, 0.48f, 0.48f, 0.48f, creeperGreen);
+                Raylib.DrawCube(headPos, 0.48f, 0.48f, 0.48f, babakherGreen);
                 Raylib.DrawCubeWires(headPos, 0.482f, 0.482f, 0.482f, outlineColor);
 
-                Raylib.DrawCube(headPos + new Vector3(-0.11f, 0.06f, 0.245f), 0.10f, 0.10f, 0.01f, ShadeColor(Color.Black, light, hPos));
-                Raylib.DrawCube(headPos + new Vector3(0.11f, 0.06f, 0.245f), 0.10f, 0.10f, 0.01f, ShadeColor(Color.Black, light, hPos));
-                Raylib.DrawCube(headPos + new Vector3(0f, -0.06f, 0.245f), 0.10f, 0.12f, 0.01f, ShadeColor(Color.Black, light, hPos));
-                Raylib.DrawCube(headPos + new Vector3(-0.07f, -0.12f, 0.245f), 0.06f, 0.12f, 0.01f, ShadeColor(Color.Black, light, hPos));
-                Raylib.DrawCube(headPos + new Vector3(0.07f, -0.12f, 0.245f), 0.06f, 0.12f, 0.01f, ShadeColor(Color.Black, light, hPos));
+                // ── Морда Бабахера: светящиеся глаза, нахмуренные брови, зубастая пасть ──
+                const float faceZ = 0.245f;
+                var eyeGlow = isFlashing ? ShadeColor(Color.White, light, hPos)
+                    : ShadeColor(new Color(215, 235, 120, 255), light, hPos);
+                var pupilDark = ShadeColor(Color.Black, light, hPos);
+                var browDark = ShadeColor(new Color(12, 55, 22, 255), light, hPos);
+                var mouthDark = ShadeColor(new Color(8, 6, 6, 255), light, hPos);
+                var toothWhite = ShadeColor(Color.White, light, hPos);
+
+                // Светящиеся глаза-белки (широкие, злобный прищур)
+                Raylib.DrawCube(headPos + new Vector3(-0.115f, 0.055f, faceZ), 0.10f, 0.085f, 0.012f, eyeGlow);
+                Raylib.DrawCube(headPos + new Vector3(0.115f, 0.055f, faceZ), 0.10f, 0.085f, 0.012f, eyeGlow);
+
+                // Зрачки-точки (жуткий пристальный взгляд)
+                Raylib.DrawCube(headPos + new Vector3(-0.115f, 0.050f, faceZ + 0.002f), 0.05f, 0.05f, 0.014f, pupilDark);
+                Raylib.DrawCube(headPos + new Vector3(0.115f, 0.050f, faceZ + 0.002f), 0.05f, 0.05f, 0.014f, pupilDark);
+
+                // Нахмуренные брови, скошенные к переносице (злоба)
+                Raylib.DrawCube(headPos + new Vector3(-0.145f, 0.115f, faceZ + 0.001f), 0.07f, 0.03f, 0.012f, browDark);
+                Raylib.DrawCube(headPos + new Vector3(-0.085f, 0.095f, faceZ + 0.001f), 0.07f, 0.03f, 0.012f, browDark);
+                Raylib.DrawCube(headPos + new Vector3(0.085f, 0.095f, faceZ + 0.001f), 0.07f, 0.03f, 0.012f, browDark);
+                Raylib.DrawCube(headPos + new Vector3(0.145f, 0.115f, faceZ + 0.001f), 0.07f, 0.03f, 0.012f, browDark);
+
+                // Широкая зубастая пасть
+                Raylib.DrawCube(headPos + new Vector3(0f, -0.09f, faceZ), 0.16f, 0.07f, 0.01f, mouthDark);
+                // Верхние зубы
+                Raylib.DrawCube(headPos + new Vector3(-0.045f, -0.062f, faceZ + 0.002f), 0.03f, 0.03f, 0.012f, toothWhite);
+                Raylib.DrawCube(headPos + new Vector3(0f, -0.062f, faceZ + 0.002f), 0.03f, 0.03f, 0.012f, toothWhite);
+                Raylib.DrawCube(headPos + new Vector3(0.045f, -0.062f, faceZ + 0.002f), 0.03f, 0.03f, 0.012f, toothWhite);
+                // Нижние клыки
+                Raylib.DrawCube(headPos + new Vector3(-0.025f, -0.145f, faceZ + 0.002f), 0.035f, 0.06f, 0.012f, toothWhite);
+                Raylib.DrawCube(headPos + new Vector3(0.025f, -0.145f, faceZ + 0.002f), 0.035f, 0.06f, 0.012f, toothWhite);
 
                 // 4 Legs
                 var legFL = new Vector3(-0.16f, -0.55f, 0.22f + walkSwing * 0.25f);
@@ -1013,13 +1040,13 @@ public sealed class WorldRenderer : IDisposable {
                 var legBR = new Vector3(0.16f, -0.55f, -0.22f + walkSwing * 0.25f);
 
                 float legW = 0.18f, legH = 0.40f, legD = 0.18f;
-                Raylib.DrawCube(legFL, legW, legH, legD, creeperGreen);
+                Raylib.DrawCube(legFL, legW, legH, legD, babakherGreen);
                 Raylib.DrawCubeWires(legFL, legW + 0.002f, legH + 0.002f, legD + 0.002f, outlineColor);
-                Raylib.DrawCube(legFR, legW, legH, legD, creeperGreen);
+                Raylib.DrawCube(legFR, legW, legH, legD, babakherGreen);
                 Raylib.DrawCubeWires(legFR, legW + 0.002f, legH + 0.002f, legD + 0.002f, outlineColor);
-                Raylib.DrawCube(legBL, legW, legH, legD, creeperGreen);
+                Raylib.DrawCube(legBL, legW, legH, legD, babakherGreen);
                 Raylib.DrawCubeWires(legBL, legW + 0.002f, legH + 0.002f, legD + 0.002f, outlineColor);
-                Raylib.DrawCube(legBR, legW, legH, legD, creeperGreen);
+                Raylib.DrawCube(legBR, legW, legH, legD, babakherGreen);
                 Raylib.DrawCubeWires(legBR, legW + 0.002f, legH + 0.002f, legD + 0.002f, outlineColor);
             } else if (h.Type == HostileType.ZombiePigman) {
                 // ── ZOMBIE PIGMAN (СВИНОЗОМБИ) MODEL ───────────────────────
@@ -1143,6 +1170,84 @@ public sealed class WorldRenderer : IDisposable {
                 // Светящиеся фиолетовые глаза
                 Raylib.DrawCube(headPos + new Vector3(-0.11f, 0.06f, 0.215f), 0.08f, 0.08f, 0.012f, eyeColor);
                 Raylib.DrawCube(headPos + new Vector3(0.11f, 0.06f, 0.215f), 0.08f, 0.08f, 0.012f, eyeColor);
+            } else if (h.Type == HostileType.NetherLord) {
+                // ── МИНИ-БОСС: Повелитель Ада (тёмно-красный демон с рогами) ──
+                var demonSkin = ShadeColor(h.HurtTime > 0f ? new Color(220, 60, 50, 255) : new Color(120, 30, 20, 255), light, hPos);
+                var demonHot = ShadeColor(h.HurtTime > 0f ? new Color(255, 150, 60, 255) : new Color(210, 90, 40, 255), light, hPos);
+                var demonEye = ShadeColor(new Color(255, 210, 80, 255), light, hPos);
+                var outline = ShadeColor(new Color(40, 8, 8, 200), light, hPos);
+                float bob2 = MathF.Sin(time * 2.5f) * 0.06f;
+
+                // Ноги
+                Raylib.DrawCube(new Vector3(-0.20f, -0.95f, walkSwing * 0.3f), 0.24f, 0.70f, 0.24f, demonSkin);
+                Raylib.DrawCube(new Vector3(0.20f, -0.95f, -walkSwing * 0.3f), 0.24f, 0.70f, 0.24f, demonSkin);
+                // Тело
+                Raylib.DrawCube(new Vector3(0f, -0.20f, 0f), 0.55f, 0.90f, 0.35f, demonSkin);
+                Raylib.DrawCubeWires(new Vector3(0f, -0.20f, 0f), 0.552f, 0.902f, 0.352f, outline);
+                // Руки
+                float armSw2 = isMoving ? MathF.Sin(time * 8f) * 0.5f : 0f;
+                Raylib.DrawCube(new Vector3(-0.40f, -0.10f, armSw2 * 0.3f), 0.18f, 0.80f, 0.18f, demonSkin);
+                Raylib.DrawCube(new Vector3(0.40f, -0.10f, -armSw2 * 0.3f), 0.18f, 0.80f, 0.18f, demonSkin);
+                // Голова + рога
+                var dHead = new Vector3(0f, 0.55f + bob2, 0f);
+                Raylib.DrawCube(dHead, 0.40f, 0.40f, 0.40f, demonSkin);
+                Raylib.DrawCubeWires(dHead, 0.402f, 0.402f, 0.402f, outline);
+                Raylib.DrawCube(dHead + new Vector3(-0.14f, 0.26f, 0f), 0.06f, 0.20f, 0.06f, demonHot);
+                Raylib.DrawCube(dHead + new Vector3(0.14f, 0.26f, 0f), 0.06f, 0.20f, 0.06f, demonHot);
+                // Светящиеся глаза
+                Raylib.DrawCube(dHead + new Vector3(-0.10f, 0.05f, 0.205f), 0.07f, 0.06f, 0.015f, demonEye);
+                Raylib.DrawCube(dHead + new Vector3(0.10f, 0.05f, 0.205f), 0.07f, 0.06f, 0.015f, demonEye);
+                // Огненная аура: парящие угли вокруг тела
+                for (int i = 0; i < 4; i++) {
+                    float a = time * 2f + i * 1.57f;
+                    var ember = new Vector3(MathF.Cos(a) * 0.55f, -0.4f + MathF.Sin(time * 3f + i) * 0.3f, MathF.Sin(a) * 0.55f);
+                    Raylib.DrawCube(ember, 0.08f, 0.08f, 0.08f, demonHot);
+                }
+            } else if (h.Type == HostileType.SwampGuardian) {
+                // ── МИНИ-БОСС: Болотный страж (огромная зелёная слизь) ──
+                var swampBody = ShadeColor(h.HurtTime > 0f ? new Color(150, 220, 90, 255) : new Color(70, 130, 60, 255), light, hPos);
+                var swampDark = ShadeColor(h.HurtTime > 0f ? new Color(80, 140, 50, 255) : new Color(35, 75, 35, 255), light, hPos);
+                var swampEye = ShadeColor(new Color(255, 240, 150, 255), light, hPos);
+                float squish = 1f + MathF.Sin(time * 4f) * 0.08f;
+
+                // Широкое приземистое тело
+                Raylib.DrawCube(new Vector3(0f, -0.1f, 0f), 0.9f, 0.55f * squish, 0.9f, swampBody);
+                Raylib.DrawCubeWires(new Vector3(0f, -0.1f, 0f), 0.902f, 0.552f * squish, 0.902f, swampDark);
+                // Купол-голова
+                Raylib.DrawCube(new Vector3(0f, 0.32f, 0f), 0.8f, 0.42f * squish, 0.8f, swampBody);
+                // Пятна слизи
+                Raylib.DrawCube(new Vector3(-0.25f, 0.05f, 0.3f), 0.2f, 0.12f, 0.2f, swampDark);
+                Raylib.DrawCube(new Vector3(0.25f, 0.4f, -0.15f), 0.18f, 0.1f, 0.18f, swampDark);
+                // Светящиеся глаза
+                Raylib.DrawCube(new Vector3(-0.2f, 0.42f, 0.41f), 0.12f, 0.09f, 0.02f, swampEye);
+                Raylib.DrawCube(new Vector3(0.2f, 0.42f, 0.41f), 0.12f, 0.09f, 0.02f, swampEye);
+            } else if (h.Type == HostileType.DesertGuardian) {
+                // ── МИНИ-БОСС: Страж пустыни (песчано-золотой голем) ──
+                var golemSand = ShadeColor(h.HurtTime > 0f ? new Color(240, 200, 130, 255) : new Color(210, 190, 140, 255), light, hPos);
+                var golemGold = ShadeColor(h.HurtTime > 0f ? new Color(255, 230, 90, 255) : new Color(200, 170, 60, 255), light, hPos);
+                var golemEye = ShadeColor(new Color(255, 90, 40, 255), light, hPos);
+                var outline3 = ShadeColor(new Color(90, 70, 30, 200), light, hPos);
+
+                // Ноги-колонны
+                Raylib.DrawCube(new Vector3(-0.25f, -0.55f, walkSwing * 0.3f), 0.3f, 0.5f, 0.3f, golemSand);
+                Raylib.DrawCube(new Vector3(0.25f, -0.55f, -walkSwing * 0.3f), 0.3f, 0.5f, 0.3f, golemSand);
+                // Массивный корпус
+                Raylib.DrawCube(new Vector3(0f, 0.0f, 0f), 0.7f, 0.8f, 0.45f, golemSand);
+                Raylib.DrawCubeWires(new Vector3(0f, 0.0f, 0f), 0.702f, 0.802f, 0.452f, outline3);
+                // Золотая насечка на груди
+                Raylib.DrawCube(new Vector3(0f, 0.05f, 0.23f), 0.3f, 0.25f, 0.03f, golemGold);
+                // Руки
+                float armSw3 = isMoving ? MathF.Sin(time * 7f) * 0.4f : 0f;
+                Raylib.DrawCube(new Vector3(-0.52f, 0.1f, armSw3 * 0.3f), 0.25f, 0.7f, 0.25f, golemSand);
+                Raylib.DrawCube(new Vector3(0.52f, 0.1f, -armSw3 * 0.3f), 0.25f, 0.7f, 0.25f, golemSand);
+                // Голова с золотым венцом
+                var gHead = new Vector3(0f, 0.65f, 0f);
+                Raylib.DrawCube(gHead, 0.5f, 0.5f, 0.5f, golemSand);
+                Raylib.DrawCubeWires(gHead, 0.502f, 0.502f, 0.502f, outline3);
+                Raylib.DrawCube(gHead + new Vector3(0f, 0.28f, 0f), 0.36f, 0.08f, 0.36f, golemGold);
+                // Глаза
+                Raylib.DrawCube(gHead + new Vector3(-0.12f, 0.04f, 0.26f), 0.08f, 0.08f, 0.02f, golemEye);
+                Raylib.DrawCube(gHead + new Vector3(0.12f, 0.04f, 0.26f), 0.08f, 0.08f, 0.02f, golemEye);
             }
 
             Rlgl.PopMatrix();

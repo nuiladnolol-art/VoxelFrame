@@ -12,6 +12,27 @@ public sealed partial class GameWorld {
     /// <summary>Повержен ли босс (персистентно).</summary>
     public bool EndBossDefeated;
 
+    // ── Мини-боссы артефактов: встречаются один раз за мир ──────────────────
+    public bool NetherBossSpawned;
+    public bool SwampBossSpawned;
+    public bool DesertBossSpawned;
+
+    /// <summary>Спавнит мини-босса в точке, если он ещё не встречался в этом мире.</summary>
+    public void SpawnMiniBoss(HostileType type, Vector3 pos) {
+        if (type == HostileType.NetherLord) {
+            if (NetherBossSpawned) return;
+            NetherBossSpawned = true;
+        } else if (type == HostileType.SwampGuardian) {
+            if (SwampBossSpawned) return;
+            SwampBossSpawned = true;
+        } else if (type == HostileType.DesertGuardian) {
+            if (DesertBossSpawned) return;
+            DesertBossSpawned = true;
+        } else return;
+        HostileMobs.Add(new HostileMob(type, pos));
+        SoundSystem.PlayBabakherHiss();
+    }
+
     /// <summary>Позиции всех когда-либо сгенерированных эндер-кристаллов (для подсчёта живых).</summary>
     private readonly HashSet<Vec3i> _endCrystals = new();
 

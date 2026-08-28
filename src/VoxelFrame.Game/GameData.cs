@@ -220,6 +220,12 @@ public static class GameData {
     public static readonly ItemDefinition EndPortalFrameItem = Item(107, "Рамка портала Энда", ObsidianM);
     public static readonly ItemDefinition EnderCrystalItem = Item(108, "Эндер-кристалл", GlassM);
 
+    // Артефакты мини-боссов и Ключ Бездны (собирается из всех четырёх артефактов)
+    public static readonly ItemDefinition NetherArtifactItem = Item(109, "Адский артефакт", ObsidianM);
+    public static readonly ItemDefinition SwampArtifactItem = Item(110, "Болотный артефакт", OrganicM);
+    public static readonly ItemDefinition DesertArtifactItem = Item(111, "Пустынный артефакт", SandM);
+    public static readonly ItemDefinition VoidKeyItem = Item(112, "Ключ Бездны", ObsidianM, maxStack: 1);
+
     // ── Блоки ─────────────────────────────────────────────────────────────────
     public static readonly BlockType BGrass = Block(1, "Трава", DirtM, drop: DirtItem);
     public static readonly BlockType BDirt = Block(2, "Земля", DirtM, drop: DirtItem);
@@ -295,13 +301,15 @@ public static class GameData {
     public static readonly BlockType BChorusPlant = Block(51, "Растение хоруса", Oak, drop: ChorusFruitItem, flammable: true, burnTime: 5f);
     public static readonly BlockType BChorusFlower = Block(52, "Цветок хоруса", Oak, drop: ChorusFruitItem, flammable: true, burnTime: 3f)
         .With(b => { b.IsOpaque = false; });
+    public static readonly BlockType BVoidGate = Block(53, "Врата Бездны", ObsidianM, drop: null, light: 12)
+        .With(b => { b.IsUnbreakable = true; b.IsOpaque = false; });
 
     public static readonly BlockType[] Blocks =
         { BGrass, BDirt, BStone, BLog, BLeaves, BPlanks, BCoalOre, BTorch, BBedrock, BIronOre, BWorkbench, BFurnace,
           BCobblestone, BSand, BGravel, BGlass, BWater, BLava, BGoldOre, BDiamondOre, BRedstoneOre, BObsidian, BChest, BBed, BBedHead,
           BFarmland, BWheatCrop, BTallGrass, BMossyCobblestone, BMobSpawner, BWeb, BRail, BPressurePlate, BTNT, BChiseledSandstone,
           BNetherrack, BSoulSand, BGlowstone, BNetherQuartzOre, BNetherBrick, BNetherPortal, BDoorLower, BDoorUpper,
-          BEndStone, BEndPortalFrame, BEndPortal, BObsidianPillar, BEnderCrystal, BChorusPlant, BChorusFlower };
+          BEndStone, BEndPortalFrame, BEndPortal, BObsidianPillar, BEnderCrystal, BChorusPlant, BChorusFlower, BVoidGate };
 
 
     private static readonly Dictionary<ushort, BlockType> _byId = Blocks.ToDictionary(b => b.Id);
@@ -645,7 +653,8 @@ public static class GameData {
             GlowstoneItem, NetherQuartzOreItem, NetherBrickItem, MossyCobblestoneItem,
             ChiseledSandstoneItem, RailItem, BucketItem, WaterBucketItem, LavaBucketItem, DoorItem,
             EnderPearlItem, EyeOfEnderItem, BlazePowderItem, ChorusFruitItem, EndSlimeItem,
-            EndStoneItem, EndPortalFrameItem, EnderCrystalItem }) {
+            EndStoneItem, EndPortalFrameItem, EnderCrystalItem,
+            NetherArtifactItem, SwampArtifactItem, DesertArtifactItem, VoidKeyItem }) {
             Items.Add(item.Id, item);
         }
 
@@ -905,6 +914,13 @@ public static class GameData {
 
         // Каша из опилок: 2 опилки + 1 доска + 1 семена пшеницы
         AddShapeRecipe(new ItemDefinition?[] { SawdustItem, SawdustItem, null, PlankItem, WheatSeedsItem, null, null, null, null }, SawdustPorridgeItem, 1);
+
+        // Ключ Бездны: четыре артефакта мини-боссов (Энд, Ад, Болото, Пустыня)
+        AddShapeRecipe(new ItemDefinition?[] {
+            EndSlimeItem, NetherArtifactItem, null,
+            DesertArtifactItem, SwampArtifactItem, null,
+            null, null, null
+        }, VoidKeyItem, 1);
     }
 
     private static void InitSmeltingRecipes() {

@@ -7,13 +7,15 @@ namespace VoxelFrame.Game;
 
 /// <summary>Типы биомов в игре.</summary>
 public enum BiomeType {
-    Plains,    // Равнины (открытые луга, 0 деревьев)
+    Plains,    // Равнины (открытые луга, редкие деревья)
     Forest,    // Лес (высокая плотность деревьев)
     Desert,    // Пустыня (пески и дюны, 0 деревьев)
     Beach,     // Пляж (песчаные берега)
     Ocean,     // Океан (глубокая вода)
     River,     // Река (водные русла)
     Mineshaft, // Заброшенные шахты (подземный биом с деревянными крепями и факелами)
+    Savanna,   // Саванна (тёплая сухая, жёлтая трава, редкие раскидистые деревья)
+    Swamp,     // Болото (влажное, тёмная вода, деревья у воды, ночью слаймы)
 }
 
 /// <summary>
@@ -122,13 +124,23 @@ public sealed class WorldGenerator {
         float temp = _beach.Get(wx * 0.0022f + 1200f, wz * 0.0022f + 1200f);
         float humid = _forestNoise.Get(wx * 0.0028f + 2500f, wz * 0.0028f + 2500f);
 
+        // Болото: очень влажно, умеренно-тёплый климат (тёмная вода, слаймы ночью)
+        if (humid > 0.80f && temp < 0.70f) {
+            return BiomeType.Swamp;
+        }
+        // Пустыня: жарко и сухо
         if (temp > 0.70f && humid < 0.38f) {
-            return BiomeType.Desert; // Жаркий и сухой биом пустыни (~15% суши)
+            return BiomeType.Desert; // Жаркий и сухой биом пустыни (~11% суши)
         }
+        // Саванна: тепло, не очень влажно (сухие жёлтые равнины с редкими деревьями)
+        if (temp > 0.40f && temp < 0.75f && humid < 0.50f) {
+            return BiomeType.Savanna;
+        }
+        // Лес: влажный лесистый
         if (humid > 0.50f) {
-            return BiomeType.Forest; // Влажный лесистый биом (~35% суши)
+            return BiomeType.Forest; // Влажный лесистый биом
         }
-        return BiomeType.Plains; // Умеренные просторные равнины (~50% суши)
+        return BiomeType.Plains; // Умеренные просторные равнины
     }
 
     public static string GetBiomeName(BiomeType biome) => biome switch {
@@ -138,6 +150,8 @@ public sealed class WorldGenerator {
         BiomeType.Forest => "Лес",
         BiomeType.Desert => "Пустыня",
         BiomeType.Mineshaft => "Заброшенная шахта",
+        BiomeType.Savanna => "Саванна",
+        BiomeType.Swamp => "Болото",
         _ => "Равнины"
     };
 
@@ -170,6 +184,7 @@ public sealed class WorldGenerator {
                 float beachNoise = _beach.Get(wx * 0.05f, wz * 0.05f);
                 var biome = GetBiome(wx, BaseHeight, wz);
                 bool isDesert = biome == BiomeType.Desert;
+                bool isSwamp = biome == BiomeType.Swamp;
                 bool isBeach = (surface <= SeaLevel + 2 && surface >= SeaLevel - 3) || biome == BiomeType.Beach;
 
                 for (int ly = 0; ly < Chunk.SizeY; ly++) {
@@ -193,6 +208,8 @@ public sealed class WorldGenerator {
                             type = beachNoise > 0.5f ? GameData.BGravel.Id : GameData.BSand.Id;
                         } else if (isDesert || isBeach) {
                             type = beachNoise > 0.3f ? GameData.BSand.Id : (isDesert ? GameData.BSand.Id : GameData.BGravel.Id);
+                        } else if (isSwamp) {
+                            type = GameData.BDirt.Id; // Болото: топкая грязевая поверхность
                         } else {
                             type = GameData.BGrass.Id;
                         }
@@ -208,6 +225,18 @@ public sealed class WorldGenerator {
 
                     var vox = MakeVoxel(type);
                     chunk.SetVoxel(idx, in vox);
+                }
+
+                // Болотные лужи: в низинах болота мелкая тёмная вода вместо грязи
+                if (biome == BiomeType.Swamp && surface >= SeaLevel && surface <= SeaLevel + 2) {
+                    int surfLy = surface - oy;
+                    if (surfLy >= 0 && surfLy < Chunk.SizeY) {
+                        var wIdx = Chunk.Index(lx, surfLy, lz);
+                        if (chunk.Get(wIdx).TypeId == GameData.BDirt.Id) {
+                            var waterVox = MakeVoxel(GameData.BWater.Id);
+                            chunk.SetVoxel(wIdx, in waterVox);
+                        }
+                    }
                 }
             }
         }
@@ -239,6 +268,129 @@ public sealed class WorldGenerator {
             PlaceRuinedPortals(chunk, ox, oy, oz);
             PlaceEndStrongholds(chunk, ox, oy, oz);
         }
+    }
+
+    // ── Поиск биомов и структур (для команды /locate) ──────────────────────────
+
+    /// <summary>Ищет ближайший биом заданного типа вокруг точки (спираль с шагом 16).</summary>
+    public Vector3? FindNearestBiome(Vector3 from, BiomeType target) {
+        int px = (int)MathF.Floor(from.X), pz = (int)MathF.Floor(from.Z);
+        for (int ring = 0; ring <= 220; ring++) {  // до ~3520 блоков
+            int r = ring * 16;
+            for (int i = -ring; i <= ring; i++) {
+                if (GetBiome(px + i * 16, 50, pz + r) == target)
+                    return new Vector3(px + i * 16 + 0.5f, MathF.Max(SeaLevel + 1, SurfaceHeight(px + i * 16, pz + r)), pz + r + 0.5f);
+                if (GetBiome(px + i * 16, 50, pz - r) == target)
+                    return new Vector3(px + i * 16 + 0.5f, MathF.Max(SeaLevel + 1, SurfaceHeight(px + i * 16, pz - r)), pz - r + 0.5f);
+                if (GetBiome(px + r, 50, pz + i * 16) == target)
+                    return new Vector3(px + r + 0.5f, MathF.Max(SeaLevel + 1, SurfaceHeight(px + r, pz + i * 16)), pz + i * 16 + 0.5f);
+                if (GetBiome(px - r, 50, pz + i * 16) == target)
+                    return new Vector3(px - r + 0.5f, MathF.Max(SeaLevel + 1, SurfaceHeight(px - r, pz + i * 16)), pz + i * 16 + 0.5f);
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Ищет ближайшую структуру по названию (village/stronghold/portal/dungeon/pyramid/mineshaft).</summary>
+    public Vector3? FindNearestStructure(Vector3 from, string structure) {
+        int px = (int)MathF.Floor(from.X), pz = (int)MathF.Floor(from.Z);
+        switch (structure.ToLowerInvariant()) {
+            case "village": return FindNearestVillage(px, pz);
+            case "portal": case "ruinedportal": return FindNearestRuinedPortal(px, pz);
+            case "dungeon": return FindNearestDungeon(px, pz);
+            case "pyramid": case "desertpyramid": return FindNearestPyramid(px, pz);
+            case "mineshaft": return FindNearestMineshaft(px, pz);
+            case "stronghold": return FindNearestEndStronghold(from);
+            default: return null;
+        }
+    }
+
+    private Vector3? FindNearestVillage(int px, int pz) {
+        const int sector = 448; // 14 чанков
+        int psx = (int)MathF.Floor((float)px / sector), psz = (int)MathF.Floor((float)pz / sector);
+        Vector3? best = null; float bestDist = float.MaxValue;
+        for (int dx = -8; dx <= 8; dx++) for (int dz = -8; dz <= 8; dz++) {
+            int sx = psx + dx, sz = psz + dz;
+            float seed = _mineshaftNoise.Get(sx * 31.73f + 123.456f, sz * 31.73f + 654.321f);
+            if (seed < 0.30f) continue;
+            var rng = new Random(_seed ^ (sx * 73856093) ^ (sz * 19349663));
+            int vx = sx * sector + rng.Next(24, sector - 24), vz = sz * sector + rng.Next(24, sector - 24);
+            var biome = GetBiome(vx, 50, vz);
+            if (biome == BiomeType.Desert || biome == BiomeType.Ocean || biome == BiomeType.Beach ||
+                biome == BiomeType.River || biome == BiomeType.Swamp) continue;
+            if (SurfaceHeight(vx, vz) < SeaLevel + 3) continue;
+            float d = (vx - px) * (vx - px) + (vz - pz) * (vz - pz);
+            if (d < bestDist) { bestDist = d; best = new Vector3(vx + 0.5f, SurfaceHeight(vx, vz), vz + 0.5f); }
+        }
+        return best;
+    }
+
+    private Vector3? FindNearestRuinedPortal(int px, int pz) {
+        const int sector = 320;
+        int psx = (int)MathF.Floor((float)px / sector), psz = (int)MathF.Floor((float)pz / sector);
+        Vector3? best = null; float bestDist = float.MaxValue;
+        for (int dx = -10; dx <= 10; dx++) for (int dz = -10; dz <= 10; dz++) {
+            int sx = psx + dx, sz = psz + dz;
+            float seed = _mineshaftNoise.Get(sx * 43.19f + 555.55f, sz * 43.19f + 777.77f);
+            if (seed < 0.70f) continue;
+            var rng = new Random(_seed ^ (sx * 458921) ^ (sz * 912837));
+            int vx = sx * sector + rng.Next(24, sector - 24), vz = sz * sector + rng.Next(24, sector - 24);
+            if (SurfaceHeight(vx, vz) <= SeaLevel + 2) continue;
+            float d = (vx - px) * (vx - px) + (vz - pz) * (vz - pz);
+            if (d < bestDist) { bestDist = d; best = new Vector3(vx + 0.5f, SurfaceHeight(vx, vz), vz + 0.5f); }
+        }
+        return best;
+    }
+
+    private Vector3? FindNearestDungeon(int px, int pz) {
+        const int sector = 512;
+        int psx = (int)MathF.Floor((float)px / sector), psz = (int)MathF.Floor((float)pz / sector);
+        Vector3? best = null; float bestDist = float.MaxValue;
+        for (int dx = -8; dx <= 8; dx++) for (int dz = -8; dz <= 8; dz++) {
+            int sx = psx + dx, sz = psz + dz;
+            float seed = _mineshaftNoise.Get(sx * 23.45f + 111f, sz * 23.45f + 222f);
+            if (seed < 0.70f) continue;
+            var rng = new Random(_seed ^ (sx * 928374) ^ (sz * 123891));
+            int cx = sx * sector + rng.Next(64, sector - 64), cz = sz * sector + rng.Next(64, sector - 64);
+            int cy = 14 + Math.Abs((sx * 37 + sz * 19) % 18);
+            if (cy > 38) continue;
+            float d = (cx - px) * (cx - px) + (cz - pz) * (cz - pz);
+            if (d < bestDist) { bestDist = d; best = new Vector3(cx + 0.5f, cy + 0.5f, cz + 0.5f); }
+        }
+        return best;
+    }
+
+    private Vector3? FindNearestPyramid(int px, int pz) {
+        const int sector = 512;
+        int psx = (int)MathF.Floor((float)px / sector), psz = (int)MathF.Floor((float)pz / sector);
+        Vector3? best = null; float bestDist = float.MaxValue;
+        for (int dx = -8; dx <= 8; dx++) for (int dz = -8; dz <= 8; dz++) {
+            int sx = psx + dx, sz = psz + dz;
+            float seed = _mineshaftNoise.Get(sx * 42.1f + 123f, sz * 42.1f + 321f);
+            if (seed < 0.85f) continue;
+            var rng = new Random(_seed ^ (sx * 49281) ^ (sz * 89123));
+            int cx = sx * sector + rng.Next(64, sector - 64), cz = sz * sector + rng.Next(64, sector - 64);
+            if (GetBiome(cx, 40, cz) != BiomeType.Desert) continue;
+            if (SurfaceHeight(cx, cz) <= SeaLevel + 2) continue;
+            float d = (cx - px) * (cx - px) + (cz - pz) * (cz - pz);
+            if (d < bestDist) { bestDist = d; best = new Vector3(cx + 0.5f, SurfaceHeight(cx, cz), cz + 0.5f); }
+        }
+        return best;
+    }
+
+    private Vector3? FindNearestMineshaft(int px, int pz) {
+        const int sector = 128;
+        int psx = (int)MathF.Floor((float)px / sector), psz = (int)MathF.Floor((float)pz / sector);
+        Vector3? best = null; float bestDist = float.MaxValue;
+        for (int dx = -20; dx <= 20; dx++) for (int dz = -20; dz <= 20; dz++) {
+            int sx = psx + dx, sz = psz + dz;
+            float seed = _mineshaftNoise.Get(sx * 17.3f + 100f, sz * 17.3f + 100f);
+            if (seed < 0.78f) continue;
+            int cx = sx * sector + 64, cz = sz * sector + 64;
+            float d = (cx - px) * (cx - px) + (cz - pz) * (cz - pz);
+            if (d < bestDist) { bestDist = d; best = new Vector3(cx + 0.5f, 18f, cz + 0.5f); }
+        }
+        return best;
     }
 
     // ── Крепости Энда (strongholds) в обычном мире ─────────────────────────────
@@ -383,9 +535,10 @@ public sealed class WorldGenerator {
                         var biome = GetBiome(wx, BaseHeight, wz);
                         bool isForest = biome == BiomeType.Forest;
                         bool isPlains = biome == BiomeType.Plains;
-                        if (isForest || isPlains) {
-                            // Оптимизированная естественная плотность 2D-травы (-60% от исходного, кластерами)
-                            float chance = isPlains ? 0.22f : 0.12f;
+                        bool isSavanna = biome == BiomeType.Savanna;
+                        if (isForest || isPlains || isSavanna) {
+                            // Оптимизированная естественная плотность 2D-травы (кластерами)
+                            float chance = isSavanna ? 0.30f : isPlains ? 0.22f : 0.12f;
                             if (fNoise < chance && ((wx * 19 + wz * 37) % 4 == 0)) {
                                 var vx = MakeVoxel(GameData.BTallGrass.Id);
                                 chunk.SetVoxel(idx, in vx);
@@ -614,8 +767,10 @@ public sealed class WorldGenerator {
                         var biome = GetBiome(wx, BaseHeight, wz);
                         if (biome == BiomeType.Plains) {
                             if (n < 0.88f) continue; // Редкие одиночные деревья на равнинах
-                        } else if (biome != BiomeType.Forest) {
-                            continue;
+                        } else if (biome == BiomeType.Savanna) {
+                            if (n < 0.78f) continue; // Саванна: редкие раскидистые деревья
+                        } else if (biome != BiomeType.Forest && biome != BiomeType.Swamp) {
+                            continue; // Лес и болото — полная плотность деревьев
                         }
 
                         int surface = SurfaceHeight(wx, wz);
@@ -685,7 +840,8 @@ public sealed class WorldGenerator {
         if (centerSurface < SeaLevel + 3) return; // не в воде/пляже
         var centerBiome = GetBiome(villageWX, BaseHeight, villageWZ);
         if (centerBiome == BiomeType.Desert || centerBiome == BiomeType.Ocean ||
-            centerBiome == BiomeType.Beach || centerBiome == BiomeType.River) return;
+            centerBiome == BiomeType.Beach || centerBiome == BiomeType.River ||
+            centerBiome == BiomeType.Swamp) return;
 
         // 1. Центральный колодец деревни (Village Town Well)
         PlaceVillageWell(chunk, ox, oz, villageWX, villageWZ);
@@ -1380,6 +1536,39 @@ public sealed class WorldGenerator {
             SetWorldBlock(chunk, ox, oy, oz, px, topY + 1, pz + 1, 0);
             SetWorldBlock(chunk, ox, oy, oz, px + 1, topY + 1, pz + 1, 0);
             SetWorldBlock(chunk, ox, oy, oz, px, topY + 2, pz, 0);
+        }
+    }
+
+    /// <summary>
+    /// Тайное измерение «Бездна»: парящая тёмная обсидиановая платформа в пустоте
+    /// под Эндом. В центре — алтарь-врата, куда вставляется Ключ Бездны.
+    /// Попасть сюда можно, выжив при падении в пустоту Энда.
+    /// </summary>
+    public void GenerateVoidChunk(Chunk chunk, int ox, int oy, int oz) {
+        const int platformRadius = 26;
+        for (int lx = 0; lx < Chunk.SizeX; lx++) {
+            for (int lz = 0; lz < Chunk.SizeZ; lz++) {
+                int wx = ox + lx, wz = oz + lz;
+                float dist = MathF.Sqrt(wx * wx + wz * wz);
+                for (int ly = 0; ly < Chunk.SizeY; ly++) {
+                    int wy = oy + ly;
+                    ushort blockId = 0;
+
+                    // Тёмная платформа: сверху ровная, края сходят на конус в пустоту
+                    if (dist <= platformRadius) {
+                        float bottom = 14f + dist * 0.22f;
+                        if (wy >= bottom && wy <= 20) {
+                            blockId = (wy == 20) ? GameData.BEndStone.Id : GameData.BObsidian.Id;
+                        }
+                    }
+
+                    // Алтарь-врата в центре платформы (постамент + светящиеся врата)
+                    if (MathF.Abs(wx) <= 2 && MathF.Abs(wz) <= 2 && wy >= 21 && wy <= 22) blockId = GameData.BObsidian.Id;
+                    if (wx == 0 && wz == 0 && wy == 23) blockId = GameData.BVoidGate.Id;
+
+                    chunk.SetVoxel(Chunk.Index(lx, ly, lz), MakeVoxel(blockId));
+                }
+            }
         }
     }
 

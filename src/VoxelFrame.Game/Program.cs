@@ -35,6 +35,11 @@ internal static class Program {
 
     private static int Main(string[] args) {
         if (args.Contains("--smoke")) return SmokeTest.Run();
+        if (args.Contains("--export-textures")) {
+            // Генерирует недостающие файлы текстур в assets/ (для тайлов без файла).
+            TextureAtlas.GenerateDefaultTextures(forceOverwrite: false);
+            return 0;
+        }
         AppDomain.CurrentDomain.UnhandledException += (_, e) => FlushCrashLog(e.ExceptionObject as Exception);
 
         string? autoshotFile = null;
@@ -550,6 +555,11 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.StoneShovelItem.Id, TextureAtlas.TShovelStone);
         TextureAtlas.SetItemTile(GameData.IronShovelItem.Id, TextureAtlas.TShovelIron);
         TextureAtlas.SetItemTile(GameData.DiamondShovelItem.Id, TextureAtlas.TShovelDiamond);
+        TextureAtlas.SetItemTile(GameData.GoldPickaxeItem.Id, TextureAtlas.TPickaxeGold);
+        TextureAtlas.SetItemTile(GameData.GoldAxeItem.Id, TextureAtlas.TAxeGold);
+        TextureAtlas.SetItemTile(GameData.GoldSwordItem.Id, TextureAtlas.TSwordGold);
+        TextureAtlas.SetItemTile(GameData.GoldShovelItem.Id, TextureAtlas.TShovelGold);
+        TextureAtlas.SetItemTile(GameData.GoldHoeItem.Id, TextureAtlas.THoeGold);
 
         // Дроп мобов и новые предметы
         TextureAtlas.SetItemTile(GameData.FeatherItem.Id, TextureAtlas.TFeather);
@@ -632,6 +642,7 @@ internal static class Program {
         TextureAtlas.SetBlockTiles(GameData.BEnderCrystal.Id, TextureAtlas.TEnderCrystal, TextureAtlas.TEnderCrystal, TextureAtlas.TEnderCrystal);
         TextureAtlas.SetBlockTiles(GameData.BChorusPlant.Id, TextureAtlas.TChorusPlant, TextureAtlas.TChorusPlant, TextureAtlas.TChorusPlant);
         TextureAtlas.SetBlockTiles(GameData.BChorusFlower.Id, TextureAtlas.TChorusFlower, TextureAtlas.TChorusFlower, TextureAtlas.TChorusFlower);
+        TextureAtlas.SetBlockTiles(GameData.BVoidGate.Id, TextureAtlas.TVoidGate, TextureAtlas.TVoidGate, TextureAtlas.TVoidGate);
         TextureAtlas.SetItemTile(GameData.EnderPearlItem.Id, TextureAtlas.TEnderPearl);
         TextureAtlas.SetItemTile(GameData.EyeOfEnderItem.Id, TextureAtlas.TEyeOfEnder);
         TextureAtlas.SetItemTile(GameData.BlazePowderItem.Id, TextureAtlas.TBlazePowder);
@@ -640,5 +651,9 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.EndStoneItem.Id, TextureAtlas.TEndStone);
         TextureAtlas.SetItemTile(GameData.EndPortalFrameItem.Id, TextureAtlas.TEndPortalFrame);
         TextureAtlas.SetItemTile(GameData.EnderCrystalItem.Id, TextureAtlas.TEnderCrystal);
+        TextureAtlas.SetItemTile(GameData.NetherArtifactItem.Id, TextureAtlas.TNetherArtifact);
+        TextureAtlas.SetItemTile(GameData.SwampArtifactItem.Id, TextureAtlas.TSwampArtifact);
+        TextureAtlas.SetItemTile(GameData.DesertArtifactItem.Id, TextureAtlas.TDesertArtifact);
+        TextureAtlas.SetItemTile(GameData.VoidKeyItem.Id, TextureAtlas.TVoidKey);
     }
 }

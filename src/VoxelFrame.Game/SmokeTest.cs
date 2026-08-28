@@ -426,11 +426,11 @@ internal static class SmokeTest {
         Check(!zombie.Alive, "зомби погиб");
         Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.RottenFleshItem.Id), "с зомби выпала гнилая плоть");
 
-        // 2. Дроп Крипера: порох
-        var creeper = new HostileMob(HostileType.Creeper, s.Player.Eye + s.Player.Forward * 2f);
-        w.HostileMobs.Add(creeper);
-        creeper.TakeDamage(100f, w, s);
-        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.GunpowderItem.Id), "с крипера выпал порох");
+        // 2. Дроп Бабахера: порох
+        var babakher = new HostileMob(HostileType.Babakher, s.Player.Eye + s.Player.Forward * 2f);
+        w.HostileMobs.Add(babakher);
+        babakher.TakeDamage(100f, w, s);
+        Check(w.Pickups.Any(p => p.Item.Definition.Id == GameData.GunpowderItem.Id), "с бабахера выпал порох");
 
         // 3. Дроп Скелета: стрелы и кости
         var skeleton = new HostileMob(HostileType.Skeleton, s.Player.Eye + s.Player.Forward * 2f);

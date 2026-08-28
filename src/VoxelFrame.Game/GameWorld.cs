@@ -68,6 +68,8 @@ public sealed partial class GameWorld : IDisposable {
                 Generator.GenerateNetherChunk(core, cc.X * Chunk.SizeX, cc.Y * Chunk.SizeY, cc.Z * Chunk.SizeZ);
             } else if (Dimension == Dimension.End) {
                 Generator.GenerateEndChunk(core, cc.X * Chunk.SizeX, cc.Y * Chunk.SizeY, cc.Z * Chunk.SizeZ);
+            } else if (Dimension == Dimension.Void) {
+                Generator.GenerateVoidChunk(core, cc.X * Chunk.SizeX, cc.Y * Chunk.SizeY, cc.Z * Chunk.SizeZ);
             } else {
                 Generator.GenerateChunk(core);
             }
@@ -427,6 +429,21 @@ public sealed partial class GameWorld : IDisposable {
             if (rng.NextDouble() < 0.30) Add(GameData.StonePickaxeItem, 1);
             if (rng.NextDouble() < 0.20) Add(GameData.IronIngotItem, rng.Next(1, 2));
         }
+
+        // Страж пустыни пробуждается при первом открытии сундука в пирамиде (Пустыня)
+        if (!DesertBossSpawned && Generator.GetBiome(pos.X, pos.Y, pos.Z) == BiomeType.Desert) {
+            var spawnPos = new Vector3(pos.X + 3.5f, pos.Y + 1f, pos.Z + 3.5f);
+            for (int dy = 0; dy < 6; dy++) {
+                var foot = new Vec3i(pos.X + 3, pos.Y + dy, pos.Z + 3);
+                if (!IsSolidAt(foot) && IsSolidAt(foot + new Vec3i(0, -1, 0))) {
+                    spawnPos = new Vector3(pos.X + 3.5f, pos.Y + dy + 0.5f, pos.Z + 3.5f);
+                    break;
+                }
+            }
+            SpawnMiniBoss(HostileType.DesertGuardian, spawnPos);
+            session?.AddMessage("Из песка поднимается Страж пустыни!");
+        }
+
         Chests[pos] = newInv;
         return newInv;
     }
@@ -1054,6 +1071,17 @@ public sealed partial class GameWorld : IDisposable {
     private void TrySpawnHostileNearPlayer(Player player, GameSession session) {
         var pPos = player.Position;
         float skyFactor = session.DayNight.SkyFactor;
+
+        // Болотный страж просыпается ночью, когда игрок впервые заходит в болото
+        if (!SwampBossSpawned && Dimension == Dimension.Overworld && skyFactor < 0.4f &&
+            Generator.GetBiome((int)MathF.Floor(pPos.X), 50, (int)MathF.Floor(pPos.Z)) == BiomeType.Swamp) {
+            var gPos = new Vector3(pPos.X + 5f, pPos.Y, pPos.Z + 5f);
+            var foot = new Vec3i((int)MathF.Floor(gPos.X), (int)MathF.Floor(gPos.Y), (int)MathF.Floor(gPos.Z));
+            if (!IsSolidAt(foot)) {
+                SpawnMiniBoss(HostileType.SwampGuardian, gPos);
+                session.AddMessage("Из тёмной воды поднимается Болотный страж!");
+            }
+        }
 
         for (int attempt = 0; attempt < 8; attempt++) {
             float angle = (float)_random.NextDouble() * MathF.Tau;
