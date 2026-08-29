@@ -85,15 +85,26 @@ namespace VoxelFrame.Game;
                     bool isFluid = v.TypeId == GameData.BWater.Id || v.TypeId == GameData.BLava.Id;
                     bool isWater = v.TypeId == GameData.BWater.Id;
                     bool isFoliage = v.TypeId == GameData.BTallGrass.Id || v.TypeId == GameData.BWheatCrop.Id;
-                    bool isTranslucent = isFluid || isFoliage || GameData.IsDoor(v.TypeId) || v.TypeId == GameData.BGlass.Id || v.TypeId == GameData.BBed.Id || v.TypeId == GameData.BBedHead.Id
+                    bool isTranslucent = (isFluid && isWater) || isFoliage || GameData.IsDoor(v.TypeId) || v.TypeId == GameData.BGlass.Id || v.TypeId == GameData.BBed.Id || v.TypeId == GameData.BBedHead.Id
                         || v.TypeId == GameData.BNetherPortal.Id || v.TypeId == GameData.BEndPortal.Id;
                     if (pass == 0 && isTranslucent) continue;
                     if (pass == 1 && !isTranslucent) continue;
 
                     if (isFoliage) {
-                        byte foliageTile = v.TypeId == GameData.BTallGrass.Id
-                            ? (byte)TextureAtlas.TTallGrass
-                            : (byte)(TextureAtlas.TWheatCrop0 + Math.Clamp((int)v.SubGridLayerMask, 0, 3));
+                        byte foliageTile;
+                        if (v.TypeId == GameData.BTallGrass.Id) {
+                            int wx = gc.Coord.X * Chunk.SizeX + lx;
+                            int wz = gc.Coord.Z * Chunk.SizeZ + lz;
+                            var biome = world.Generator.GetBiome(wx, 40, wz);
+                            foliageTile = biome switch {
+                                BiomeType.Plains => (byte)TextureAtlas.TTallGrassPlains,
+                                BiomeType.Savanna => (byte)TextureAtlas.TTallGrassSavanna,
+                                BiomeType.Swamp => (byte)TextureAtlas.TTallGrassSwamp,
+                                _ => (byte)TextureAtlas.TTallGrass
+                            };
+                        } else {
+                            foliageTile = (byte)(TextureAtlas.TWheatCrop0 + Math.Clamp((int)v.SubGridLayerMask, 0, 3));
+                        }
                         
                         var (u0, v0, u1, v1) = TileUv(foliageTile);
                         var (sun, blockL) = GetFaceLight(neighbors, gc, lx, ly, lz, 0, 0, 0);
@@ -238,9 +249,16 @@ namespace VoxelFrame.Game;
                     if (isFluid) {
                         ushort aboveType = GetTypeIdAtOffset(neighbors, gc, lx, ly, lz, 0, 1, 0);
                         float selfH = (aboveType == v.TypeId) ? 1.0f : GetFluidHeight(v.TypeId, v.SubGridLayerMask);
-                        byte fluidTile = (byte)(isWater ? TextureAtlas.TWater : TextureAtlas.TLava);
+                        int wx = gc.Coord.X * Chunk.SizeX + lx;
+                        int wz = gc.Coord.Z * Chunk.SizeZ + lz;
+                        var biome = world.Generator.GetBiome(wx, 40, wz);
+                        byte fluidTile = (byte)(isWater
+                            ? (biome == BiomeType.Swamp ? TextureAtlas.TWaterSwamp : TextureAtlas.TWater)
+                            : TextureAtlas.TLava);
                         var (u0, v0, u1, v1) = TileUv(fluidTile);
-                        byte alpha = isWater ? (byte)210 : (byte)255;
+                        byte alpha = isWater
+                            ? (biome == BiomeType.Swamp ? (byte)235 : (byte)210)
+                            : (byte)255;
 
                         float worldOffsetX = gc.Coord.X * Chunk.SizeX;
                         float worldOffsetY = gc.Coord.Y * Chunk.SizeY;
@@ -396,7 +414,37 @@ namespace VoxelFrame.Game;
 
                         int baseVertex = verts.Count / 3;
                         byte tile = GetRotatedFaceTile(tiles, v.TypeId, v.SubGridLayerMask, f);
-                        var (sun, blockL) = GetFaceLight(neighbors, gc, lx, ly, lz, dx, dy, dz);
+                        if (v.TypeId == GameData.BLeaves.Id) {
+                            int wx = gc.Coord.X * Chunk.SizeX + lx;
+                            int wz = gc.Coord.Z * Chunk.SizeZ + lz;
+                            var biome = world.Generator.GetBiome(wx, 40, wz);
+                            tile = biome switch {
+                                BiomeType.Plains => TextureAtlas.TLeavesPlains,
+                                BiomeType.Savanna => TextureAtlas.TLeavesSavanna,
+                                BiomeType.Swamp => TextureAtlas.TLeavesSwamp,
+                                _ => TextureAtlas.TLeaves
+                            };
+                        } else if (v.TypeId == GameData.BGrass.Id) {
+                            int wx = gc.Coord.X * Chunk.SizeX + lx;
+                            int wz = gc.Coord.Z * Chunk.SizeZ + lz;
+                            var biome = world.Generator.GetBiome(wx, 40, wz);
+                            if (f == 2) { // Верх (+Y)
+                                tile = biome switch {
+                                    BiomeType.Plains => (byte)TextureAtlas.TGrassTopPlains,
+                                    BiomeType.Savanna => (byte)TextureAtlas.TGrassTopSavanna,
+                                    BiomeType.Swamp => (byte)TextureAtlas.TGrassTopSwamp,
+                                    _ => (byte)TextureAtlas.TGrassTop
+                                };
+                            } else if (f != 3) { // Бока (±X, ±Z)
+                                tile = biome switch {
+                                    BiomeType.Plains => (byte)TextureAtlas.TGrassSidePlains,
+                                    BiomeType.Savanna => (byte)TextureAtlas.TGrassSideSavanna,
+                                    BiomeType.Swamp => (byte)TextureAtlas.TGrassSideSwamp,
+                                    _ => (byte)TextureAtlas.TGrassSide
+                                };
+                            }
+                        }
+                        var (faceSun, faceBlockL) = GetFaceLight(neighbors, gc, lx, ly, lz, dx, dy, dz);
                         var (u0, v0, u1, v1) = TileUv(tile);
                         float worldOffsetX = gc.Coord.X * Chunk.SizeX;
                         float worldOffsetY = gc.Coord.Y * Chunk.SizeY;
@@ -409,10 +457,19 @@ namespace VoxelFrame.Game;
                         };
                         byte shadeDir = (byte)(255f * faceDir);
 
-                        foreach (var (fx, fy, fz, fu, fv) in FaceVerts[f]) {
-                            float ao = (SaveSystem.FancyGraphics && !isFluid) ? GetVertexAO(neighbors, gc, lx, ly, lz, f, fx, fy, fz) : 1.0f;
-                            byte shadeSun = (byte)(255f * sun * ao);
-                            byte shadeBlock = (byte)(255f * blockL * ao);
+                        bool useSmooth = SaveSystem.FancyGraphics && !isFluid;
+                        float[] cornerLightSums = new float[4];
+
+                        for (int vi = 0; vi < 4; vi++) {
+                            var (fx, fy, fz, fu, fv) = FaceVerts[f][vi];
+                            float ao = useSmooth ? GetVertexAO(neighbors, gc, lx, ly, lz, f, fx, fy, fz) : 1.0f;
+                            var (vSun, vBlock) = useSmooth
+                                ? GetVertexSmoothLight(neighbors, gc, lx, ly, lz, f, fx, fy, fz, faceSun, faceBlockL)
+                                : (faceSun, faceBlockL);
+
+                            cornerLightSums[vi] = (vSun + vBlock) * ao;
+                            byte shadeSun = (byte)(255f * vSun * ao);
+                            byte shadeBlock = (byte)(255f * vBlock * ao);
 
                             float actualFy = fy;
                             if ((v.TypeId == GameData.BBed.Id || v.TypeId == GameData.BBedHead.Id) && fy > 0.5f) {
@@ -438,14 +495,26 @@ namespace VoxelFrame.Game;
                             uvs.Add(v0 + (v1 - v0) * actualFv);
                             cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(shadeDir); cols.Add((byte)255);
                         }
-                        indices.Add((ushort)(baseVertex + 0));
-                        indices.Add((ushort)(baseVertex + 1));
-                        indices.Add((ushort)(baseVertex + 2));
-                        indices.Add((ushort)(baseVertex + 0));
-                        indices.Add((ushort)(baseVertex + 2));
-                        indices.Add((ushort)(baseVertex + 3));
-                    }                    }
+
+                        // Умная триангуляция для предотвращения анизотропных срезов освещения
+                        if (cornerLightSums[0] + cornerLightSums[2] > cornerLightSums[1] + cornerLightSums[3]) {
+                            indices.Add((ushort)(baseVertex + 0));
+                            indices.Add((ushort)(baseVertex + 1));
+                            indices.Add((ushort)(baseVertex + 2));
+                            indices.Add((ushort)(baseVertex + 0));
+                            indices.Add((ushort)(baseVertex + 2));
+                            indices.Add((ushort)(baseVertex + 3));
+                        } else {
+                            indices.Add((ushort)(baseVertex + 1));
+                            indices.Add((ushort)(baseVertex + 2));
+                            indices.Add((ushort)(baseVertex + 3));
+                            indices.Add((ushort)(baseVertex + 0));
+                            indices.Add((ushort)(baseVertex + 1));
+                            indices.Add((ushort)(baseVertex + 3));
+                        }
+                    }
                 }
+            }
             }
             Flush();
         }
@@ -603,11 +672,11 @@ namespace VoxelFrame.Game;
     }
 
     /// <summary>
-    /// Заслоняет ли блок грань соседа. Жидкости (вода/лава) НЕ заслоняют:
-    /// грань блока должна быть видна сквозь них, иначе блок «исчезает» у лавы.
+    /// Заслоняет ли блок грань соседа. Вода НЕ заслоняет (полупрозрачна),
+    /// лава и твёрдые блоки — заслоняют.
     /// </summary>
     private static bool IsFaceOccluding(ushort typeId) {
-        if (typeId == 0 || typeId == GameData.BWater.Id || typeId == GameData.BLava.Id) return false;
+        if (typeId == 0 || typeId == GameData.BWater.Id) return false;
         return GameData.GetBlock(typeId).IsOpaque;
     }
 
@@ -675,6 +744,49 @@ namespace VoxelFrame.Game;
             2 => 0.48f,
             _ => 0.28f,
         };
+    }
+
+    private static (float Sun, float Block) GetVertexSmoothLight(
+        GameChunk?[,,] neighbors, GameChunk gc, int lx, int ly, int lz,
+        int f, int fx, int fy, int fz, float faceSun, float faceBlockL) {
+        var (dx, dy, dz, _, _, _) = Faces[f];
+
+        int offA = 0, offB = 0;
+        int taxX = 0, taxY = 0, taxZ = 0;
+        int tbxX = 0, tbyY = 0, tbzZ = 0;
+
+        if (dx != 0) {
+            offA = (fy == 0) ? -1 : 1;
+            offB = (fz == 0) ? -1 : 1;
+            taxY = 1;
+            tbzZ = 1;
+        } else if (dy != 0) {
+            offA = (fx == 0) ? -1 : 1;
+            offB = (fz == 0) ? -1 : 1;
+            taxX = 1;
+            tbzZ = 1;
+        } else if (dz != 0) {
+            offA = (fx == 0) ? -1 : 1;
+            offB = (fy == 0) ? -1 : 1;
+            taxX = 1;
+            tbyY = 1;
+        }
+
+        int dx1 = dx + offA * taxX, dy1 = dy + offA * taxY, dz1 = dz + offA * taxZ;
+        int dx2 = dx + offB * tbxX, dy2 = dy + offB * tbyY, dz2 = dz + offB * tbzZ;
+        int dx3 = dx + offA * taxX + offB * tbxX, dy3 = dy + offA * taxY + offB * tbyY, dz3 = dz + offA * taxZ + offB * tbzZ;
+
+        bool s1Solid = IsSolidAtOffset(neighbors, gc, lx, ly, lz, dx1, dy1, dz1);
+        bool s2Solid = IsSolidAtOffset(neighbors, gc, lx, ly, lz, dx2, dy2, dz2);
+
+        var l1 = GetFaceLight(neighbors, gc, lx, ly, lz, dx1, dy1, dz1);
+        var l2 = GetFaceLight(neighbors, gc, lx, ly, lz, dx2, dy2, dz2);
+        var l3 = (s1Solid && s2Solid) ? (faceSun, faceBlockL) : GetFaceLight(neighbors, gc, lx, ly, lz, dx3, dy3, dz3);
+
+        float totalSun = faceSun + l1.Sun + l2.Sun + l3.Item1;
+        float totalBlock = faceBlockL + l1.Block + l2.Block + l3.Item2;
+
+        return (totalSun * 0.25f, totalBlock * 0.25f);
     }
 
     private static byte GetRotatedFaceTile(in TextureAtlas.BlockFaceTiles tiles, ushort typeId, byte facing, int f) {

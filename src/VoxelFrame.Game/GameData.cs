@@ -226,6 +226,11 @@ public static class GameData {
     public static readonly ItemDefinition DesertArtifactItem = Item(111, "Пустынный артефакт", SandM);
     public static readonly ItemDefinition VoidKeyItem = Item(112, "Ключ Бездны", ObsidianM, maxStack: 1);
 
+    // Тотемы призыва хранителей артефактов
+    public static readonly ItemDefinition NetherTotemItem = Item(113, "Тотем Пламени", ObsidianM, maxStack: 16);
+    public static readonly ItemDefinition DesertTotemItem = Item(114, "Тотем Песков", SandM, maxStack: 16);
+    public static readonly ItemDefinition SwampTotemItem = Item(115, "Тотем Топей", OrganicM, maxStack: 16);
+
     // ── Блоки ─────────────────────────────────────────────────────────────────
     public static readonly BlockType BGrass = Block(1, "Трава", DirtM, drop: DirtItem);
     public static readonly BlockType BDirt = Block(2, "Земля", DirtM, drop: DirtItem);
@@ -594,34 +599,7 @@ public static class GameData {
     }
 
     static GameData() {
-        _blockByItem[DirtItem.Id] = BDirt.Id;
-        _blockByItem[StoneItem.Id] = BStone.Id;
-        _blockByItem[LogItem.Id] = BLog.Id;
-        _blockByItem[PlankItem.Id] = BPlanks.Id;
-        _blockByItem[CoalOreItem.Id] = BCoalOre.Id;
-        _blockByItem[TorchItem.Id] = BTorch.Id;
-        _blockByItem[IronOreItem.Id] = BIronOre.Id;
-        _blockByItem[GoldOreItem.Id] = BGoldOre.Id;
-        _blockByItem[DiamondOreItem.Id] = BDiamondOre.Id;
-        _blockByItem[SandItem.Id] = BSand.Id;
-        _blockByItem[GravelItem.Id] = BGravel.Id;
-        _blockByItem[CobblestoneItem.Id] = BCobblestone.Id;
-        _blockByItem[GlassItem.Id] = BGlass.Id;
-        _blockByItem[ObsidianItem.Id] = BObsidian.Id;
-        _blockByItem[WorkbenchItem.Id] = BWorkbench.Id;
-        _blockByItem[FurnaceItem.Id] = BFurnace.Id;
-        _blockByItem[ChestItem.Id] = BChest.Id;
-        _blockByItem[BedItem.Id] = BBed.Id;
-        _blockByItem[TNTItem.Id] = BTNT.Id;
-        _blockByItem[NetherrackItem.Id] = BNetherrack.Id;
-        _blockByItem[SoulSandItem.Id] = BSoulSand.Id;
-        _blockByItem[GlowstoneItem.Id] = BGlowstone.Id;
-        _blockByItem[NetherQuartzOreItem.Id] = BNetherQuartzOre.Id;
-        _blockByItem[NetherBrickItem.Id] = BNetherBrick.Id;
-        _blockByItem[MossyCobblestoneItem.Id] = BMossyCobblestone.Id;
-        _blockByItem[ChiseledSandstoneItem.Id] = BChiseledSandstone.Id;
-        _blockByItem[RailItem.Id] = BRail.Id;
-        _blockByItem[DoorItem.Id] = BDoorLower.Id;
+        // Дополнительные записи, отсутствующие в inline-инициализации
         _blockByItem[EndStoneItem.Id] = BEndStone.Id;
         _blockByItem[EndPortalFrameItem.Id] = BEndPortalFrame.Id;
         _blockByItem[EnderCrystalItem.Id] = BEnderCrystal.Id;
@@ -914,6 +892,42 @@ public static class GameData {
 
         // Каша из опилок: 2 опилки + 1 доска + 1 семена пшеницы
         AddShapeRecipe(new ItemDefinition?[] { SawdustItem, SawdustItem, null, PlankItem, WheatSeedsItem, null, null, null, null }, SawdustPorridgeItem, 1);
+
+        // Тотем Пламени (призыв Владыки Незера в Аду): 2 стержня ифрита + 1 уголь + 1 золото
+        AddShapeRecipe(new ItemDefinition?[] {
+            BlazeRodItem, GoldIngotItem, null,
+            CoalItem, BlazeRodItem, null,
+            null, null, null
+        }, NetherTotemItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] {
+            BlazeRodItem, BlazeRodItem, null,
+            GoldIngotItem, CoalItem, null,
+            null, null, null
+        }, NetherTotemItem, 1);
+
+        // Тотем Песков (призыв Стража Пустыни в Пустыне): 2 песка + 1 золото + 1 кремень
+        AddShapeRecipe(new ItemDefinition?[] {
+            SandItem, SandItem, null,
+            GoldIngotItem, FlintItem, null,
+            null, null, null
+        }, DesertTotemItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] {
+            SandItem, GoldIngotItem, null,
+            SandItem, FlintItem, null,
+            null, null, null
+        }, DesertTotemItem, 1);
+
+        // Тотем Топей (призыв Болотного Стража в Болоте): 2 нити + 1 древесный уголь + 1 кость
+        AddShapeRecipe(new ItemDefinition?[] {
+            StringItem, StringItem, null,
+            CharcoalItem, BoneItem, null,
+            null, null, null
+        }, SwampTotemItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] {
+            StringItem, StringItem, null,
+            CoalItem, BoneItem, null,
+            null, null, null
+        }, SwampTotemItem, 1);
 
         // Ключ Бездны: четыре артефакта мини-боссов (Энд, Ад, Болото, Пустыня)
         AddShapeRecipe(new ItemDefinition?[] {

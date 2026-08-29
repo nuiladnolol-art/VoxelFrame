@@ -126,13 +126,20 @@ public sealed class FluidEngine {
 
         // ── 1. Взаимодействие Вода <-> Лава ─────────────────────────────────────
         if (fluidId == GameData.BLava.Id) {
-            // Если лава касается любой воды со всех 6 сторон
+            // Лава стекает прямо на воду снизу -> вода превращается в камень
+            var downPos = pos + new Vec3i(0, -1, 0);
+            var downV = _world.GetVoxel(downPos);
+            if (downV.TypeId == GameData.BWater.Id) {
+                _world.PlacePlacedBlock(downPos, GameData.BStone);
+                SoundSystem.PlaySplash();
+                NotifyNeighbors(downPos);
+            }
+
+            // Если лава касается воды со стороны: текущая лава превращается в булыжник, источник — в обсидиан
             if (HasAdjacentFluid(pos, GameData.BWater.Id, out _)) {
                 if (currentLevel == 0) {
-                    // Источник лавы превращается в обсидиан
                     _world.PlacePlacedBlock(pos, GameData.BObsidian);
                 } else {
-                    // Текущая лава превращается в булыжник
                     _world.PlacePlacedBlock(pos, GameData.BCobblestone);
                 }
                 SoundSystem.PlaySplash();
@@ -152,13 +159,22 @@ public sealed class FluidEngine {
                 }
             }
         } else if (fluidId == GameData.BWater.Id) {
-            // Если сверху на воду течет лава
+            // Если сверху на воду течет лава -> камень
             var up = pos + new Vec3i(0, 1, 0);
             if (_world.GetVoxel(up).TypeId == GameData.BLava.Id) {
                 _world.PlacePlacedBlock(pos, GameData.BStone);
                 SoundSystem.PlaySplash();
                 NotifyNeighbors(pos);
                 return;
+            }
+
+            // Если вода течет на лаву снизу
+            var downPos = pos + new Vec3i(0, -1, 0);
+            var downV = _world.GetVoxel(downPos);
+            if (downV.TypeId == GameData.BLava.Id) {
+                _world.PlacePlacedBlock(downPos, downV.SubGridLayerMask == 0 ? GameData.BObsidian : GameData.BCobblestone);
+                SoundSystem.PlaySplash();
+                NotifyNeighbors(downPos);
             }
 
             // Если вода касается лавы сбоку: превращаем лаву в обсидиан (источник) или булыжник (поток)
@@ -194,8 +210,7 @@ public sealed class FluidEngine {
         // ── 3. Стекание вниз (вертикальный водопад / лавапад) ───────────────────
         Vec3i down = pos + new Vec3i(0, -1, 0);
         var downVox = _world.GetVoxel(down);
-        // В пустоте (ниже VoidY) падение прекращается — иначе вода в Энде,
-        // поставленная на столбе, падала бы в бездну бесконечно и вешала игру.
+        // В пустоте (ниже VoidY) падение прекращается
         bool canFlowDown = down.Y > FallingBlock.VoidY && CanFlowInto(downVox.TypeId);
 
         if (canFlowDown) {
@@ -203,18 +218,22 @@ public sealed class FluidEngine {
             _world.PlacePlacedBlock(down, GameData.GetBlock(fluidId), FallingLevel);
             ScheduleFluid(down, fluidId);
             NotifyNeighbors(down);
-            // Если жидкость может свободно падать вниз, она устремляется вниз без растекания в стороны
+            // Если жидкость свободно падает вниз, она НЕ растекается в стороны
             return;
         }
 
         // ── 4. Горизонтальное растекание ────────────────────────────────────────
-        // Эффективный уровень, от которого отталкиваемся при растекании.
-        // Источник (0) растекается на весь радиус. Упавшая жидкость — НЕ источник:
-        // она растекается лишь на 2-3 блока, иначе вода, поставленная на высоте,
-        // на каждом перепаде склона заново обнуляет дистанцию и разливается цунами.
+        // Жидкость растекается в стороны ТОЛЬКО если под ней твёрдый пол или стоячий водоём!
+        // В воздухе или над продолжающимся вертикальным столбом растекания в стороны быть НЕ ДОЛЖНО (иначе вырастает гигантский конус/пирамида).
+        bool hasFloor = _world.IsSolidAt(down) || (downVox.TypeId == fluidId && downVox.SubGridLayerMask == 0);
+        if (!hasFloor) {
+            return;
+        }
+
+        // Эффективный уровень, от которого отталкиваемся при растекании на полу.
         int spreadBaseLevel = currentLevel switch {
             0 => 0,
-            FallingLevel => Math.Max(1, maxDistance - 3),
+            FallingLevel => 0, // Столб водопада, ударившись о пол, растекается как от источника
             _ => currentLevel,
         };
 
@@ -278,9 +297,10 @@ public sealed class FluidEngine {
                     // Настоящий источник дает уровень 1
                     minParentLevel = Math.Min(minParentLevel, 0);
                 } else if (nLevel == FallingLevel) {
-                    // Падающий столб — НЕ источник: питает лишь ближайшие клетки,
-                    // иначе водопад на склоне разливался бы цунами (обнуление дистанции).
-                    minParentLevel = Math.Min(minParentLevel, Math.Max(1, maxDistance - 3));
+                    // Падающий столб питает горизонтальные клетки ТОЛЬКО если он ударился о пол
+                    if (_world.IsSolidAt(nPos + new Vec3i(0, -1, 0))) {
+                        minParentLevel = Math.Min(minParentLevel, 0);
+                    }
                 } else if (nLevel < currentLevel || currentLevel == FallingLevel) {
                     minParentLevel = Math.Min(minParentLevel, (int)nLevel);
                 }
@@ -294,17 +314,18 @@ public sealed class FluidEngine {
 
     private void CheckInfiniteWaterSource(Vec3i pos) {
         var vox = _world.GetVoxel(pos);
-        // Бесконечный источник может сформироваться только в пустой клетке или в текущей воде (level > 0)
-        if (vox.TypeId != 0 && (vox.TypeId != GameData.BWater.Id || vox.SubGridLayerMask == 0)) {
+        // Бесконечный источник может сформироваться только в пустой клетке или в горизонтально текущей воде (не в падающей и не в источнике)
+        if (vox.TypeId != 0 && (vox.TypeId != GameData.BWater.Id || vox.SubGridLayerMask == 0 || vox.SubGridLayerMask == FallingLevel)) {
             return;
         }
 
-        // Обязательное условие: опора снизу (твёрдый блок или блок воды)
+        // Обязательное условие: опора снизу — твёрдый блок ИЛИ полноценный неподвижный блок-источник
         var down = pos + new Vec3i(0, -1, 0);
         var downVox = _world.GetVoxel(down);
-        if (downVox.TypeId == 0) return;
+        bool hasSolidOrSourceBase = _world.IsSolidAt(down) || (downVox.TypeId == GameData.BWater.Id && downVox.SubGridLayerMask == 0);
+        if (!hasSolidOrSourceBase) return;
 
-        // Считаем соседние полноценные источники воды (level == 0)
+        // Считаем соседние полноценные горизонтальные источники воды (level == 0)
         var hDirs = new Vec3i[] {
             new(1, 0, 0), new(-1, 0, 0),
             new(0, 0, 1), new(0, 0, -1)

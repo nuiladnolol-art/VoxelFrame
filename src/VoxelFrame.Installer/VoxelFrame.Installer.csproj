@@ -9,7 +9,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <CodePage>65001</CodePage>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <Version>0.9.5</Version>
+    <Version>0.9.9</Version>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="payload.zip" Condition="Exists('payload.zip')" />

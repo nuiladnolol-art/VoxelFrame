@@ -1,4 +1,5 @@
 using System.Numerics;
+using Raylib_cs;
 using VoxelFrame.Core;
 using VoxelFrame.Core.Inventory;
 using VoxelFrame.Core.World;
@@ -36,6 +37,8 @@ public sealed partial class Player {
     public float SlotToastTimer;
     public string SlotToastText = "";
     public float EatTimer;
+    public float EatingTimer;
+    public float EatingSoundTimer;
     public float AttackTimer;
     /// <summary>Метка замаха (ЛКМ) — нужна для удара по эндер-кристаллу, который не ловится лучом.</summary>
     public float SwingMarker;
@@ -49,6 +52,7 @@ public sealed partial class Player {
     public float LavaBurnTimer;
     public float FireBurnTimer;
     public float DrownDamageTimer;
+    public float VoidDamageTimer;
     /// <summary>Урон от застревания в блоках.</summary>
     public float StuckTimer;
     public const float MaxHunger = 20f;
@@ -527,18 +531,31 @@ public sealed partial class Player {
             var dim = session.World.Dimension;
             if (dim == Dimension.End || dim == Dimension.Void) {
                 VoidFallTimer += dt;
-                if (VoidFallTimer >= 4f) {
+                VoidDamageTimer -= dt;
+                // Смертоносный урон Пустоты: 2.0 HP (1 сердце) каждые 0.333с = ровно 6.0 HP (3 сердца в секунду)
+                if (VoidDamageTimer <= 0f) {
+                    VoidDamageTimer = 0.333f;
+                    InvulnerabilityTimer = 0f;
+                    ApplyDamage(2.0f, session);
+                }
+                if (VoidFallTimer > 1.0f && VoidFallTimer < 1.4f) {
+                    session.ShowTitle("СМЕРТОНОСНАЯ ПУСТОТА", "Используйте Золотые яблоки и Тотемы бессмертия!", 3.5f, new Color(255, 40, 70, 255));
+                }
+
+                if (dim == Dimension.Void) {
+                    // В измерении Бездны при падении за край арены возвращаем на монолитный пол
+                    if (VoidFallTimer >= 0.8f) {
+                        VoidFallTimer = 0f;
+                        VoidDamageTimer = 0f;
+                        Position = new Vector3(0.5f, 13.5f, -14f);
+                        Velocity = Vector3.Zero;
+                        session.ShowTitle("ТЕМНОЕ ПРИТЯЖЕНИЕ", "Гравитация Бездны вернула вас на арену!", 3.0f, new Color(180, 60, 255, 255));
+                        SoundSystem.PlayThunder();
+                    }
+                } else if (VoidFallTimer >= 5.0f) {
                     VoidFallTimer = 0f;
-                    if (dim == Dimension.Void) {
-                        session.ReturnFromVoid();
-                    } else {
-                        session.EnterVoid();
-                    }
-                } else {
-                    ApplyDamage(4f * dt, session);
-                    if (VoidFallTimer > 2f && (int)(VoidFallTimer * 5f) % 3 == 0) {
-                        session.AddMessage("Пустота тянет вниз... Хилитесь или держите тотем!");
-                    }
+                    VoidDamageTimer = 0f;
+                    session.EnterVoid();
                 }
             } else {
                 ApplyDamage(MaxHealth * 2f, session);
@@ -546,6 +563,20 @@ public sealed partial class Player {
             }
         } else {
             VoidFallTimer = 0f;
+            VoidDamageTimer = 0f;
+        }
+
+        // Проверка обнаружения древнего Обелиска Края на побочном острове (+100, +100)
+        if (session.World.Dimension == Dimension.End && !session.EndLoreDiscovered) {
+            var toLoreAltar = Position - new Vector3(100.5f, 73f, 100.5f);
+            if (toLoreAltar.Length() < 6.5f) {
+                session.EndLoreDiscovered = true;
+                session.ShowTitle("ЗАБЫТЫЙ ОБЕЛИСК КРАЯ", "«Скоуй Ключ Бездны из Слизи Края и трёх реликвий...»", 6.0f, new Color(255, 215, 80, 255), new Color(255, 240, 180, 255));
+                session.AddMessage("§6[Забытый Обелиск Края]:");
+                session.AddMessage("§e«Соедини Слизь Края с тремя реликвиями (Ад, Болото, Пустыня), чтобы сковать Ключ Бездны...»");
+                session.AddMessage("§c«Но путь в Бездну лежит сквозь смертоносное падение в Пустоту (~3 сердца в секунду). Лишь вкусивший Золотые яблоки и запасшийся Тотемами достигнет пола из бедрока...»");
+                SoundSystem.PlayThunder();
+            }
         }
 
         // Проверка удушья под водой (дискретный урон 2 HP в секунду)
@@ -605,12 +636,13 @@ public sealed partial class Player {
         if (HurtTimer > 0f) HurtTimer = MathF.Max(0f, HurtTimer - dt);
         if (InvulnerabilityTimer > 0f) InvulnerabilityTimer = MathF.Max(0f, InvulnerabilityTimer - dt);
 
-        // 1. Атака сущностей (мобы/животные/босс) требует дискретного клика ЛКМ (AttackPressed)
+        // 1. Атака сущностей (мобы/животные/босс/истинный босс) требует дискретного клика ЛКМ (AttackPressed)
         Animal? targetedAnimal = null;
         HostileMob? targetedHostile = null;
         EndSlime? targetedBoss = null;
+        TrueEndSlime? targetedTrueBoss = null;
         float bestEntityDist = float.MaxValue;
-        const float EntityAttackReach = 3.0f;
+        const float EntityAttackReach = 3.2f;
 
         foreach (var a in world.Animals) {
             if (!a.Alive) continue;
@@ -638,6 +670,7 @@ public sealed partial class Player {
                     targetedHostile = m;
                     targetedAnimal = null;
                     targetedBoss = null;
+                    targetedTrueBoss = null;
                 }
             }
         }
@@ -653,6 +686,23 @@ public sealed partial class Player {
                     targetedBoss = boss;
                     targetedAnimal = null;
                     targetedHostile = null;
+                    targetedTrueBoss = null;
+                }
+            }
+        }
+
+        // Истинный босс Бездны (если жив)
+        if (world.TrueVoidBoss is { Alive: true } tBoss) {
+            var bMin = tBoss.Position - new Vector3(TrueEndSlime.HalfSizeXZ, TrueEndSlime.HalfSizeY, TrueEndSlime.HalfSizeXZ);
+            var bMax = tBoss.Position + new Vector3(TrueEndSlime.HalfSizeXZ, TrueEndSlime.HalfSizeY, TrueEndSlime.HalfSizeXZ);
+            if (RayAabb(Eye, Forward, bMin, bMax, out float tbt) && tbt < bestEntityDist && tbt <= EntityAttackReach + 1.0f) {
+                var hitPoint = Eye + Forward * MathF.Max(0.1f, tbt - 0.05f);
+                if (HostileMob.HasLineOfSight(world, Eye, hitPoint)) {
+                    bestEntityDist = tbt;
+                    targetedTrueBoss = tBoss;
+                    targetedBoss = null;
+                    targetedAnimal = null;
+                    targetedHostile = null;
                 }
             }
         }
@@ -661,14 +711,15 @@ public sealed partial class Player {
         SwingMarker = MathF.Max(0f, SwingMarker - dt);
         if (input.AttackPressed) SwingMarker = AttackCooldown;
 
-        if (input.AttackPressed && (targetedAnimal != null || targetedHostile != null || targetedBoss != null) && bestEntityDist <= EntityAttackReach) {
+        if (input.AttackPressed && (targetedAnimal != null || targetedHostile != null || targetedBoss != null || targetedTrueBoss != null) && bestEntityDist <= EntityAttackReach + 1.0f) {
             BreakTarget = new Vec3i(int.MinValue, int.MinValue, int.MinValue);
             BreakProgress = 0f;
             BreakDuration = 0f;
             if (targetedAnimal != null) AttackAnimal(world, session);
             else if (targetedHostile != null) AttackHostile(targetedHostile, world, session);
             else if (targetedBoss != null) AttackBoss(targetedBoss, world, session);
-        } else if ((input.AttackHeld || input.AttackPressed) && (targetedAnimal == null && targetedHostile == null && targetedBoss == null)) {
+            else if (targetedTrueBoss != null) AttackTrueBoss(targetedTrueBoss, world, session);
+        } else if ((input.AttackHeld || input.AttackPressed) && (targetedAnimal == null && targetedHostile == null && targetedBoss == null && targetedTrueBoss == null)) {
             // 2. Ломание блоков (в Креативе мгновенно любые блоки, включая бедрок, в Выживании по времени)
             if (hasTarget && GameData.TryGetBlock(world.GetVoxel(hit).TypeId, out var targetBlock)) {
                 if (session.GameMode == GameMode.Creative) {
@@ -722,7 +773,50 @@ public sealed partial class Player {
             }
         }
 
-        // Использование: установка блока или быстрое поедание (Alpha style).
+        // Поедание пищи с задержкой 1.6 сек при удержании ПКМ (как в Minecraft)
+        var heldFoodItem = SelectedEntry?.Item.Definition;
+        if (heldFoodItem != null && GameData.FoodValue.TryGetValue(heldFoodItem.Id, out float foodVal)) {
+            bool canEatFood = Hunger < MaxHunger || heldFoodItem.Id == GameData.GoldenAppleItem.Id;
+            if ((input.UseHeld || input.UsePressed) && canEatFood) {
+                EatingTimer += dt;
+                EatingSoundTimer += dt;
+                if (EatingSoundTimer >= 0.22f) {
+                    EatingSoundTimer = 0f;
+                    SoundSystem.PlayEat();
+                    world.SpawnCrit(Position + new Vector3(0f, 1.2f, 0f), 3);
+                }
+
+                if (EatingTimer >= 1.6f) {
+                    EatingTimer = 0f;
+                    if (TryConsumeSelected(heldFoodItem, 1)) {
+                        Hunger = MathF.Min(MaxHunger, Hunger + foodVal);
+                        Saturation = MathF.Min(Hunger, Saturation + foodVal * 0.6f);
+                        if (heldFoodItem.Id == GameData.GoldenAppleItem.Id) {
+                            Health = MathF.Min(MaxHealth, Health + 4f);
+                            InvulnerabilityTimer = 1.5f;
+                            session.ShowTitle("ЗОЛОТОЕ ЯБЛОКО", "+4 HP и благословение защиты!", 2.5f, new Color(255, 215, 0, 255));
+                        } else if (heldFoodItem.Id == GameData.RottenFleshItem.Id) {
+                            if (Random.Shared.NextDouble() < 0.80) {
+                                Exhaustion += 12.0f;
+                                session.AddMessage("Несвежая пища вызвала приступ голода!");
+                            }
+                        } else if (heldFoodItem.Id == GameData.ChorusFruitItem.Id) {
+                            TeleportRandomly(world);
+                            session.ShowTitle("ПЛОД ХОРУСА", "Пространственное смещение!", 2.0f, new Color(210, 120, 255, 255));
+                        }
+                        SoundSystem.PlayEat();
+                    }
+                }
+            } else {
+                EatingTimer = 0f;
+                EatingSoundTimer = 0f;
+            }
+        } else {
+            EatingTimer = 0f;
+            EatingSoundTimer = 0f;
+        }
+
+        // Использование: установка блока или быстрое взаимодействие.
         PlaceCooldown -= dt;
         bool wantUse = input.UsePressed || (input.UseHeld && PlaceCooldown <= 0f);
         if (wantUse) {
@@ -738,14 +832,16 @@ public sealed partial class Player {
                     session.Ui = UiState.Furnace;
                     wantUse = false;
                 } else if (targetVox.TypeId == GameData.BVoidGate.Id) {
-                    // Врата Бездны: вставить Ключ Бездны (только в измерении Бездны)
+                    // Врата Бездны / Алтарь: вставить Ключ Бездны (только в измерении Бездны)
                     var heldVoidKey = SelectedEntry?.Item.Definition;
                     if (heldVoidKey != null && heldVoidKey.Id == GameData.VoidKeyItem.Id && session.World.Dimension == Dimension.Void) {
-                        if (TryConsumeSelected(heldVoidKey, 1, session)) {
-                            session.GiveVoidReward();
-                            SoundSystem.PlayThunder();
+                        if (!world.VoidAltarTriggered && TryConsumeSelected(heldVoidKey, 1, session)) {
+                            session.TriggerVoidAltarEncounter();
                             wantUse = false;
                         }
+                    } else if (session.World.Dimension == Dimension.Void && !world.VoidAltarTriggered) {
+                        session.AddMessage("Врата запечатаны древней силой. Нужен Ключ Бездны...");
+                        wantUse = false;
                     }
                 } else if (targetVox.TypeId == GameData.BChest.Id) {
                     session.ActiveChestPos = session.TargetBlock;
@@ -965,29 +1061,8 @@ public sealed partial class Player {
                             session.AddMessage(item.Id == GameData.WaterBucketItem.Id ? "Вода вылита из ведра" : "Лава вылита из ведра");
                             wantUse = false;
                         }
-                    } else if (GameData.FoodValue.TryGetValue(item.Id, out float foodVal)) {
-                        bool canEatFood = Hunger < MaxHunger || item.Id == GameData.GoldenAppleItem.Id;
-                        if (input.UsePressed && canEatFood) {
-                            if (TryConsumeSelected(item, 1)) {
-                                Hunger = MathF.Min(MaxHunger, Hunger + foodVal);
-                                Saturation = MathF.Min(Hunger, Saturation + foodVal * 0.6f);
-                                if (item.Id == GameData.GoldenAppleItem.Id) {
-                                    Health = MathF.Min(MaxHealth, Health + 4f);
-                                    InvulnerabilityTimer = 1.5f;
-                                    session.AddMessage("Золотое яблоко: +4 HP и кратковременная защита!");
-                                } else if (item.Id == GameData.RottenFleshItem.Id) {
-                                    if (Random.Shared.NextDouble() < 0.80) {
-                                        Exhaustion += 12.0f;
-                                        session.AddMessage("Несвежая пища вызвала приступ голода!");
-                                    }
-                                } else if (item.Id == GameData.ChorusFruitItem.Id) {
-                                    // Плод хоруса: случайный телепорт в пределах ~8 блоков (как в Minecraft)
-                                    TeleportRandomly(world);
-                                    session.AddMessage("Плод хоруса телепортировал вас!");
-                                }
-                                SoundSystem.PlayEat();
-                            }
-                        }
+                    } else if (GameData.FoodValue.ContainsKey(item.Id)) {
+                        wantUse = false;
                     } else if (item.Id == GameData.EyeOfEnderItem.Id) {
                         // Око Эндера: ПКМ по рамке — вставка глаза; ПКМ по воздуху/не-рамке — бросок к крепости
                         wantUse = false;
@@ -1022,6 +1097,62 @@ public sealed partial class Player {
                         if (input.UsePressed) {
                             if (session.GameMode == GameMode.Creative || TryConsumeSelected(item, 1)) {
                                 ThrowEnderPearl(world, session);
+                            }
+                        }
+                    } else if (item.Id == GameData.NetherTotemItem.Id) {
+                        // Тотем Пламени: ПКМ — призыв Владыки Незера в Аду
+                        wantUse = false;
+                        if (input.UsePressed) {
+                            if (world.Dimension == Dimension.Nether) {
+                                if (session.GameMode == GameMode.Creative || TryConsumeSelected(item, 1)) {
+                                    var spawnPos = Position + Forward * 5.0f + new Vector3(0f, 1.0f, 0f);
+                                    world.HostileMobs.Add(new HostileMob(HostileType.NetherLord, spawnPos));
+                                    world.NetherBossSpawned = true;
+                                    SoundSystem.PlayThunder();
+                                    SoundSystem.PlayBabakherHiss();
+                                    world.SpawnCrit(spawnPos, 40);
+                                    session.AddMessage("§cТотем Пламени вспыхивает! Владыка Незера восстаёт из адского пламени!");
+                                }
+                            } else {
+                                session.AddMessage("§cТотем Пламени можно использовать только в Нижнем мире (Незере)!");
+                            }
+                        }
+                    } else if (item.Id == GameData.DesertTotemItem.Id) {
+                        // Тотем Песков: ПКМ — призыв Стража Пустыни в Пустыне
+                        wantUse = false;
+                        if (input.UsePressed) {
+                            var b = world.Generator.GetBiome((int)Position.X, 50, (int)Position.Z);
+                            if (b == BiomeType.Desert) {
+                                if (session.GameMode == GameMode.Creative || TryConsumeSelected(item, 1)) {
+                                    var spawnPos = Position + Forward * 5.0f + new Vector3(0f, 1.0f, 0f);
+                                    world.HostileMobs.Add(new HostileMob(HostileType.DesertGuardian, spawnPos));
+                                    world.DesertBossSpawned = true;
+                                    SoundSystem.PlayThunder();
+                                    SoundSystem.PlayBabakherHiss();
+                                    world.SpawnCrit(spawnPos, 40);
+                                    session.AddMessage("§eТотем Песков пробуждает древнюю силу! Страж Пустыни восстаёт из барханов!");
+                                }
+                            } else {
+                                session.AddMessage("§eТотем Песков можно использовать только в биоме Пустыни!");
+                            }
+                        }
+                    } else if (item.Id == GameData.SwampTotemItem.Id) {
+                        // Тотем Топей: ПКМ — призыв Болотного Стража в Болоте
+                        wantUse = false;
+                        if (input.UsePressed) {
+                            var b = world.Generator.GetBiome((int)Position.X, 50, (int)Position.Z);
+                            if (b == BiomeType.Swamp) {
+                                if (session.GameMode == GameMode.Creative || TryConsumeSelected(item, 1)) {
+                                    var spawnPos = Position + Forward * 5.0f + new Vector3(0f, 1.0f, 0f);
+                                    world.HostileMobs.Add(new HostileMob(HostileType.SwampGuardian, spawnPos));
+                                    world.SwampBossSpawned = true;
+                                    SoundSystem.PlayThunder();
+                                    SoundSystem.PlayBabakherHiss();
+                                    world.SpawnCrit(spawnPos, 40);
+                                    session.AddMessage("§2Тотем Топей взывает к тьме! Болотный Страж восстаёт из трясины!");
+                                }
+                            } else {
+                                session.AddMessage("§2Тотем Топей можно использовать только в биоме Болота!");
                             }
                         }
                     } else if (session.HasTarget && GameData.TryGetBlockByItem(item.Id, out var block)) {
@@ -1392,12 +1523,12 @@ public sealed partial class Player {
         if (min.X < pmax.X && max.X > pmin.X && min.Y < pmax.Y && max.Y > pmin.Y && min.Z < pmax.Z && max.Z > pmin.Z)
             return false;
 
-        // Вычисляем ориентацию блока (facing: 0..3) по направлению взгляда игрока (передняя сторона печки смотрит на игрока)
+        // Вычисляем ориентацию блока (facing: 0..3) по направлению взгляда игрока
         byte facing = 0;
         Vec3i forwardH;
         if (MathF.Abs(Forward.X) > MathF.Abs(Forward.Z)) {
-            if (Forward.X > 0) { facing = 1; forwardH = new Vec3i(1, 0, 0); }
-            else { facing = 3; forwardH = new Vec3i(-1, 0, 0); }
+            if (Forward.X > 0) { facing = 3; forwardH = new Vec3i(1, 0, 0); }
+            else { facing = 1; forwardH = new Vec3i(-1, 0, 0); }
         } else {
             if (Forward.Z > 0) { facing = 2; forwardH = new Vec3i(0, 0, 1); }
             else { facing = 0; forwardH = new Vec3i(0, 0, -1); }
@@ -1604,6 +1735,34 @@ public sealed partial class Player {
         if (isStrong) SoundSystem.PlayStrongAttack();
         else SoundSystem.PlayWeakAttack();
         DamageSelectedTool(session); // оружие изнашивается при ударе по боссу
+    }
+
+    public void AttackTrueBoss(TrueEndSlime boss, GameWorld world, GameSession session) {
+        if (AttackTimer > 0f) return;
+
+        ushort toolId = SelectedItem?.Id ?? 0;
+        float weaponCd = GameData.GetWeaponCooldown(toolId);
+        float charge = Math.Clamp(AttackRechargeTimer / weaponCd, 0f, 1f);
+        AttackRechargeTimer = 0f;
+        AttackTimer = AttackCooldown;
+
+        bool isStrong = charge >= 0.85f;
+        bool isCrit = isStrong && !OnGround && Velocity.Y < -0.2f;
+
+        float baseDmg = GameData.GetWeaponDamage(toolId);
+        float dmg = baseDmg * (0.2f + 0.8f * charge * charge);
+
+        if (isCrit) {
+            dmg *= 1.5f;
+            session.AddMessage("Критический удар по Истинному Слизню! ×1.5");
+            world.SpawnCrit(boss.Position + new Vector3(0f, TrueEndSlime.HalfSizeY, 0f), 22);
+        }
+
+        boss.TakeDamage(dmg, world, session);
+
+        if (isStrong) SoundSystem.PlayStrongAttack();
+        else SoundSystem.PlayWeakAttack();
+        DamageSelectedTool(session);
     }
 
     /// <summary>Пересечение луча с AABB (метод слэбов).</summary>

@@ -36,6 +36,7 @@ internal static class SmokeTest {
             Timed("mobs", TestAlphaMobsAndFluids);
             Timed("biomes", TestBiomesAnimalsCharcoalTools);
             Timed("endslime", TestEndSlime);
+            Timed("trueboss", TestTrueVoidBossAndLore);
             Timed("endsave", TestEndSaveLoad);
             Timed("multi", TestMultiWorldSaveLoad);
         } catch (Exception ex) {
@@ -79,12 +80,13 @@ internal static class SmokeTest {
         var s2 = NewSession(12345);
         Check(s2.World.Generator.SurfaceHeight(37, -12) == s.World.Generator.SurfaceHeight(37, -12),
               "генерация детерминирована по сиду");
-        // Деревья существуют в мире.
-        bool foundTree = false;
-        var gc = s.World.TryGetChunk(Chunk.CoordOf(spawn));
-        for (int i = 0; i < Chunk.VoxelCount && !foundTree; i++)
-            if (gc!.Chunk.Get(i).TypeId == GameData.BLog.Id) foundTree = true;
-        Check(foundTree, "в чанке спавна есть дерево");
+        // Деревья существуют в мире вокруг спавна
+        bool foundTree = s.World.Chunks.Any(gc => {
+            for (int i = 0; i < Chunk.VoxelCount; i++)
+                if (gc.Chunk.Get(i).TypeId == GameData.BLog.Id) return true;
+            return false;
+        });
+        Check(foundTree, "в мире вокруг спавна сгенерированы деревья");
     }
 
     // ── 2. Движение ──────────────────────────────────────────────────────────
@@ -93,22 +95,25 @@ internal static class SmokeTest {
         Console.WriteLine("[2] Движение игрока");
         var s = NewSession();
         Tick(s, 1f);   // гравитация усаживает игрока
+
+        // Прыжок — на стартовой площадке спавна: гарантированно ровная твёрдая земля
+        // (спавн теперь сид-зависим и может оказаться в болоте с топью и кронами).
+        float baseY = s.Player.Position.Y;
+        bool jumped = false;
+        var jumpInput = PlayerInput.Idle;
+        for (int i = 0; i < 60; i++) {
+            jumpInput.Jump = i == 0;
+            s.Tick(Dt, jumpInput);
+            if (s.Player.Position.Y > baseY + 0.5f) jumped = true;
+        }
+        Check(jumped, "прыжок поднимает игрока");
+
         var start = s.Player.Position;
         var input = PlayerInput.Idle;
         input.MoveZ = 1f;
         for (int i = 0; i < 120; i++) s.Tick(Dt, input);
         var moved = Vector3.Distance(start, s.Player.Position);
         Check(moved > 2f, $"игрок прошёл вперёд ({moved:F2} м)");
-
-        // Прыжок.
-        float baseY = s.Player.Position.Y;
-        bool jumped = false;
-        for (int i = 0; i < 60; i++) {
-            input.Jump = i == 0;
-            s.Tick(Dt, input);
-            if (s.Player.Position.Y > baseY + 0.5f) jumped = true;
-        }
-        Check(jumped, "прыжок поднимает игрока");
     }
 
     // ── 3. Ломание и установка блоков ────────────────────────────────────────
@@ -250,8 +255,8 @@ internal static class SmokeTest {
         s.Player.Hunger = 10f;
         s.Player.SelectedSlot = 0;
 
-        var input = PlayerInput.Idle with { UsePressed = true };
-        s.Tick(Dt, input);
+        var input = PlayerInput.Idle with { UseHeld = true };
+        for (int i = 0; i < 35; i++) s.Tick(0.05f, input);
         Check(Math.Abs(s.Player.Hunger - 14f) < 0.01f, "яблоко восстановило +4 сытости");
         Check(inv.CountOf(GameData.AppleItem) == 0, "яблоко съедено");
 
@@ -607,9 +612,91 @@ internal static class SmokeTest {
 
         // Смерть и награда
         boss.TakeDamage(2000f, end, s);
+        Check(boss.IsDying, "Слизень Края начинает анимацию гибели");
+        for (int t = 0; t < 100; t++) boss.Tick(0.05f, end, s.Player, s, center, center.Y);
         Check(!boss.Alive, "Слизень Края умирает от большого урона");
         Check(end.EndBossDefeated, "босс помечен побеждённым");
         Check(end.Pickups.Any(p => p.Item.Definition.Id == GameData.EndSlimeItem.Id), "с босса выпала эндер-слизь");
+    }
+
+    private static void TestTrueVoidBossAndLore() {
+        Console.WriteLine("[13.5] Секретный финал: Обелиск, Ключ Бездны, Истинный Слизень");
+        var s = NewSession(5555);
+        var inv = s.Player.Inventory;
+
+        // 1. Крафт Ключа Бездны из 4 артефактов
+        inv.TryInsert(GameData.NewItem(GameData.EndSlimeItem), 1);
+        inv.TryInsert(GameData.NewItem(GameData.NetherArtifactItem), 1);
+        inv.TryInsert(GameData.NewItem(GameData.DesertArtifactItem), 1);
+        inv.TryInsert(GameData.NewItem(GameData.SwampArtifactItem), 1);
+
+        var keyGrid = new ItemDefinition?[] {
+            GameData.EndSlimeItem, GameData.NetherArtifactItem, null,
+            GameData.DesertArtifactItem, GameData.SwampArtifactItem, null,
+            null, null, null
+        };
+        Check(GameData.TryCraftShape(keyGrid, inv, out var voidKey) && voidKey.Item.Id == GameData.VoidKeyItem.Id,
+              "секретный крафт Ключа Бездны успешен");
+
+        // 2. Вход в измерение Бездны
+        s.EnterVoid();
+        Check(s.World.Dimension == Dimension.Void, "игрок перешёл в измерение Бездны");
+        Check(s.Player.Position.Y >= 11f, "игрок приземлился на монолитный пол из бедрока");
+
+        // 3. Активация алтаря Бездны
+        s.TriggerVoidAltarEncounter();
+        Check(s.World.VoidAltarTriggered, "алтарь Бездны активирован");
+        Check(s.World.VoidBossIntroStep == 1, "началась катсцена пробуждения босса");
+
+        // Прогон тиков для завершения интро и спавна Истинного Слизня
+        for (int i = 0; i < 5; i++) {
+            s.World.TickTrueVoidBoss(2.5f, s.Player, s);
+        }
+        var tb = s.World.TrueVoidBoss;
+        Check(tb is { Alive: true } && tb.Health == TrueEndSlime.MaxHealth,
+              "Истинный Слизень Края успешно пробуждён с 350 HP");
+
+        // 4. Нанесение урона и победа
+        tb!.TakeDamage(400f, s.World, s);
+        Check(tb.IsDying, "Истинный Слизень начинает анимацию гибели");
+        for (int t = 0; t < 100; t++) s.World.TickTrueVoidBoss(0.05f, s.Player, s);
+        Check(!tb.Alive && s.World.TrueVoidBossDefeated, "Истинный Слизень повержен");
+        var chestVoxel = s.World.GetVoxel(new Vec3i(0, 12, 0));
+        Check(chestVoxel.TypeId == GameData.BChest.Id, "после победы материализовалась Сокровищница Бездны");
+
+        // 5. Крафт и работа Тотемов призыва хранителей артефактов
+        inv.TryInsert(GameData.NewItem(GameData.BlazeRodItem), 2);
+        inv.TryInsert(GameData.NewItem(GameData.GoldIngotItem), 1);
+        inv.TryInsert(GameData.NewItem(GameData.CoalItem), 1);
+        var netherTotemGrid = new ItemDefinition?[] {
+            GameData.BlazeRodItem, GameData.GoldIngotItem, null,
+            GameData.CoalItem, GameData.BlazeRodItem, null,
+            null, null, null
+        };
+        Check(GameData.TryCraftShape(netherTotemGrid, inv, out var nTotem) && nTotem.Item.Id == GameData.NetherTotemItem.Id,
+              "крафт Тотема Пламени успешен");
+
+        inv.TryInsert(GameData.NewItem(GameData.SandItem), 2);
+        inv.TryInsert(GameData.NewItem(GameData.GoldIngotItem), 1);
+        inv.TryInsert(GameData.NewItem(GameData.FlintItem), 1);
+        var desertTotemGrid = new ItemDefinition?[] {
+            GameData.SandItem, GameData.SandItem, null,
+            GameData.GoldIngotItem, GameData.FlintItem, null,
+            null, null, null
+        };
+        Check(GameData.TryCraftShape(desertTotemGrid, inv, out var dTotem) && dTotem.Item.Id == GameData.DesertTotemItem.Id,
+              "крафт Тотема Песков успешен");
+
+        inv.TryInsert(GameData.NewItem(GameData.StringItem), 2);
+        inv.TryInsert(GameData.NewItem(GameData.CharcoalItem), 1);
+        inv.TryInsert(GameData.NewItem(GameData.BoneItem), 1);
+        var swampTotemGrid = new ItemDefinition?[] {
+            GameData.StringItem, GameData.StringItem, null,
+            GameData.CharcoalItem, GameData.BoneItem, null,
+            null, null, null
+        };
+        Check(GameData.TryCraftShape(swampTotemGrid, inv, out var sTotem) && sTotem.Item.Id == GameData.SwampTotemItem.Id,
+              "крафт Тотема Топей успешен");
     }
 
     // ── 13. Энд: сохранение/загрузка мира и босса ─────────────────────────────
@@ -1062,7 +1149,8 @@ internal static class SmokeTest {
         Check(s.Player.Inventory.Slots[0]?.Quantity == 5 && s.Player.Hunger == 20f, "при полной сытости (20/20) игрок не может есть еду");
 
         s.Player.Hunger = 15f;
-        s.Player.Update(0.1f, useInput, w, s);
+        var holdInput = PlayerInput.Idle with { UseHeld = true };
+        for (int i = 0; i < 20; i++) s.Player.Update(0.1f, holdInput, w, s);
         Check(s.Player.Inventory.Slots[0]?.Quantity == 4 && s.Player.Hunger == 19f, "при неполной сытости (<20) еда успешно съедается");
 
         // 30. Распространение травы на землю и отмирание под твердыми блоками

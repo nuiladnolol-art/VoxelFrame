@@ -13,7 +13,7 @@ namespace VoxelFrame.Game;
 /// </summary>
 public static class SaveSystem {
     public const uint Magic = 0x56465331;   // "VFS1"
-    public const int Version = 17;
+    public const int Version = 18;
 
     public static string CurrentWorldPath = "";
     public static int SelectedWorldSlot = 1;
@@ -169,6 +169,17 @@ public static class SaveSystem {
             bw.Write(true);
             bw.Write(eb.Health);
             WriteVec3(bw, eb.Position);
+        } else {
+            bw.Write(false);
+        }
+
+        // Истинный босс Бездны
+        bw.Write(world.TrueVoidBossDefeated);
+        bw.Write(world.VoidAltarTriggered);
+        if (world.TrueVoidBoss is { Alive: true } tb) {
+            bw.Write(true);
+            bw.Write(tb.Health);
+            WriteVec3(bw, tb.Position);
         } else {
             bw.Write(false);
         }
@@ -660,6 +671,16 @@ public static class SaveSystem {
             world.EndBoss = new EndSlime(bossPos, islandCenter, seed) { Health = bossHp };
         }
 
+        if (version >= 18) {
+            world.TrueVoidBossDefeated = br.ReadBoolean();
+            world.VoidAltarTriggered = br.ReadBoolean();
+            if (br.ReadBoolean()) {
+                float tbHp = br.ReadSingle();
+                var tbPos = ReadVec3(br);
+                world.TrueVoidBoss = new TrueEndSlime(tbPos, new Vector3(0.5f, 11f, 0.5f), seed) { Health = tbHp };
+            }
+        }
+
         int chunkCount = br.ReadInt32();
         for (int c = 0; c < chunkCount; c++) {
             var cc = new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32());
@@ -820,6 +841,15 @@ public static class SaveSystem {
     public static bool EntityShadows = true;
     public static int SoundVolume = 100; // 0..100%
     public static int RenderDistanceSetting = 5; // 2..20
+    public static int MouseSensitivity = 100; // 20..200%
+    public static int FovSetting = 70; // 50..110
+    public static bool SmoothLighting = true;
+    public static int UiScaleMode = 0; // 0 = Авто (по высоте окна), иначе процент 50..300
+    public static int PostFxMode = 1;  // 0 = выкл, 1 = вкл (виньетка/золотой час/bloom в настройках графики)
+    public static bool PostFxVignette = true;
+    public static int PostFxVignetteStrength = 35; // 0..60 %
+    public static bool PostFxGoldenHour = true;
+    public static bool PostFxBloom = true;
 
     public static void SaveSettings() {
         try {
@@ -834,7 +864,6 @@ public static class SaveSystem {
                 ["Sprint"] = (int)KeyBinds.Sprint,
                 ["Drop"] = (int)KeyBinds.Drop,
                 ["Inventory"] = (int)KeyBinds.Inventory,
-                ["Crafting"] = (int)KeyBinds.Crafting,
                 ["Pause"] = (int)KeyBinds.Pause,
                 ["Fullscreen"] = Raylib_cs.Raylib.IsWindowState(Raylib_cs.ConfigFlags.UndecoratedWindow) || Raylib_cs.Raylib.IsWindowFullscreen(),
                 ["Width"] = Raylib_cs.Raylib.GetScreenWidth(),
@@ -847,6 +876,15 @@ public static class SaveSystem {
                 ["EntityShadows"] = EntityShadows,
                 ["SoundVolume"] = SoundVolume,
                 ["RenderDistanceSetting"] = RenderDistanceSetting,
+                ["MouseSensitivity"] = MouseSensitivity,
+                ["FovSetting"] = FovSetting,
+                ["SmoothLighting"] = SmoothLighting,
+                ["UiScaleMode"] = UiScaleMode,
+                ["PostFxMode"] = PostFxMode,
+                ["PostFxVignette"] = PostFxVignette,
+                ["PostFxVignetteStrength"] = PostFxVignetteStrength,
+                ["PostFxGoldenHour"] = PostFxGoldenHour,
+                ["PostFxBloom"] = PostFxBloom,
             };
             File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(obj, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
         } catch { }
@@ -869,7 +907,6 @@ public static class SaveSystem {
             R("Sprint", v => KeyBinds.Sprint = (Raylib_cs.KeyboardKey)v);
             R("Drop", v => KeyBinds.Drop = (Raylib_cs.KeyboardKey)v);
             R("Inventory", v => KeyBinds.Inventory = (Raylib_cs.KeyboardKey)v);
-            R("Crafting", v => KeyBinds.Crafting = (Raylib_cs.KeyboardKey)v);
             R("Pause", v => KeyBinds.Pause = (Raylib_cs.KeyboardKey)v);
             R("GraphicsQuality", v => {
                 GraphicsQuality = (GraphicsPreset)Math.Clamp(v, 0, 2);
@@ -885,6 +922,15 @@ public static class SaveSystem {
             B("EntityShadows", v => EntityShadows = v);
             R("SoundVolume", v => SoundVolume = v);
             R("RenderDistanceSetting", v => RenderDistanceSetting = v);
+            R("MouseSensitivity", v => MouseSensitivity = Math.Clamp(v, 20, 200));
+            R("FovSetting", v => FovSetting = Math.Clamp(v, 50, 110));
+            B("SmoothLighting", v => SmoothLighting = v);
+            R("UiScaleMode", v => UiScaleMode = v == 0 ? 0 : Math.Clamp(v, 50, 300));
+            R("PostFxMode", v => PostFxMode = Math.Clamp(v, 0, 1));
+            B("PostFxVignette", v => PostFxVignette = v);
+            R("PostFxVignetteStrength", v => PostFxVignetteStrength = Math.Clamp(v, 0, 60));
+            B("PostFxGoldenHour", v => PostFxGoldenHour = v);
+            B("PostFxBloom", v => PostFxBloom = v);
         } catch { }
     }
 }

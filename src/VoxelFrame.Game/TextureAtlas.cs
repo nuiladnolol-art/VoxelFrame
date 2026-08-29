@@ -8,7 +8,7 @@ namespace VoxelFrame.Game;
 /// </summary>
 public static class TextureAtlas {
     public const int TilePx = 16;
-    public const int Cols = 8, Rows = 20;
+    public const int Cols = 8, Rows = 26;
     public const int AtlasW = Cols * TilePx, AtlasH = Rows * TilePx;
 
     public const int TGrassTop = 0, TGrassSide = 1, TDirt = 2, TStone = 3,
@@ -49,7 +49,11 @@ public static class TextureAtlas {
                      TEnderPearl = 130, TEyeOfEnder = 131, TBlazePowder = 132, TChorusFruit = 133, TEndSlime = 134,
                      TNetherArtifact = 135, TSwampArtifact = 136, TDesertArtifact = 137, TVoidKey = 138,
                      TVoidGate = 139,
-                     TPickaxeGold = 140, TAxeGold = 141, TSwordGold = 142, TShovelGold = 143, THoeGold = 144;
+                     TPickaxeGold = 140, TAxeGold = 141, TSwordGold = 142, TShovelGold = 143, THoeGold = 144,
+                     TLeavesPlains = 148, TLeavesSavanna = 149, TLeavesSwamp = 150, TWaterSwamp = 151,
+                     TGrassTopPlains = 152, TGrassSidePlains = 153, TTallGrassPlains = 154,
+                     TGrassTopSavanna = 155, TGrassSideSavanna = 156, TTallGrassSavanna = 157,
+                     TGrassTopSwamp = 158, TGrassSideSwamp = 159, TTallGrassSwamp = 160;
 
     public record struct BlockFaceTiles(byte PosX, byte NegX, byte PosY, byte NegY, byte PosZ, byte NegZ);
 
@@ -462,6 +466,21 @@ public static class TextureAtlas {
         palette[TChorusPlant] = (new Color(126, 68, 140, 255), true);
         palette[TVoidGate] = (new Color(52, 30, 80, 255), true);
         palette[TChorusFlower] = (new Color(176, 112, 188, 255), true);
+        // Биомные цвета листвы и болотной воды
+        palette[TLeavesPlains] = (new Color(72, 152, 45, 255), true);
+        palette[TLeavesSavanna] = (new Color(152, 148, 50, 255), true);
+        palette[TLeavesSwamp] = (new Color(58, 86, 42, 255), true);
+        palette[TWaterSwamp] = (new Color(36, 62, 46, 255), true);
+        // Биомные цвета травы (блоки и растительность)
+        palette[TGrassTopPlains] = (new Color(96, 178, 56, 255), true);
+        palette[TGrassSidePlains] = (new Color(122, 92, 58, 255), true);
+        palette[TTallGrassPlains] = (new Color(95, 185, 52, 255), false);
+        palette[TGrassTopSavanna] = (new Color(162, 154, 52, 255), true);
+        palette[TGrassSideSavanna] = (new Color(122, 92, 58, 255), true);
+        palette[TTallGrassSavanna] = (new Color(165, 158, 55, 255), false);
+        palette[TGrassTopSwamp] = (new Color(64, 88, 44, 255), true);
+        palette[TGrassSideSwamp] = (new Color(122, 92, 58, 255), true);
+        palette[TTallGrassSwamp] = (new Color(62, 86, 42, 255), false);
 
         var rng = new Random(20260812);
         for (int tile = 0; tile < palette.Length; tile++) {
@@ -1030,7 +1049,7 @@ public static class TextureAtlas {
                         } else {
                             a = 0;
                         }
-                    } else if (tile == TTallGrass) {
+                    } else if (tile == TTallGrass || tile == TTallGrassPlains || tile == TTallGrassSavanna || tile == TTallGrassSwamp) {
                         // Трава: реалистичные лепестки и стебельки травы (Cross-billboard)
                         bool isGrassBlade = false;
                         if (py >= 4 && (px == 3 || px == 4) && py >= 6) isGrassBlade = true;
@@ -1041,13 +1060,35 @@ public static class TextureAtlas {
                         if (py >= 13 && px >= 2 && px <= 14) isGrassBlade = true;
 
                         if (isGrassBlade) {
-                            int shade = (px * 7 + py * 11) % 40;
-                            r = 70 + shade;
-                            g = 150 + shade;
-                            b = 35 + shade / 2;
+                            int shade = (px * 7 + py * 11) % 35;
+                            var (tc, _) = palette[tile];
+                            r = Math.Clamp(tc.R + shade - 15, 0, 255);
+                            g = Math.Clamp(tc.G + shade - 15, 0, 255);
+                            b = Math.Clamp(tc.B + shade / 2 - 8, 0, 255);
                             a = 255;
                         } else {
                             a = 0;
+                        }
+                    } else if (tile == TGrassSide || tile == TGrassSidePlains || tile == TGrassSideSavanna || tile == TGrassSideSwamp) {
+                        bool isGrassFringe = py <= 2 || (py == 3 && (px % 3 == 0 || px % 4 == 1));
+                        if (isGrassFringe) {
+                            int topTile = tile switch {
+                                TGrassSidePlains => TGrassTopPlains,
+                                TGrassSideSavanna => TGrassTopSavanna,
+                                TGrassSideSwamp => TGrassTopSwamp,
+                                _ => TGrassTop
+                            };
+                            var (gcCol, _) = palette[topTile];
+                            int d = (px * 13 + py * 7) % 20;
+                            r = Math.Clamp(gcCol.R + d - 10, 0, 255);
+                            g = Math.Clamp(gcCol.G + d - 10, 0, 255);
+                            b = Math.Clamp(gcCol.B + d - 10, 0, 255);
+                            a = 255;
+                        } else {
+                            r = 122 + (px * 7 + py * 13) % 25 - 12;
+                            g = 92 + (px * 7 + py * 13) % 20 - 10;
+                            b = 58 + (px * 7 + py * 13) % 15 - 7;
+                            a = 255;
                         }
                     } else if (tile == TRawMutton) {
                         bool insideChop = (px - 7) * (px - 7) * 1.0f + (py - 7) * (py - 7) * 1.2f <= 18;
@@ -1257,7 +1298,7 @@ public static class TextureAtlas {
                     } else {
                         if (tile == TPlanks && (py == 4 || py == 11)) { r -= 40; g -= 30; b -= 20; }
                         if (tile == TLogSide && py % 5 == 4) { r -= 30; g -= 24; b -= 14; }
-                        if (tile == TLeaves && (px * 3 + py * 7) % 5 == 0) {
+                        if ((tile == TLeaves || tile == TLeavesPlains || tile == TLeavesSavanna || tile == TLeavesSwamp) && (px * 3 + py * 7) % 5 == 0) {
                             a = 0;
                         }
                         if (tile == TVoidGate) {

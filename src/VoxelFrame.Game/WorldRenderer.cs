@@ -46,6 +46,8 @@ public sealed class WorldRenderer : IDisposable {
         uniform vec4 colDiffuse;
         uniform float skyFactor;
         uniform float sunAngle;
+        uniform float time;
+        uniform int dimension;
         uniform vec3 playerLightPos;
         uniform float playerLightRadius;
         uniform vec3 creeperLightPos;
@@ -55,6 +57,7 @@ public sealed class WorldRenderer : IDisposable {
         uniform float fogStart;
         uniform float fogEnd;
         out vec4 finalColor;
+
         void main() {
             vec4 texelColor = texture(texture0, fragTexCoord);
             if (texelColor.a < 0.05) discard;
@@ -72,7 +75,7 @@ public sealed class WorldRenderer : IDisposable {
                 }
             }
 
-            // Динамический свет от раздувающегося белого бабахера
+            // Динамический свет от взрывающегося бабахера
             if (creeperLightRadius > 0.1) {
                 float d = distance(fragWorldPos, creeperLightPos);
                 if (d < creeperLightRadius) {
@@ -81,24 +84,45 @@ public sealed class WorldRenderer : IDisposable {
                 }
             }
 
-            // Нелинейная кривая освещенности (гамма-коррекция)
-            float sunCurve = pow(sun * max(skyFactor, 0.04), 1.35);
-            float blockCurve = pow(block, 1.25);
+            // Нелинейная гамма-кривая освещенности
+            float sunCurve = pow(sun * max(skyFactor, 0.04), 1.28);
+            float blockCurve = pow(block, 1.20);
 
-            // Теплый уютный оттенок факельного света + чистый дневной свет
-            vec3 torchLight = vec3(1.0, 0.82, 0.55) * blockCurve;
-            vec3 sunLight = vec3(0.96, 0.96, 1.0) * sunCurve;
-            vec3 ambient = vec3(0.12, 0.12, 0.16);
+            // Суточная цветовая температура солнца / луны (Golden hour на рассвете/закате и лунное серебро ночью)
+            float horizonGlow = clamp(1.0 - abs(sin(sunAngle)) * 2.8, 0.0, 1.0);
+            vec3 daySunCol = vec3(1.0, 0.98, 0.92);
+            vec3 goldenHourCol = vec3(1.0, 0.65, 0.38);
+            vec3 nightMoonCol = vec3(0.55, 0.70, 1.0);
 
-            vec3 totalLight = (sunLight + torchLight + ambient) * faceDir;
-            totalLight = clamp(totalLight, 0.08, 1.0);
+            vec3 sunLightColor = mix(daySunCol, goldenHourCol, horizonGlow * smoothstep(0.1, 0.6, skyFactor));
+            sunLightColor = mix(nightMoonCol, sunLightColor, smoothstep(0.08, 0.25, skyFactor));
+
+            vec3 torchColor = vec3(1.0, 0.82, 0.52);
+            vec3 ambientColor = mix(vec3(0.06, 0.08, 0.14), vec3(0.14, 0.14, 0.16), skyFactor);
+
+            if (dimension == 1) { // Nether
+                ambientColor = vec3(0.20, 0.06, 0.06);
+                torchColor = vec3(1.0, 0.72, 0.40);
+            } else if (dimension == 2) { // End
+                ambientColor = vec3(0.12, 0.08, 0.18);
+                sunLightColor = vec3(0.85, 0.75, 1.0);
+            }
+
+            vec3 totalLight = (sunLightColor * sunCurve + torchColor * blockCurve + ambientColor) * faceDir;
+            totalLight = clamp(totalLight, 0.06, 1.0);
+
+            // Легкий процедурный блик/каустика на воде на верхних гранях
+            if (faceDir > 0.95 && texelColor.a < 0.98) {
+                float wave = sin(fragWorldPos.x * 2.5 + time * 2.0) * cos(fragWorldPos.z * 2.5 + time * 2.0);
+                totalLight += vec3(0.06, 0.08, 0.10) * clamp(wave, 0.0, 1.0) * skyFactor;
+            }
 
             vec4 lightedColor = texelColor * colDiffuse * vec4(totalLight, 1.0);
 
-            // Плавный дистанционный туман горизонта (убирает рябь, контурные линии и резкую границу мира)
+            // Плавный дистанционный туман
             float dist = distance(fragWorldPos, cameraPos);
-            float fogFactor = clamp((dist - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
-            fogFactor = pow(fogFactor, 1.35);
+            float fogFactor = clamp((dist - fogStart) / max(fogEnd - fogStart, 0.01), 0.0, 1.0);
+            fogFactor = smoothstep(0.0, 1.0, fogFactor);
 
             finalColor = vec4(mix(lightedColor.rgb, fogColor, fogFactor), lightedColor.a);
         }
@@ -106,6 +130,8 @@ public sealed class WorldRenderer : IDisposable {
 
     private int _skyFactorLoc = -1;
     private int _sunAngleLoc = -1;
+    private int _timeLoc = -1;
+    private int _dimensionLoc = -1;
     private int _playerLightPosLoc = -1;
     private int _playerLightRadiusLoc = -1;
     private int _creeperLightPosLoc = -1;
@@ -124,6 +150,8 @@ public sealed class WorldRenderer : IDisposable {
         public float Lifetime;
         public float MaxLifetime;
         public bool IsCrit;
+        public bool IsHealBeam; // летит к Target без гравитации
+        public Vector3 Target;
     }
 
     private readonly List<VoxelParticle> _particles = new();
@@ -154,6 +182,8 @@ public sealed class WorldRenderer : IDisposable {
             _material.Shader = shader;
             _skyFactorLoc = Raylib.GetShaderLocation(shader, "skyFactor");
             _sunAngleLoc = Raylib.GetShaderLocation(shader, "sunAngle");
+            _timeLoc = Raylib.GetShaderLocation(shader, "time");
+            _dimensionLoc = Raylib.GetShaderLocation(shader, "dimension");
             _playerLightPosLoc = Raylib.GetShaderLocation(shader, "playerLightPos");
             _playerLightRadiusLoc = Raylib.GetShaderLocation(shader, "playerLightRadius");
             _creeperLightPosLoc = Raylib.GetShaderLocation(shader, "creeperLightPos");
@@ -172,6 +202,7 @@ public sealed class WorldRenderer : IDisposable {
         world.OnBlockRemoved += SpawnBlockParticles;
         world.OnDustSpawned += SpawnDustParticles;
         world.OnCritSpawned += SpawnCritParticles;
+        world.OnHealBeamSpawned += SpawnHealBeamParticles;
     }
 
     public int MeshQueueCount => _rebuildQueue.Count;
@@ -227,6 +258,14 @@ public sealed class WorldRenderer : IDisposable {
         if (_sunAngleLoc != -1) {
             float angle = _session.DayNight.TimeOfDay * MathF.PI * 2f;
             unsafe { Raylib.SetShaderValue(_material.Shader, _sunAngleLoc, &angle, ShaderUniformDataType.Float); }
+        }
+        if (_timeLoc != -1) {
+            float time = (float)_session.TotalPlaySeconds;
+            unsafe { Raylib.SetShaderValue(_material.Shader, _timeLoc, &time, ShaderUniformDataType.Float); }
+        }
+        if (_dimensionLoc != -1) {
+            int dim = (int)_world.Dimension;
+            unsafe { Raylib.SetShaderValue(_material.Shader, _dimensionLoc, &dim, ShaderUniformDataType.Int); }
         }
 
         bool holdingTorch = _session.Player.SelectedEntry?.Item.Definition.Id == GameData.TorchItem.Id || _session.Player.OffhandItem?.Id == GameData.TorchItem.Id;
@@ -314,7 +353,10 @@ public sealed class WorldRenderer : IDisposable {
 
             const float chunkRadius = 27.8f; // Радиус описанной сферы для 32×32×32 чанка
             var camFwd = _session.Player.Forward;
-            const float tanFov = 1.55f; // Запас конуса для широких мониторов
+            float currentFov = _session.Camera.FovY;
+            float aspect = (float)Raylib.GetScreenWidth() / Math.Max(1, Raylib.GetScreenHeight());
+            float halfFovRad = currentFov * 0.5f * (MathF.PI / 180f);
+            float tanFov = MathF.Tan(halfFovRad) * MathF.Max(1.0f, aspect) * 1.55f; // Динамический запас конуса под любой FOV и ультраширокие мониторы
 
             _translucentChunks.Clear();
             foreach (var gc in _world.Chunks) {
@@ -354,16 +396,20 @@ public sealed class WorldRenderer : IDisposable {
             if (_translucentChunks.Count > 1) {
                 _translucentChunks.Sort(static (a, b) => b.DistSq.CompareTo(a.DistSq));
             }
-            foreach (var (gc, _) in _translucentChunks) {
-                foreach (var m in gc.TranslucentMeshes)
-                    Raylib.DrawMesh(m, _material, Matrix4x4.Identity);
+            if (_translucentChunks.Count > 0) {
+                Rlgl.DisableDepthMask();
+                foreach (var (gc, _) in _translucentChunks) {
+                    foreach (var m in gc.TranslucentMeshes)
+                        Raylib.DrawMesh(m, _material, Matrix4x4.Identity);
+                }
+                Rlgl.EnableDepthMask();
             }
         }
     }
 
     // ── Небо и Погода ────────────────────────────────────────────────────────
 
-    /// <summary>Фоновый градиент неба (2D купол).</summary>
+    /// <summary>Фоновый градиент неба (2D купол с горизонтом и рассветными оттенками).</summary>
     public void DrawSky() {
         if (_world.Dimension == Dimension.Nether) {
             Raylib.ClearBackground(new Color(45, 10, 10, 255));
@@ -379,15 +425,27 @@ public sealed class WorldRenderer : IDisposable {
         }
         int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
 
-        var top = LerpColor(C(8, 10, 26, 255), C(92, 150, 240, 255), f);
-        var bottom = LerpColor(C(16, 18, 40, 255), C(178, 208, 244, 255), f);
+        // Базовые цвета неба (день/ночь)
+        var top = LerpColor(C(6, 8, 22, 255), C(85, 145, 235, 255), f);
+        var bottom = LerpColor(C(14, 16, 36, 255), C(175, 205, 245, 255), f);
+
+        // Рассветный / закатный золотистый оттенок у горизонта
+        float u = _session.DayNight.TimeOfDay;
+        float sunAngle = 2f * MathF.PI * (u - 0.25f);
+        float horizonGlow = Math.Clamp(1.0f - MathF.Abs(MathF.Sin(sunAngle)) * 2.8f, 0f, 1f);
+        if (horizonGlow > 0f && _session.Weather == WeatherType.Clear) {
+            var sunsetCol = C(245, 130, 65, 255);
+            bottom = LerpColor(bottom, sunsetCol, horizonGlow * 0.75f);
+        }
+
         Raylib.DrawRectangleGradientV(0, 0, w, h, top, bottom);
     }
 
-    /// <summary>3D Небесные светила (Солнце, Луна, звёзды в мировом пространстве).</summary>
+    /// <summary>3D Небесные светила (Солнце, Луна, звёзды — билборды с процедурными текстурами).</summary>
     public void Draw3DSky(Camera3D camera) {
         if (_world.Dimension == Dimension.Nether) return;
         if (_world.Dimension == Dimension.End) return; // в Энде нет солнца/луны — только пустота
+        if (!SkyTextures.Ready) SkyTextures.Load();
 
         float f = _session.DayNight.SkyFactor;
         if (_session.Weather != WeatherType.Clear) f *= 0.45f;
@@ -397,36 +455,50 @@ public sealed class WorldRenderer : IDisposable {
         // Направление орбиты светил в мировом 3D-пространстве (Восток -> Зенит -> Запад)
         Vector3 celestialDir = Vector3.Normalize(new Vector3(MathF.Cos(sunAngle), MathF.Sin(sunAngle), 0.22f));
         float dist = 170f;
+        float time = (float)Raylib.GetTime();
 
-        // 1. Звёзды в 3D (видны ночью и в сумерках)
+        // 1. Звёзды — текстурные билборды трёх величин, мягко мерцают
         if (f < 0.65f) {
             float starAlpha = Math.Clamp((0.65f - f) / 0.65f, 0f, 1f);
-            byte a = (byte)(starAlpha * 220);
-            Color starColor = C(245, 245, 255, (int)a);
-            foreach (var s in StarPositions) {
+            for (int i = 0; i < StarPositions.Length; i++) {
+                var s = StarPositions[i];
+                float twinkle = MathF.Sin(time * 2.5f + i * 1.7f) * 0.25f + 0.75f;
+                // Три «величины» звёзд: размер и яркость варьируются детерминированно
+                float size = 0.9f + (i % 4) * 0.35f;
+                byte a = (byte)(starAlpha * (190 + (i % 3) * 22) * twinkle);
+                var starColor = C(245, 245, 255, (int)a);
                 Vector3 starWorld = camera.Position + s * dist;
-                Raylib.DrawCube(starWorld, 1.3f, 1.3f, 1.3f, starColor);
+                Raylib.DrawBillboardPro(camera, SkyTextures.Star, new Rectangle(0, 0, 32, 32),
+                    starWorld, s, new Vector2(size, size), Vector2.Zero, 0f, starColor);
             }
         }
 
-        // 2. 3D Солнце
+        // 2. Солнце с короной (текстурный билборд)
         Vector3 sunPos = camera.Position + celestialDir * dist;
         if (celestialDir.Y > -0.22f) {
             float sunA = Math.Clamp((celestialDir.Y + 0.22f) * 3f, 0f, 1f);
-            Color sunColor = C(255, 255, 220, (int)(sunA * 255));
-            Color sunGlow = C(255, 215, 80, (int)(sunA * 180));
-            Raylib.DrawCube(sunPos, 26f, 26f, 26f, sunColor);
-            Raylib.DrawCubeWires(sunPos, 26.6f, 26.6f, 26.6f, sunGlow);
+            var up = new Vector3(0f, 1f, 0f);
+            // Ядро + корона одним спрайтом 46×46
+            Raylib.DrawBillboardPro(camera, SkyTextures.Sun, new Rectangle(0, 0, 128, 128),
+                sunPos, up, new Vector2(46f, 46f), Vector2.Zero, 0f, C(255, 255, 255, (int)(sunA * 255)));
         }
 
-        // 3. 3D Луна
+        // 3. Луна с фазами (атлас 8 фаз) и лунным ореолом
         Vector3 moonPos = camera.Position - celestialDir * dist;
         if (-celestialDir.Y > -0.22f) {
             float moonA = Math.Clamp((-celestialDir.Y + 0.22f) * 3f, 0f, 1f);
-            Color moonColor = C(230, 235, 255, (int)(moonA * 255));
-            Color moonGlow = C(150, 180, 240, (int)(moonA * 150));
-            Raylib.DrawCube(moonPos, 20f, 20f, 20f, moonColor);
-            Raylib.DrawCubeWires(moonPos, 20.5f, 20.5f, 20.5f, moonGlow);
+            // Фаза меняется каждый игровой день (сутки — 20 минут реального времени)
+            int dayIndex = (int)MathF.Floor(_session.TotalPlaySeconds / DayNightCycle.CycleSeconds) % SkyTextures.PhaseCount;
+            int phase = ((dayIndex + 4) % SkyTextures.PhaseCount + SkyTextures.PhaseCount) % SkyTextures.PhaseCount;
+            var src = new Rectangle(phase * SkyTextures.PhasePx, 0, SkyTextures.PhasePx, SkyTextures.PhasePx);
+            var up = new Vector3(0f, 1f, 0f);
+            // Мягкий ореол под луной (спрайт солнца, перекрашенный в голубой)
+            if (SaveSystem.FancyGraphics) {
+                Raylib.DrawBillboardPro(camera, SkyTextures.Sun, new Rectangle(0, 0, 128, 128),
+                    moonPos, up, new Vector2(34f, 34f), Vector2.Zero, 0f, C(120, 160, 235, (int)(moonA * 70)));
+            }
+            Raylib.DrawBillboardPro(camera, SkyTextures.MoonPhaseAtlas, src,
+                moonPos, up, new Vector2(26f, 26f), Vector2.Zero, 0f, C(255, 255, 255, (int)(moonA * 255)));
         }
     }
 
@@ -1266,6 +1338,14 @@ public sealed class WorldRenderer : IDisposable {
             var greenDark = hurt ? new Color(170, 40, 40, 235) : new Color(45, 110, 95, 240);
             var eyeColor = ShadeColor(new Color(200, 90, 255, 255), bl, boss.Position);
 
+            // Во время отдыха (окно уязвимости) босс «сдувается» и желтеет — видно окно атаки
+            if (boss.IsResting) {
+                squish *= 0.82f;
+                bodyH = EndSlime.HalfSizeY * 2f * squish;
+                green = new Color(150, 175, 70, 240);
+                greenDark = new Color(105, 125, 45, 240);
+            }
+
             DrawSoftShadow(baseCenter, bodyW * 0.6f);
 
             // Внешняя оболочка
@@ -1278,6 +1358,32 @@ public sealed class WorldRenderer : IDisposable {
             float eyeFz = bodyW * 0.55f;
             Raylib.DrawCube(boss.Position + new Vector3(-bodyW * 0.25f, 0.25f, eyeFz), 0.5f, 0.5f, 0.12f, eyeColor);
             Raylib.DrawCube(boss.Position + new Vector3(bodyW * 0.25f, 0.25f, eyeFz), 0.5f, 0.5f, 0.12f, eyeColor);
+        }
+
+        // 3.1.5 Draw True End Slime boss (Истинный Слизень Края в Бездне)
+        if (_world.TrueVoidBoss is { Alive: true } tBoss) {
+            var bl = GetLightFactor(tBoss.Position);
+            float squish = 1f + MathF.Sin(time * 7f) * 0.15f;
+            float bodyW = TrueEndSlime.HalfSizeXZ * 2f;
+            float bodyH = TrueEndSlime.HalfSizeY * 2f * squish;
+            var baseCenter = tBoss.Position - new Vector3(0f, TrueEndSlime.HalfSizeY, 0f);
+            var bodyPos = baseCenter + new Vector3(0f, bodyH * 0.5f, 0f);
+            bool hurt = tBoss.HurtTime > 0f;
+            var voidColor = hurt ? new Color(255, 60, 60, 245) : new Color(75, 20, 110, 245);
+            var voidCore = hurt ? new Color(220, 30, 30, 250) : new Color(140, 30, 180, 250);
+            var eyeColor = ShadeColor(new Color(255, 30, 50, 255), bl, tBoss.Position);
+
+            DrawSoftShadow(baseCenter, bodyW * 0.7f);
+
+            // Внешняя тёмная оболочка Бездны
+            Raylib.DrawCube(bodyPos, bodyW, bodyH, bodyW, ShadeColor(voidColor, bl, tBoss.Position));
+            // Внутреннее пульсирующее ядро
+            Raylib.DrawCube(bodyPos, bodyW * 0.75f, bodyH * 0.75f, bodyW * 0.75f, ShadeColor(voidCore, bl, tBoss.Position));
+
+            // Зловещие светящиеся красные глаза
+            float eyeFz = bodyW * 0.55f;
+            Raylib.DrawCube(tBoss.Position + new Vector3(-bodyW * 0.25f, 0.35f, eyeFz), 0.6f, 0.6f, 0.15f, eyeColor);
+            Raylib.DrawCube(tBoss.Position + new Vector3(bodyW * 0.25f, 0.35f, eyeFz), 0.6f, 0.6f, 0.15f, eyeColor);
         }
 
         // 3.2 End Crystals (сущности — парят, светятся, взрываются от касания)
@@ -1317,6 +1423,36 @@ public sealed class WorldRenderer : IDisposable {
                 Raylib.DrawCube(ringPos, 0.26f, 0.12f, 0.26f, crystalCol);
             }
             Rlgl.PopMatrix();
+        }
+
+        // 3.3 Телеграф ударной волны Слизня Края: пульсирующее красное кольцо на земле
+        if (_world.EndBoss is { Alive: true, IsDying: false } slamBoss && slamBoss.SlamWarningTimer > 0f) {
+            float t = slamBoss.SlamWarningTimer / 0.6f;                 // 1 → 0
+            byte alpha = (byte)(150 + 80 * MathF.Sin(time * 30f));      // быстрый пульс
+            float radius = EndSlime.HalfSizeXZ + 3.2f + (1f - t) * 1.2f;
+            var ground = FindGroundBelow(slamBoss.Position);
+            if (ground.HasValue) {
+                var gc = ground.Value;
+                Raylib.DrawCircle3D(new Vector3(gc.X, gc.Y + 0.03f, gc.Z), radius, new Vector3(1, 0, 0), 90f,
+                    new Color((byte)255, (byte)60, (byte)30, alpha));
+                Raylib.DrawCircle3D(new Vector3(gc.X, gc.Y + 0.03f, gc.Z), radius * 0.62f, new Vector3(1, 0, 0), 90f,
+                    new Color((byte)255, (byte)120, (byte)40, (byte)(alpha * 0.6f)));
+            }
+        }
+
+        // 3.4 Телеграф сингулярности Истинного Слизня: фиолетовое сжимающееся кольцо вокруг игрока
+        if (_world.TrueVoidBoss is { Alive: true, IsDying: false } tSlam && tSlam.SingularityWarningTimer > 0f) {
+            float t = tSlam.SingularityWarningTimer / 0.6f;             // 1 → 0
+            float radius = 4.5f * t + 1.2f;                             // сжимается к игроку
+            byte alpha = (byte)(140 + 80 * MathF.Sin(time * 30f));
+            var ground = FindGroundBelow(_session.Player.Position);
+            if (ground.HasValue) {
+                var gp = ground.Value;
+                Raylib.DrawCircle3D(new Vector3(gp.X, gp.Y + 0.03f, gp.Z), radius, new Vector3(1, 0, 0), 90f,
+                    new Color((byte)220, (byte)40, (byte)255, alpha));
+                Raylib.DrawCircle3D(new Vector3(gp.X, gp.Y + 0.03f, gp.Z), radius * 0.55f, new Vector3(1, 0, 0), 90f,
+                    new Color((byte)255, (byte)100, (byte)255, (byte)(alpha * 0.6f)));
+            }
         }
 
         // 4. Draw Flying Arrows / Жемчуг / Око Эндера with lighting and fog
@@ -1380,6 +1516,19 @@ public sealed class WorldRenderer : IDisposable {
             Color tint = ShadeColor(Color.White, light, p.Position);
             Raylib.DrawBillboardRec(camera, TextureAtlas.Atlas, src, pos, new Vector2(0.4f, 0.4f), tint);
         }
+    }
+
+    /// <summary>Ищет твёрдую землю под точкой (до 6 блоков вниз); null — если не нашли.</summary>
+    private Vector3? FindGroundBelow(Vector3 pos) {
+        int px = (int)MathF.Floor(pos.X);
+        int pz = (int)MathF.Floor(pos.Z);
+        int startY = (int)MathF.Floor(pos.Y);
+        for (int y = startY; y >= startY - 6; y--) {
+            if (_world.IsSolidAt(new Vec3i(px, y, pz))) {
+                return new Vector3(pos.X, y + 1.0f, pos.Z);
+            }
+        }
+        return null;
     }
 
     private void DrawSoftShadow(Vector3 pos, float baseRadius) {
@@ -1488,6 +1637,28 @@ public sealed class WorldRenderer : IDisposable {
         }
     }
 
+    /// <summary>Луч лечения: искры летят от кристалла к боссу по прямой (без гравитации).</summary>
+    public void SpawnHealBeamParticles(Vector3 from, Vector3 to, int count = 3) {
+        for (int i = 0; i < count; i++) {
+            var jitter = new Vector3(
+                (ParticleRng.NextSingle() - 0.5f) * 0.5f,
+                (ParticleRng.NextSingle() - 0.5f) * 0.5f,
+                (ParticleRng.NextSingle() - 0.5f) * 0.5f);
+            float life = 0.55f + ParticleRng.NextSingle() * 0.3f;
+            _particles.Add(new VoxelParticle {
+                Position = from + jitter,
+                Velocity = Vector3.Zero,
+                Color = new Color(90, 255, 160, 220),
+                Size = 0.10f + ParticleRng.NextSingle() * 0.06f,
+                Lifetime = life,
+                MaxLifetime = life,
+                IsCrit = true,
+                IsHealBeam = true,
+                Target = to + new Vector3(0f, EndSlime.HalfSizeY, 0f)
+            });
+        }
+    }
+
     public void DrawParticles(float dt) {
         for (int i = _particles.Count - 1; i >= 0; i--) {
             var p = _particles[i];
@@ -1497,10 +1668,18 @@ public sealed class WorldRenderer : IDisposable {
                 continue;
             }
 
-            p.Position += p.Velocity * dt;
-            p.Velocity.Y -= 16f * dt;
-            p.Velocity.X *= MathF.Exp(-2.0f * dt);
-            p.Velocity.Z *= MathF.Exp(-2.0f * dt);
+            if (p.IsHealBeam) {
+                // Искра летит к цели по прямой с лёгкой волной
+                var jitter = new Vector3(
+                    MathF.Sin(p.MaxLifetime * 23f + i) * 0.15f, 0f,
+                    MathF.Cos(p.MaxLifetime * 19f + i) * 0.15f);
+                p.Position = Vector3.Lerp(p.Position, p.Target, 4.5f * dt) + jitter * dt;
+            } else {
+                p.Position += p.Velocity * dt;
+                p.Velocity.Y -= 16f * dt;
+                p.Velocity.X *= MathF.Exp(-2.0f * dt);
+                p.Velocity.Z *= MathF.Exp(-2.0f * dt);
+            }
             _particles[i] = p;
 
             float alphaRatio = Math.Clamp(p.Lifetime / p.MaxLifetime, 0f, 1f);
@@ -1544,7 +1723,8 @@ public sealed class WorldRenderer : IDisposable {
             unsafe {
                 _material.Maps[(int)MaterialMapIndex.Albedo].Texture = default;
             }
-            Raylib.UnloadShader(_material.Shader);
+            // UnloadMaterial уже выгружает шейдер материала — ручной UnloadShader
+            // приводил к двойному освобождению и крашу 0xC0000374 на выходе.
             Raylib.UnloadMaterial(_material);
         }
         _materialReady = false;

@@ -28,8 +28,28 @@ public sealed class GameSession {
     public bool KeepInventory = false;
     public int MasterSeed;
 
-    // Титры при выходе из Энда после победы над боссом
+    // Титры при выходе из Энда / Бездны после победы над боссом
     public float CreditsTimer;
+    public int CreditsType = 1; // 1 = End Slime (таинственный финал), 2 = True Void Slime (истинный триумф)
+    /// <summary>После этих титров — сохранить игру и выйти в главное меню (истинный финал).</summary>
+    public bool CreditsLeadToMenu;
+
+    // Кинематографичные заголовки и субтитры (Cinema Titles)
+    public string? CurrentTitle;
+    public string? CurrentSubtitle;
+    public float TitleTimer;
+    public float TitleDuration = 4.5f;
+    public Color TitleColor = Color.White;
+    public Color SubtitleColor = Color.LightGray;
+
+    public void ShowTitle(string title, string subtitle = "", float duration = 4.5f, Color? titleColor = null, Color? subColor = null) {
+        CurrentTitle = title;
+        CurrentSubtitle = subtitle;
+        TitleDuration = MathF.Max(1.0f, duration);
+        TitleTimer = TitleDuration;
+        TitleColor = titleColor ?? new Color(255, 225, 120, 255);
+        SubtitleColor = subColor ?? new Color(235, 235, 245, 255);
+    }
 
     // Чат и команды
     public string ChatInput = "";
@@ -134,33 +154,78 @@ public sealed class GameSession {
             Player = new Player(),
             MasterSeed = seed,
         };
-        // Спавн: площадка 3×3 на поверхности у (0,0). Мгновенная плавная загрузка без фризов
-        int target = session.World.Generator.SurfaceHeight(0, 0);
-        session.World.EnsureLoadedAroundSync(new Vector3(0.5f, target + 1.9f, 0.5f), 1);
+
+        // Точка спавна зависит от сида: ищем сушу спиралью от (0,0). Чистый Перлин в узлах
+        // решётки вырождается в константу, поэтому фикс-спавн (0,0) всегда давал одну и ту же
+        // плоскую точку (Саванна, Y=42) в любом мире.
+        Vec3i spawn = FindSpawnPoint(session.World.Generator, seed);
+
+        // Спавн: площадка 3×3 на поверхности. Мгновенная плавная загрузка без фризов
+        int target = session.World.Generator.SurfaceHeight(spawn.X, spawn.Z);
+        session.World.EnsureLoadedAroundSync(new Vector3(spawn.X + 0.5f, target + 1.9f, spawn.Z + 0.5f), 1);
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
-                int sh = session.World.Generator.SurfaceHeight(dx, dz);
-                var w = new Vec3i(dx, 0, dz);
+                int wx = spawn.X + dx, wz = spawn.Z + dz;
+                int sh = session.World.Generator.SurfaceHeight(wx, wz);
+                var w = new Vec3i(wx, 0, wz);
                 if (sh > target) {
                     for (int y = target + 1; y <= sh; y++) {
-                        var v = session.World.GetVoxel(new Vec3i(dx, y, dz));
-                        if (v.TypeId != 0) session.World.RemoveBlock(new Vec3i(dx, y, dz));
+                        var v = session.World.GetVoxel(new Vec3i(wx, y, wz));
+                        if (v.TypeId != 0) session.World.RemoveBlock(new Vec3i(wx, y, wz));
                     }
                 } else if (sh < target) {
                     for (int y = sh + 1; y <= target; y++)
-                        session.World.PlacePlacedBlock(new Vec3i(dx, y, dz), GameData.BDirt);
+                        session.World.PlacePlacedBlock(new Vec3i(wx, y, wz), GameData.BDirt);
                 }
                 // Крона дерева, попавшего в площадку, не должна висеть в воздухе.
                 for (int y = target + 1; y <= target + 8; y++) {
-                    var w2 = new Vec3i(dx, y, dz);
+                    var w2 = new Vec3i(wx, y, wz);
                     if (session.World.GetVoxel(w2).TypeId == GameData.BLeaves.Id)
                         session.World.RemoveBlock(w2);
                 }
             }
         }
-        session.World.SpawnBlock = new Vec3i(0, target, 0);
-        session.Player.Position = new Vector3(0.5f, target + 1.9f, 0.5f);
+        session.World.SpawnBlock = new Vec3i(spawn.X, target, spawn.Z);
+        session.Player.Position = new Vector3(spawn.X + 0.5f, target + 1.9f, spawn.Z + 0.5f);
         return session;
+    }
+
+    /// <summary>Детерминированный поиск точки спавна по сиду: суша над уровнем моря,
+    /// не вода, не пляж и не деревня. Стартуем в 1500–2600 блоках от (0,0) в сид-зависимом
+    /// направлении: узел перлин-решётки в начале координат зажимает климат в линейный пандус
+    /// (ячейка климата ~625 блоков), поэтому в радиусе пары сотен блоков биом в каждом мире
+    /// был один и тот же (Саванна).</summary>
+    private static Vec3i FindSpawnPoint(WorldGenerator gen, int seed) {
+        var rng = new Random(seed ^ 0x5F3759DF);
+        double angle = rng.NextDouble() * Math.Tau;
+        int startR = rng.Next(1500, 2601);
+        var center = new Vec3i(
+            (int)MathF.Round((float)Math.Cos(angle) * startR),
+            0,
+            (int)MathF.Round((float)Math.Sin(angle) * startR));
+
+        const int step = 13;
+        for (int ring = 0; ring <= 120; ring++) {   // спираль вокруг стартовой точки, до ~1560 блоков
+            for (int dx = -ring; dx <= ring; dx++) {
+                for (int dz = -ring; dz <= ring; dz++) {
+                    if (Math.Max(Math.Abs(dx), Math.Abs(dz)) != ring) continue; // только периметр кольца
+                    int wx = center.X + dx * step;
+                    int wz = center.Z + dz * step;
+                    if (IsGoodSpawnColumn(gen, wx, wz)) return new Vec3i(wx, 0, wz);
+                }
+            }
+        }
+        // Фоллбэк: старый центр (лучше, чем не найти ничего).
+        return new Vec3i(0, 0, 0);
+    }
+
+    private static bool IsGoodSpawnColumn(WorldGenerator gen, int wx, int wz) {
+        var biome = gen.GetBiome(wx, WorldGenerator.BaseHeight, wz);
+        if (biome is BiomeType.Ocean or BiomeType.River or BiomeType.Beach or BiomeType.Mineshaft) return false;
+        if (gen.IsInVillage(wx, wz)) return false; // площадка 3×3 не должна срезать угол дома
+        int surface = gen.SurfaceHeight(wx, wz);
+        if (surface <= WorldGenerator.SeaLevel + 1) return false; // почти уровень моря — может подтопить площадку
+        return true;
     }
 
     // ── Тик ──────────────────────────────────────────────────────────────────
@@ -216,9 +281,22 @@ public sealed class GameSession {
             AddMessage("Вы вошли в Энд!");
         } else {
             bool endBossDefeated = fromDim == Dimension.End && World.EndBossDefeated;
+            // Истинный финал: выход из Бездны после победы над Истинным Слизнем — титры и главное меню.
+            bool trueVictory = fromDim == Dimension.Void && World.TrueVoidBossDefeated;
             World = OverworldWorld ?? new GameWorld(World.Seed) { Dimension = Dimension.Overworld };
 
-            if (fromDim == Dimension.End) {
+            if (trueVictory) {
+                // Портал Триумфа уводит домой: финальные титры, затем главное меню.
+                World.EnsureLoadedAroundSync(new Vector3(World.SpawnBlock.X, World.SpawnBlock.Y, World.SpawnBlock.Z), 2);
+                Player.Position = World.GetSafeRespawnPosition(World.SpawnBlock);
+                Player.Velocity = Vector3.Zero;
+                Player.PortalTimer = -2.5f;
+                AddMessage("Портал Триумфа переносит вас домой...");
+                Ui = UiState.Credits;
+                CreditsType = 2;
+                CreditsLeadToMenu = true;
+                CreditsTimer = 32f;
+            } else if (fromDim == Dimension.End) {
                 // Выход из Энда: просто возвращаем на точку спавна, БЕЗ портала в Обычном мире
                 World.EnsureLoadedAroundSync(new Vector3(World.SpawnBlock.X, World.SpawnBlock.Y, World.SpawnBlock.Z), 2);
                 Player.Position = World.GetSafeRespawnPosition(World.SpawnBlock);
@@ -250,18 +328,24 @@ public sealed class GameSession {
         }
     }
 
+    /// <summary>Открыт ли древний обелиск знаний на побочном острове Энда.</summary>
+    public bool EndLoreDiscovered;
+
     /// <summary>Переход в Бездну (тайное измерение под Эндом) при выживании в пустоте.</summary>
     public void EnterVoid() {
         if (VoidWorld == null) {
             VoidWorld = new GameWorld(World.Seed ^ 0x4E19D2B) { Dimension = Dimension.Void };
         }
         World = VoidWorld;
-        const int platformY = 21;
-        World.EnsureLoadedAroundSync(new Vector3(0.5f, platformY, 0.5f), 2);
-        Player.Position = new Vector3(0.5f, platformY + 0.5f, 0.5f);
+        const int bedrockFloorY = 12;
+        World.EnsureLoadedAroundSync(new Vector3(0.5f, bedrockFloorY, -14f), 2);
+        Player.Position = new Vector3(0.5f, bedrockFloorY + 0.5f, -14f);
         Player.Velocity = Vector3.Zero;
         Player.PortalTimer = -2.5f;
-        AddMessage("Вы провалились в Бездну. В центре — Врата, ждущие Ключ...");
+        SoundSystem.PlayThunder();
+        ShowTitle("БЕЗДНА", "Вы пробили пелену Пустоты и достигли Дна Реальности", 5.0f, new Color(180, 60, 255, 255), new Color(230, 210, 255, 255));
+        AddMessage("§5Вы пробили смертоносную пелену Пустоты и упали на монолитный пол из бедрока!");
+        AddMessage("§dВ полумраке перед вами возвышаются Врата Бездны и Алтарь...");
     }
 
     /// <summary>Возврат из Бездны в Энд.</summary>
@@ -276,18 +360,24 @@ public sealed class GameSession {
         AddMessage("Вы выбрались из Бездны обратно в Энд.");
     }
 
-    /// <summary>Награда за открытие Врат Бездны: мощный лут.</summary>
-    public void GiveVoidReward() {
-        var inv = Player.Inventory;
-        void Give(ItemDefinition def, int qty) { if (qty > 0) inv.TryInsert(GameData.NewItem(def), qty); }
-        Give(GameData.DiamondItem, 12);
-        Give(GameData.GoldIngotItem, 24);
-        Give(GameData.TotemItem, 2);
-        Give(GameData.EnchantedBookItem, 2);
-        Give(GameData.GoldenAppleItem, 4);
-        Give(GameData.ObsidianItem, 32);
-        AddMessage("Врата Бездны открылись! Перед вами сокровище забытого измерения.");
-        AddMessage("Вы познали тайну, скрытую под Эндом.");
+    /// <summary>Активация алтаря Бездны: ловушка, диалог и пробуждение Истинного Слизня Края.</summary>
+    public void TriggerVoidAltarEncounter() {
+        if (World.VoidAltarTriggered) return;
+        World.VoidAltarTriggered = true;
+        World.VoidBossIntroStep = 1;
+        World.VoidBossIntroTimer = 0f;
+
+        // Растворяем алтарь/врата во тьме с громом и частицами
+        World.RemoveBlock(new Vec3i(0, 13, 0));
+        World.RemoveBlock(new Vec3i(0, 12, 0));
+        World.SpawnCrit(new Vector3(0.5f, 13f, 0.5f), 45);
+        SoundSystem.PlayThunder();
+        SoundSystem.PlayExplosion();
+
+        ShowTitle("ВРАТА БЕЗДНЫ РАЗРУШЕНЫ", "«Ха-ха-ха... Ты правда думал, что победил меня наверху?..»", 4.0f, new Color(220, 60, 255, 255), new Color(255, 210, 255, 255));
+        AddMessage("§dВы вставляете Ключ Бездны в алтарь...");
+        AddMessage("§4Сокровищница растворяется во тьме! Пол из бедрока содрогается!");
+        AddMessage("§5[Истинный Слизень]: Ха-ха-ха... Ты правда думал, что победил меня наверху, смертный?.. ");
     }
 
     private static void EnsureSafePortalPlatform(GameWorld world, int px, int py, int pz, BlockType portalBlock) {
@@ -330,6 +420,7 @@ public sealed class GameSession {
         for (int i = 0; i < _messages.Count; i++)
             _messages[i] = (_messages[i].Text, _messages[i].Age + dt);
         _messages.RemoveAll(m => m.Age > 6f);
+        if (TitleTimer > 0f) TitleTimer = MathF.Max(0f, TitleTimer - dt);
 
         if (Ui == UiState.Paused || Ui == UiState.Death || Ui == UiState.Credits) return;
 
@@ -390,7 +481,7 @@ public sealed class GameSession {
                 : Vector3.Zero;
             Camera.Position = Player.Eye + new Vector3(0f, Player.BobOffset, 0f) + shake;
             Camera.Target = Player.Eye + new Vector3(0f, Player.BobOffset, 0f) + Player.Forward + shake;
-            Camera.FovY = 70f + Player.SprintFovProgress * 10f;
+            Camera.FovY = SaveSystem.FovSetting + Player.SprintFovProgress * 10f;
 
             // Наклон камеры при получении урона (Hurt Tilt)
             if (Player.HurtTimer > 0f) {
@@ -402,10 +493,9 @@ public sealed class GameSession {
                 Camera.Up = Vector3.UnitY;
             }
             if (input.OpenInventory) Ui = UiState.Inventory;
-            else if (input.OpenCrafting) Ui = UiState.Crafting;
             else if (input.Pause) Ui = UiState.Paused;
         } else if (Ui != UiState.Chat && Ui != UiState.Death) {
-            if (input.OpenInventory || input.OpenCrafting || input.Pause) {
+            if (input.OpenInventory || input.Pause) {
                 Screens.ReturnHeld(this);   // предмет «из руки» и предметы крафта вернуть в инвентарь
                 Ui = UiState.Playing;
             }
@@ -420,6 +510,7 @@ public sealed class GameSession {
         var endIslandCenter = new Vector3(0.5f, endIslandTop, 0.5f);
         World.TickEndCrystals(dt, Player, this);
         World.TickEndSlime(dt, Player, this, endIslandCenter, endIslandTop);
+        World.TickTrueVoidBoss(dt, Player, this);
 
         DayNight.Tick(dt);
         // Фактор неба — uniform шейдера, меши не пересобираются при смене дня.

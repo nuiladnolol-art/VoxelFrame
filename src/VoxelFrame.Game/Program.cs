@@ -33,6 +33,21 @@ internal static class Program {
         } catch { }
     }
 
+    /// <summary>
+    /// F2: скриншот в %AppData%/VoxelFrame/screenshots/ с тостом в HUD.
+    /// </summary>
+    private static void TakeGameScreenshot(GameSession session) {
+        try {
+            string dir = Path.Combine(SaveSystem.SaveDirectory, "..", "screenshots");
+            Directory.CreateDirectory(dir);
+            string file = Path.Combine(dir, $"screenshot_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.png");
+            Raylib.TakeScreenshot(file);
+            session.AddMessage("Скриншот сохранён: " + Path.GetFileName(file));
+        } catch (Exception ex) {
+            session.AddMessage("Не удалось сохранить скриншот: " + ex.Message);
+        }
+    }
+
     private static int Main(string[] args) {
         if (args.Contains("--smoke")) return SmokeTest.Run();
         if (args.Contains("--export-textures")) {
@@ -124,12 +139,14 @@ internal static class Program {
                 }
                 Raylib.BeginDrawing();
                 MenuAction action = MenuAction.None;
+                Ui.Begin();
                 if (Screens.InSettingsScreen) {
                     if (Screens.InGraphicsScreen) Screens.DrawGraphics();
                     else if (Screens.InAudioScreen) Screens.DrawAudio();
                     else if (Screens.InGameplayScreen) Screens.DrawGameplay();
                     else if (Screens.InControlsScreen) Screens.DrawControls();
                     else Screens.DrawSettings();
+                    Ui.End();
                     Raylib.EndDrawing();
                     if (Raylib.IsKeyPressed(KeyBinds.Pause)) {
                         if (Screens.InGraphicsScreen) { Screens.InGraphicsScreen = false; SaveSystem.SaveSettings(); }
@@ -140,6 +157,7 @@ internal static class Program {
                     }
                 } else {
                     action = Screens.DrawMenu(dt);
+                    Ui.End();
                     Raylib.EndDrawing();
                 }
 
@@ -177,8 +195,14 @@ internal static class Program {
             if (session.Ui == UiState.Loading) {
                 renderer!.ProcessMeshQueue();
                 session.LoadDone = Math.Min(session.LoadDone + 4, session.LoadTotal);
-                Raylib.BeginDrawing();
+                if (!PostProcessing.BeginScene(session)) {
+                    Raylib.BeginDrawing();
+                }
+                Raylib.ClearBackground(new Color(10, 12, 20, 255));
+                Ui.Begin();
                 Screens.DrawLoading(session);
+                Ui.End();
+                PostProcessing.EndScene();
                 Raylib.EndDrawing();
                 if (session.LoadDone >= session.LoadTotal) {
                     session.Ui = UiState.Playing;
@@ -191,14 +215,19 @@ internal static class Program {
                     Raylib.EnableCursor();
                     cursorCaptured = false;
                 }
-                Raylib.BeginDrawing();
-                
+                if (!PostProcessing.BeginScene(session)) {
+                    Raylib.BeginDrawing();
+                }
+
                 if (Screens.InSettingsScreen) {
+                    Ui.Begin();
                     if (Screens.InGraphicsScreen) Screens.DrawGraphics();
                     else if (Screens.InAudioScreen) Screens.DrawAudio();
                     else if (Screens.InGameplayScreen) Screens.DrawGameplay();
                     else if (Screens.InControlsScreen) Screens.DrawControls();
                     else Screens.DrawSettings();
+                    Ui.End();
+                    PostProcessing.EndScene();
                     Raylib.EndDrawing();
                     if (pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause)) {
                         pauseDebounce = 0.25f;
@@ -221,7 +250,12 @@ internal static class Program {
                 renderer.DrawDecorations(dt);
                 Raylib.EndMode3D();
 
+                // Пост-обработка до паузы-UI
+                PostProcessing.EndScene();
+
+                Ui.Begin();
                 var pauseAction = Screens.DrawPause(session);
+                Ui.End();
                 Raylib.EndDrawing();
 
                 if ((pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause)) || pauseAction == PauseAction.Resume) {
@@ -257,7 +291,9 @@ internal static class Program {
                 try { session.SaveTo(SaveSystem.SavePath); } catch { /* повторим на следующем тике */ }
             }
 
-            Raylib.BeginDrawing();
+            if (!PostProcessing.BeginScene(session)) {
+                Raylib.BeginDrawing();
+            }
             Raylib.ClearBackground(new Color(10, 12, 20, 255));
 
             CrashDiag("03_pre_mesh");
@@ -279,12 +315,17 @@ internal static class Program {
             Raylib.EndMode3D();
             CrashDiag("09_post_endmode3d");
 
+            // Пост-обработка: композит сцены с виньеткой/цветокором ДО отрисовки UI
+            PostProcessing.EndScene();
+
             // Защита от X-Ray (если камера внутри непрозрачного блока — черная заглушка)
             var camCell = new VoxelFrame.Core.Vec3i((int)MathF.Floor(session.Camera.Position.X), (int)MathF.Floor(session.Camera.Position.Y), (int)MathF.Floor(session.Camera.Position.Z));
             if (session.World.IsOpaqueAt(camCell)) {
                 Raylib.DrawRectangle(0, 0, Raylib.GetScreenWidth(), Raylib.GetScreenHeight(), new Color(16, 14, 13, 255));
             }
 
+            // UI рисуется в виртуальных координатах (масштаб интерфейса)
+            Ui.Begin();
             switch (session.Ui) {
                 case UiState.Credits:
                     if (cursorCaptured) {
@@ -293,7 +334,18 @@ internal static class Program {
                     }
                     session.CreditsTimer -= dt;
                     Screens.DrawCredits(session);
-                    if (session.CreditsTimer <= 0f) session.Ui = UiState.Playing;
+                    if (session.CreditsTimer <= 0f || Raylib.IsKeyPressed(KeyboardKey.Escape) || Raylib.IsKeyPressed(KeyboardKey.Space) || Raylib.IsKeyPressed(KeyboardKey.Enter)) {
+                        if (session.CreditsLeadToMenu) {
+                            // Истинный финал: титры просмотрены — сохраняем и выходим в главное меню.
+                            SoundSystem.StopTotem();
+                            session.SaveTo(SaveSystem.SavePath);
+                            session.Ui = UiState.Playing;
+                            session = null;
+                            renderer = null;
+                        } else {
+                            session.Ui = UiState.Playing;
+                        }
+                    }
                     break;
                 case UiState.Playing:
                     if (Raylib.IsKeyPressed(KeyboardKey.T)) {
@@ -304,6 +356,8 @@ internal static class Program {
                         session.Ui = UiState.Chat;
                         session.ChatInput = "/";
                         if (cursorCaptured) { Raylib.EnableCursor(); cursorCaptured = false; }
+                    } else if (Raylib.IsKeyPressed(KeyboardKey.F2)) {
+                        TakeGameScreenshot(session);
                     }
 
                     // Курсор прячем только при фокусе окна: иначе он «зависает»
@@ -398,6 +452,7 @@ internal static class Program {
                     Screens.DrawChestUI(session);
                     break;
             }
+            Ui.End();
             Raylib.EndDrawing();
 
             frames++;
@@ -422,6 +477,7 @@ internal static class Program {
         SoundSystem.Shutdown();
         TextureAtlas.Unload();
         Fonts.Unload();
+        PostProcessing.Unload();
         Raylib.CloseWindow();
         return 0;
     }
@@ -437,7 +493,6 @@ internal static class Program {
         if (uiState != UiState.Playing) {
             return new PlayerInput {
                 OpenInventory = Raylib.IsKeyPressed(KeyBinds.Inventory),
-                OpenCrafting = Raylib.IsKeyPressed(KeyBinds.Crafting),
                 Pause = pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause),
             };
         }
@@ -466,14 +521,14 @@ internal static class Program {
             UsePressed = Raylib.IsMouseButtonPressed(MouseButton.Right),
             UseHeld = Raylib.IsMouseButtonDown(MouseButton.Right),
             OpenInventory = Raylib.IsKeyPressed(KeyBinds.Inventory),
-            OpenCrafting = Raylib.IsKeyPressed(KeyBinds.Crafting),
             Pause = pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause),
             Scroll = (int)Raylib.GetMouseWheelMove(),
             HotbarSlot = HotbarKey(),
         };
         var delta = Raylib.GetMouseDelta();
-        input.MouseDX = delta.X;
-        input.MouseDY = delta.Y;
+        float sens = SaveSystem.MouseSensitivity / 100f;
+        input.MouseDX = delta.X * sens;
+        input.MouseDY = delta.Y * sens;
         return input;
     }
 
@@ -655,5 +710,8 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.SwampArtifactItem.Id, TextureAtlas.TSwampArtifact);
         TextureAtlas.SetItemTile(GameData.DesertArtifactItem.Id, TextureAtlas.TDesertArtifact);
         TextureAtlas.SetItemTile(GameData.VoidKeyItem.Id, TextureAtlas.TVoidKey);
+        TextureAtlas.SetItemTile(GameData.NetherTotemItem.Id, TextureAtlas.TNetherArtifact);
+        TextureAtlas.SetItemTile(GameData.SwampTotemItem.Id, TextureAtlas.TSwampArtifact);
+        TextureAtlas.SetItemTile(GameData.DesertTotemItem.Id, TextureAtlas.TDesertArtifact);
     }
 }

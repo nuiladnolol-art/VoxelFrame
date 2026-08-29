@@ -64,9 +64,9 @@ public static partial class Screens {
     /// Отрисовка полноценного Креативного меню (Creative Inventory GUI).
     /// </summary>
     public static void DrawCreativeMenu(GameSession session) {
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        int w = Ui.Vw, h = Ui.Vh;
         var inv = session.Player.Inventory;
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Ui.Mouse();
 
         const int cols = 9;
         const int visibleRows = 5;

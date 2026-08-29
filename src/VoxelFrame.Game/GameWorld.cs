@@ -152,11 +152,14 @@ public sealed partial class GameWorld : IDisposable {
     public void EnsureLoadedAround(Vector3 playerPos, int radius = RenderDistance) {
         var pc = Chunk.CoordOf(new Vec3i((int)MathF.Floor(playerPos.X), (int)MathF.Floor(playerPos.Y), (int)MathF.Floor(playerPos.Z)));
         
+        int minY = Math.Min(0, pc.Y - 1);
+        int maxY = Math.Max(2, pc.Y + 2);
+
         // 1. Ближний радиус (дистанция 0..1): критичен для физики, гарантируем загрузку
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
-                for (int dy = -1; dy <= 2; dy++) {
-                    var cc = new Vec3i(pc.X + dx, pc.Y + dy, pc.Z + dz);
+                for (int cy = minY; cy <= maxY; cy++) {
+                    var cc = new Vec3i(pc.X + dx, cy, pc.Z + dz);
                     if (!_chunks.ContainsKey(cc)) {
                         GetOrCreateChunk(cc);
                     }
@@ -164,15 +167,15 @@ public sealed partial class GameWorld : IDisposable {
             }
         }
 
-        // 2. Внешний радиус: стримим пачками до 4 чанков за кадр от ближних к дальним
+        // 2. Внешний радиус: стримим пачками до 6 чанков за кадр от ближних к дальним
         int newChunkThisFrame = 0;
-        const int maxNewPerFrame = 4;
+        const int maxNewPerFrame = 6;
         for (int dist = 2; dist <= radius; dist++) {
             for (int dx = -dist; dx <= dist; dx++) {
                 for (int dz = -dist; dz <= dist; dz++) {
                     if (Math.Abs(dx) != dist && Math.Abs(dz) != dist) continue;
-                    for (int dy = -1; dy <= 2; dy++) {
-                        var cc = new Vec3i(pc.X + dx, pc.Y + dy, pc.Z + dz);
+                    for (int cy = minY; cy <= maxY; cy++) {
+                        var cc = new Vec3i(pc.X + dx, cy, pc.Z + dz);
                         if (!_chunks.ContainsKey(cc)) {
                             GetOrCreateChunk(cc);
                             newChunkThisFrame++;
@@ -306,6 +309,11 @@ public sealed partial class GameWorld : IDisposable {
     public void SpawnDust(Vector3 pos, int count = 4) => OnDustSpawned?.Invoke(pos, count);
     public void SpawnCrit(Vector3 pos, int count = 14) => OnCritSpawned?.Invoke(pos, count);
 
+    /// <summary>Событие луча лечения: частицы летят от точки A к точке B (визуализация регенерации босса).</summary>
+    public event Action<Vector3, Vector3, int>? OnHealBeamSpawned;
+
+    public void SpawnHealBeam(Vector3 from, Vector3 to, int count = 4) => OnHealBeamSpawned?.Invoke(from, to, count);
+
     public void RemoveBlock(Vec3i w) {
         var curVox = GetVoxel(w);
         if (curVox.TypeId != 0) {
@@ -355,17 +363,18 @@ public sealed partial class GameWorld : IDisposable {
 
         // Связанное удаление парной части кровати
         if (curVox.TypeId == GameData.BBed.Id || curVox.TypeId == GameData.BBedHead.Id) {
-            Vec3i[] cardDirs = { new(1, 0, 0), new(-1, 0, 0), new(0, 0, 1), new(0, 0, -1) };
-            foreach (var d in cardDirs) {
-                var otherPos = w + d;
-                var otherVox = GetVoxel(otherPos);
-                if (curVox.TypeId == GameData.BBed.Id && otherVox.TypeId == GameData.BBedHead.Id) {
-                    SetVoxelInternal(otherPos, VoxelData.Air);
-                    break;
-                } else if (curVox.TypeId == GameData.BBedHead.Id && otherVox.TypeId == GameData.BBed.Id) {
-                    SetVoxelInternal(otherPos, VoxelData.Air);
-                    break;
-                }
+            byte bedFacing = (byte)(curVox.SubGridLayerMask & 3);
+            Vec3i headDir = bedFacing switch {
+                3 => new Vec3i(1, 0, 0),
+                1 => new Vec3i(-1, 0, 0),
+                2 => new Vec3i(0, 0, 1),
+                _ => new Vec3i(0, 0, -1)
+            };
+            var otherPos = (curVox.TypeId == GameData.BBed.Id) ? (w + headDir) : (w - headDir);
+            var otherVox = GetVoxel(otherPos);
+            if ((curVox.TypeId == GameData.BBed.Id && otherVox.TypeId == GameData.BBedHead.Id) ||
+                (curVox.TypeId == GameData.BBedHead.Id && otherVox.TypeId == GameData.BBed.Id)) {
+                SetVoxelInternal(otherPos, VoxelData.Air);
             }
         }
 
@@ -944,14 +953,16 @@ public sealed partial class GameWorld : IDisposable {
     public void TickHostileMobs(float dt, Player player, GameSession session) {
         _hostileSpawnTimer -= dt;
         if (_hostileSpawnTimer <= 0f) {
-            _hostileSpawnTimer = 8f;
+            // В Энде фоновый спавн в 2 раза реже (16с) — эндэрмены не должны раздражать в бою с боссом
+            _hostileSpawnTimer = Dimension == Dimension.End ? 16f : 8f;
             int nearbyHostiles = 0;
             foreach (var m in HostileMobs) {
                 if (m.Alive && Vector3.DistanceSquared(m.Position, player.Position) < 45f * 45f) {
                     nearbyHostiles++;
                 }
             }
-            if (nearbyHostiles < 8) {
+            // В Энде лимит фоновых мобов ниже (3 вместо 8)
+            if (nearbyHostiles < (Dimension == Dimension.End ? 3 : 8)) {
                 TrySpawnHostileNearPlayer(player, session);
             }
         }
@@ -1122,7 +1133,7 @@ public sealed partial class GameWorld : IDisposable {
                     else if (mobRoll < 0.88) type = HostileType.Blaze;
                     else type = HostileType.Skeleton;
                 } else if (Dimension == Dimension.End) {
-                    // Энд почти полностью населён эндэрменами
+                    // Энд: фоновый спавн редкий (30%), чтобы не мешать битве с боссом
                     type = HostileType.Enderman;
                 } else {
                     // Обычное измерение: эндэрмены спавнятся довольно часто в глубокой темноте
@@ -1135,6 +1146,8 @@ public sealed partial class GameWorld : IDisposable {
 
                 // Обязательная проверка коллизии всего хитбокса моба
                 if (!Collision.IntersectsSolid(this, spawnPos - half, spawnPos + half)) {
+                    // В Энде срабатывает лишь 30% попыток — фоновые эндэрмены редки
+                    if (Dimension == Dimension.End && _random.NextDouble() > 0.30) return;
                     HostileMobs.Add(new HostileMob(type, spawnPos));
                     return;
                 }
@@ -1188,11 +1201,12 @@ public sealed partial class GameWorld : IDisposable {
     }
 
     private void SpawnInitialChunkAnimals(GameChunk gc) {
-        // Сбалансированный спавн животных (18% шанс на чанк, максимум 16 на мир)
-        if (_random.NextDouble() > 0.18) return;
-        if (Animals.Count >= 16) return;
+        bool inVillage = Generator.IsInVillage(gc.Coord.X * Chunk.SizeX + 16, gc.Coord.Z * Chunk.SizeZ + 16);
+        // Сбалансированный спавн животных (в деревнях гарантированно или 18% в дикой природе, максимум 24 на мир)
+        if (!inVillage && _random.NextDouble() > 0.18) return;
+        if (Animals.Count >= (inVillage ? 24 : 16)) return;
         var animalType = (AnimalType)_random.Next(0, 3); // Pig, Cow, Sheep
-        int count = _random.Next(2, 5); // 2..4 особи в стаде
+        int count = inVillage ? _random.Next(3, 6) : _random.Next(2, 5); // 2..5 особей в стаде
         int baseLx = _random.Next(4, Chunk.SizeX - 4);
         int baseLz = _random.Next(4, Chunk.SizeZ - 4);
 

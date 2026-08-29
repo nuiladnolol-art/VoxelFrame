@@ -1,4 +1,5 @@
 using System.Numerics;
+using Raylib_cs;
 using VoxelFrame.Core;
 using VoxelFrame.Core.World;
 
@@ -88,6 +89,13 @@ public sealed partial class GameWorld {
         return count;
     }
 
+    /// <summary>Финальный тайный босс — Истинный Слизень Края (в Бездне).</summary>
+    public TrueEndSlime? TrueVoidBoss;
+    public bool TrueVoidBossDefeated;
+    public bool VoidAltarTriggered;
+    public int VoidBossIntroStep;
+    public float VoidBossIntroTimer;
+
     /// <summary>Тик босса и спавн его при первом входе в измерение.</summary>
     public void TickEndSlime(float dt, Player player, GameSession session, Vector3 islandCenter, float islandTopY) {
         if (Dimension != Dimension.End || EndBossDefeated) return;
@@ -97,5 +105,36 @@ public sealed partial class GameWorld {
             EndBoss = new EndSlime(islandCenter + new Vector3(10f, 3f, 0f), islandCenter, Seed ^ 0x5A1E5);
         }
         EndBoss.Tick(dt, this, player, session, islandCenter, islandTopY);
+    }
+
+    /// <summary>Тик Истинного Слизня Края и катсцены пробуждения в Бездне.</summary>
+    public void TickTrueVoidBoss(float dt, Player player, GameSession session) {
+        if (Dimension != Dimension.Void || TrueVoidBossDefeated) return;
+
+        // Катсцена пробуждения босса при активации алтаря
+        if (VoidBossIntroStep > 0 && VoidBossIntroStep <= 4) {
+            VoidBossIntroTimer += dt;
+            if (VoidBossIntroTimer >= 2.4f) {
+                VoidBossIntroTimer = 0f;
+                VoidBossIntroStep++;
+
+                if (VoidBossIntroStep == 2) {
+                    session.ShowTitle("ИСТИННЫЙ ВЛАДЫКА", "«Наверху была лишь моя жалкая тень, запертая на острове!»", 3.2f, new Color(200, 60, 255, 255), new Color(245, 210, 255, 255));
+                    session.AddMessage("§5[Истинный Слизень]: Наверху была лишь моя жалкая тень, заточённая в клетке острова!");
+                    SoundSystem.PlaySplash();
+                } else if (VoidBossIntroStep == 3) {
+                    session.ShowTitle("ПЕЧАТИ СНЯТЫ", "«Ты сам принёс мне Ключ Бездны и снял печати с моей истинной мощи!»", 3.2f, new Color(220, 40, 180, 255), new Color(255, 180, 220, 255));
+                    session.AddMessage("§5[Истинный Слизень]: Ты сам принёс мне Ключ Бездны и снял печати с моей истинной мощи!");
+                    SoundSystem.PlayBabakherHiss();
+                } else if (VoidBossIntroStep == 4) {
+                    session.ShowTitle("ИСТИННЫЙ СЛИЗЕНЬ КРАЯ", "«Я — ИСТИННЫЙ СЛИЗЕНЬ КРАЯ! УЗРИ СВОЮ ПОГИБЕЛЬ!»", 5.0f, new Color(255, 30, 30, 255), new Color(255, 210, 80, 255));
+                    session.AddMessage("§4[Истинный Слизень]: Я — ИСТИННЫЙ СЛИЗЕНЬ КРАЯ! УЗРИ СВОЮ ПОГИБЕЛЬ!");
+                    SoundSystem.PlayThunder();
+                    TrueVoidBoss = new TrueEndSlime(new Vector3(0.5f, 13f, 8.5f), new Vector3(0.5f, 11f, 0.5f), Seed ^ 0x901DF00);
+                }
+            }
+        }
+
+        TrueVoidBoss?.Tick(dt, this, player, session);
     }
 }

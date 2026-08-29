@@ -15,7 +15,6 @@ public struct PlayerInput {
     public float MouseDX, MouseDY;
     public int Scroll;
     public bool OpenInventory;   // E
-    public bool OpenCrafting;    // C
     public bool Pause;           // ESC
     public int HotbarSlot;       // клавиши 1-9: выбор слота хотбара; -1 = нет
 

@@ -12,7 +12,6 @@ public static class KeyBinds {
     public static KeyboardKey Sprint = KeyboardKey.LeftControl;
     public static KeyboardKey Drop = KeyboardKey.Q;
     public static KeyboardKey Inventory = KeyboardKey.E;
-    public static KeyboardKey Crafting = KeyboardKey.C;
     public static KeyboardKey Pause = KeyboardKey.Escape;
     public static KeyboardKey ToggleDebug = KeyboardKey.F3;
 
@@ -38,7 +37,6 @@ public static class KeyBinds {
         Sprint = KeyboardKey.LeftControl;
         Drop = KeyboardKey.Q;
         Inventory = KeyboardKey.E;
-        Crafting = KeyboardKey.C;
         Pause = KeyboardKey.Escape;
         ToggleDebug = KeyboardKey.F3;
     }

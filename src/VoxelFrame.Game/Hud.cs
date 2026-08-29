@@ -12,15 +12,30 @@ public static class Hud {
     public static bool ShowDebugInfo = false;
 
     public static void Draw(GameSession session, float dt) {
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        int w = Ui.Vw, h = Ui.Vh;
         var player = session.Player;
 
-        // Прицел: классический крестик (+) с инверсным/контрастным контуром
+        // Прицел: классический крестик (+) с инверсным контуром + контекстная индикация интерактива
         int cx = w / 2, cy = h / 2;
-        Raylib.DrawRectangle(cx - 8, cy - 1, 17, 3, new Color(0, 0, 0, 160));
-        Raylib.DrawRectangle(cx - 1, cy - 8, 3, 17, new Color(0, 0, 0, 160));
-        Raylib.DrawRectangle(cx - 7, cy, 15, 1, new Color(255, 255, 255, 240));
-        Raylib.DrawRectangle(cx, cy - 7, 1, 15, new Color(255, 255, 255, 240));
+        bool isInteractable = false;
+        if (session.HasTarget) {
+            ushort tbId = session.World.GetVoxel(session.TargetBlock).TypeId;
+            isInteractable = tbId == GameData.BWorkbench.Id || tbId == GameData.BFurnace.Id ||
+                             tbId == GameData.BChest.Id || tbId == GameData.BBed.Id ||
+                             tbId == GameData.BBedHead.Id || GameData.IsDoor(tbId);
+        }
+
+        Color crosshairBg = new Color(0, 0, 0, 160);
+        Color crosshairFg = isInteractable ? new Color(255, 230, 120, 250) : new Color(255, 255, 255, 240);
+
+        Raylib.DrawRectangle(cx - 8, cy - 1, 17, 3, crosshairBg);
+        Raylib.DrawRectangle(cx - 1, cy - 8, 3, 17, crosshairBg);
+        Raylib.DrawRectangle(cx - 7, cy, 15, 1, crosshairFg);
+        Raylib.DrawRectangle(cx, cy - 7, 1, 15, crosshairFg);
+
+        if (isInteractable) {
+            Raylib.DrawCircle(cx, cy, 2.5f, new Color(255, 215, 80, 255));
+        }
 
         // Подводный полупрозрачный экранный фильтр (Underwater overlay)
         var eyeVoxel = session.World.GetVoxel(new Vec3i((int)MathF.Floor(player.Eye.X), (int)MathF.Floor(player.Eye.Y), (int)MathF.Floor(player.Eye.Z)));
@@ -67,6 +82,50 @@ public static class Hud {
             msgCount++;
         }
 
+        // Кинематографичный Заголовок и Субтитры по центру экрана (Cinema Titles & Boss Dialogues)
+        if (session.TitleTimer > 0f && !string.IsNullOrEmpty(session.CurrentTitle)) {
+            float fade = 1.0f;
+            float elapsed = session.TitleDuration - session.TitleTimer;
+            if (elapsed < 0.5f) fade = elapsed / 0.5f;
+            else if (session.TitleTimer < 0.8f) fade = session.TitleTimer / 0.8f;
+            fade = Math.Clamp(fade, 0f, 1f);
+
+            int alpha = (int)(255 * fade);
+            float titleSize = 38f;
+            float subSize = 22f;
+            float titleW = Fonts.Measure(session.CurrentTitle, titleSize);
+            float subW = string.IsNullOrEmpty(session.CurrentSubtitle) ? 0f : Fonts.Measure(session.CurrentSubtitle, subSize);
+
+            float titleX = (w - titleW) / 2f;
+            float titleY = h * 0.28f;
+
+            // Стильная полупрозрачная затемненная подложка
+            float bannerW = MathF.Max(titleW, subW) + 80f;
+            float bannerH = string.IsNullOrEmpty(session.CurrentSubtitle) ? 60f : 96f;
+            Raylib.DrawRectangle((int)((w - bannerW) / 2f), (int)(titleY - 12f), (int)bannerW, (int)bannerH, new Color(10, 8, 15, (int)(160 * fade)));
+
+            // Отрисовка заголовка
+            var tCol = new Color((int)session.TitleColor.R, (int)session.TitleColor.G, (int)session.TitleColor.B, alpha);
+            Fonts.DrawShadowed(session.CurrentTitle, titleX, titleY, titleSize, tCol);
+
+            // Отрисовка субтитров / реплики
+            if (!string.IsNullOrEmpty(session.CurrentSubtitle)) {
+                float subX = (w - subW) / 2f;
+                float subY = titleY + 44f;
+                var sCol = new Color((int)session.SubtitleColor.R, (int)session.SubtitleColor.G, (int)session.SubtitleColor.B, alpha);
+                Fonts.DrawShadowed(session.CurrentSubtitle, subX, subY, subSize, sCol);
+            }
+        }
+
+        // Индикатор прогресса поедания пищи (1.6 сек)
+        if (player.EatingTimer > 0f) {
+            float eatFrac = Math.Clamp(player.EatingTimer / 1.6f, 0f, 1f);
+            int barW = 120, barH = 7;
+            int bx = (w - barW) / 2, by = h / 2 + 36;
+            Raylib.DrawRectangle(bx - 2, by - 2, barW + 4, barH + 4, new Color(0, 0, 0, 180));
+            Raylib.DrawRectangle(bx, by, (int)(barW * eatFrac), barH, new Color(110, 220, 70, 240));
+        }
+
         // Босс-бар: Слизень Края (когда он жив и игрок в Энде)
         if (session.World.Dimension == Dimension.End && session.World.EndBoss is { Alive: true } sb) {
             float frac = Math.Clamp(sb.Health / EndSlime.MaxHealth, 0f, 1f);
@@ -81,6 +140,22 @@ public static class Hud {
                 : new Color(200, 50, 50, 255);
             Raylib.DrawRectangle(bx, by, (int)(barW * frac), barH, fillCol);
             Fonts.DrawShadowed("Слизень Края", bx + 6, by - 26, 20f, new Color(255, 255, 255, 235));
+        }
+
+        // Босс-бар: Истинный Слизень Края (в Бездне)
+        if (session.World.Dimension == Dimension.Void && session.World.TrueVoidBoss is { Alive: true } tb) {
+            float frac = Math.Clamp(tb.Health / TrueEndSlime.MaxHealth, 0f, 1f);
+            int barW = Math.Min(420, w - 40);
+            const int barH = 16;
+            int bx = (w - barW) / 2;
+            const int by = 52;
+            Raylib.DrawRectangle(bx - 4, by - 4, barW + 8, barH + 8, new Color(0, 0, 0, 210));
+            Raylib.DrawRectangle(bx, by, barW, barH, new Color(25, 10, 35, 240));
+            var fillCol = frac > 0.66f ? new Color(155, 40, 220, 255)
+                : frac > 0.33f ? new Color(220, 40, 130, 255)
+                : new Color(255, 30, 30, 255);
+            Raylib.DrawRectangle(bx, by, (int)(barW * frac), barH, fillCol);
+            Fonts.DrawShadowed($"Истинный Слизень Края  [{tb.Health:F0} / {TrueEndSlime.MaxHealth:F0}]", bx + 6, by - 26, 20f, new Color(255, 210, 255, 250));
         }
 
         // Инфо-панель: Координаты, Направление взгляда, Биом, Время, FPS (F3)
@@ -127,7 +202,8 @@ public static class Hud {
             Raylib.DrawRectangleRounded(rect, 0.15f, 6, selected ? new Color(90, 100, 120, 230) : new Color(40, 45, 55, 180));
             
             // Glowing yellow-gold border for selected slot, dark border for others
-            var borderColor = selected ? new Color(255, 220, 120, 255) : new Color(60, 65, 80, 255);
+            float pulse = MathF.Sin((float)Raylib.GetTime() * 4.5f) * 0.15f + 0.85f;
+            var borderColor = selected ? new Color((byte)255, (byte)(225 * pulse), (byte)(95 * pulse), (byte)255) : new Color(60, 65, 80, 255);
             Raylib.DrawRectangleRoundedLinesEx(rect, 0.15f, 6, selected ? 2.5f : 1.5f, borderColor);
             
             // Subtle slot number (1-9) in top-left corner
@@ -430,7 +506,7 @@ public static class Hud {
             y += 20f;
         }
 
-        LineL($"VoxelFrame 0.9.5 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
+        LineL($"VoxelFrame 0.9.9 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
         LineL($"XYZ: {player.Position.X:F3} / {player.Position.Y:F5} / {player.Position.Z:F3}", new Color(255, 240, 120, 255));
         LineL($"Block: {px} {py} {pz} [{(px & 15)} {(py & 15)} {(pz & 15)} in sub-chunk]");
         LineL($"Chunk: {px >> 4} {py >> 4} {pz >> 4} in chunk [{px >> 4}, {pz >> 4}]");

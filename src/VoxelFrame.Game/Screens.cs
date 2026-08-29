@@ -47,7 +47,6 @@ public static partial class Screens {
         "Бег (Спринт)",
         "Выбросить",
         "Инвентарь",
-        "Крафт",
         "Пауза"
     };
 
@@ -61,8 +60,7 @@ public static partial class Screens {
         6 => KeyBinds.Sprint,
         7 => KeyBinds.Drop,
         8 => KeyBinds.Inventory,
-        9 => KeyBinds.Crafting,
-        10 => KeyBinds.Pause,
+        9 => KeyBinds.Pause,
         _ => KeyboardKey.Null
     };
 
@@ -77,15 +75,14 @@ public static partial class Screens {
             case 6: KeyBinds.Sprint = key; break;
             case 7: KeyBinds.Drop = key; break;
             case 8: KeyBinds.Inventory = key; break;
-            case 9: KeyBinds.Crafting = key; break;
-            case 10: KeyBinds.Pause = key; break;
+            case 9: KeyBinds.Pause = key; break;
         }
     }
 
     // ── Главное меню ─────────────────────────────────────────────────────────
 
     public static MenuAction DrawMenu(float dt) {
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        int w = Ui.Vw, h = Ui.Vh;
         
         int tileSize = 64;
         for (int x = 0; x < w; x += tileSize) {
@@ -107,7 +104,7 @@ public static partial class Screens {
             Fonts.Draw("Название мира:", cx, h * 0.22f, 18f, new Color(200, 200, 200, 255));
             var nameRec = new Rectangle(cx, h * 0.26f, boxW, 42f);
             if (Raylib.IsMouseButtonPressed(MouseButton.Left)) {
-                if (Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), nameRec)) ActiveTextInputField = 1;
+                if (Raylib.CheckCollisionPointRec(Ui.Mouse(), nameRec)) ActiveTextInputField = 1;
             }
             Raylib.DrawRectangleRec(nameRec, ActiveTextInputField == 1 ? new Color(60, 65, 80, 255) : new Color(40, 45, 55, 255));
             Raylib.DrawRectangleLinesEx(nameRec, 1.5f, ActiveTextInputField == 1 ? new Color(255, 220, 120, 255) : new Color(90, 100, 120, 255));
@@ -121,8 +118,8 @@ public static partial class Screens {
             Fonts.Draw("Сид для генератора мира (оставьте пустым для случайного):", cx, h * 0.48f, 16f, new Color(200, 200, 200, 255));
             var seedRec = new Rectangle(cx, h * 0.52f, boxW, 42f);
             if (Raylib.IsMouseButtonPressed(MouseButton.Left)) {
-                if (Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), seedRec)) ActiveTextInputField = 2;
-                else if (!Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), nameRec)) ActiveTextInputField = 0;
+                if (Raylib.CheckCollisionPointRec(Ui.Mouse(), seedRec)) ActiveTextInputField = 2;
+                else if (!Raylib.CheckCollisionPointRec(Ui.Mouse(), nameRec)) ActiveTextInputField = 0;
             }
             Raylib.DrawRectangleRec(seedRec, ActiveTextInputField == 2 ? new Color(60, 65, 80, 255) : new Color(40, 45, 55, 255));
             Raylib.DrawRectangleLinesEx(seedRec, 1.5f, ActiveTextInputField == 2 ? new Color(255, 220, 120, 255) : new Color(90, 100, 120, 255));
@@ -176,7 +173,7 @@ public static partial class Screens {
                     var cardRec = new Rectangle(cardX, cy, cardW, cardH);
                     bool isSelected = (i == SelectedWorldListIndex);
 
-                    if (Raylib.IsMouseButtonPressed(MouseButton.Left) && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), cardRec)) {
+                    if (Raylib.IsMouseButtonPressed(MouseButton.Left) && Raylib.CheckCollisionPointRec(Ui.Mouse(), cardRec)) {
                         SelectedWorldListIndex = i;
                     }
 
@@ -235,7 +232,7 @@ public static partial class Screens {
             if (MenuError.Length > 0)
                 Fonts.DrawCentered(MenuError, w / 2f, h * 0.68f, 18f, new Color(255, 120, 120, 255));
 
-            Fonts.Draw("VoxelFrame Alpha 0.9.5", 10f, h - 25f, 14f, new Color(200, 200, 200, 180));
+            Fonts.Draw("VoxelFrame Alpha 0.9.9", 10f, h - 25f, 14f, new Color(200, 200, 200, 180));
             Fonts.Draw("SenStol Studio", w - 180f, h - 25f, 14f, new Color(200, 200, 200, 180));
         }
 
@@ -245,7 +242,7 @@ public static partial class Screens {
     // ── Настройки и Управление ───────────────────────────────────────────────
 
     public static void DrawSettings() {
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        int w = Ui.Vw, h = Ui.Vh;
         
         int tileSize = 64;
         for (int x = 0; x < w; x += tileSize) {
@@ -280,14 +277,25 @@ public static partial class Screens {
             InControlsScreen = true;
         }
 
-        if (Button(w / 2f - 140f, cy + (btnH + gapY) * 2 + 28f, 280f, 46f, "Готово", true)) {
+        // Масштаб интерфейса: авто по высоте окна или фиксированный процент
+        string scaleText = SaveSystem.UiScaleMode switch {
+            0 => "Масштаб интерфейса: Авто",
+            _ => $"Масштаб интерфейса: {SaveSystem.UiScaleMode}%",
+        };
+        if (Button(w / 2f - 140f, cy + (btnH + gapY) * 2, 280f, btnH, scaleText, true)) {
+            int[] steps = { 0, 75, 100, 125, 150, 200 };
+            int idx = Array.IndexOf(steps, SaveSystem.UiScaleMode);
+            SaveSystem.UiScaleMode = steps[(idx + 1) % steps.Length];
+        }
+
+        if (Button(w / 2f - 140f, cy + (btnH + gapY) * 2 + 28f + btnH, 280f, 46f, "Готово", true)) {
             InSettingsScreen = false;
         }
     }
 
         private static bool Slider(float x, float y, float w, float h, string text, float value, float min, float max, out float newValue) {
         newValue = value;
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Ui.Mouse();
         var rect = new Rectangle(x, y, w, h);
         bool hovered = Raylib.CheckCollisionPointRec(mouse, rect);
         bool dragging = hovered && Raylib.IsMouseButtonDown(MouseButton.Left);
@@ -320,7 +328,7 @@ public static partial class Screens {
     }
 
     public static void DrawGraphics() {
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        int w = Ui.Vw, h = Ui.Vh;
         
         int tileSize = 64;
         for (int x = 0; x < w; x += tileSize) {
@@ -388,18 +396,17 @@ public static partial class Screens {
             SaveSystem.ParticlesMode = (SaveSystem.ParticlesMode + 1) % 3;
         }
 
-        // 4. Тени сущностей
-        string shadowsText = SaveSystem.EntityShadows ? "Тени мобов: Включены" : "Тени мобов: Выключены";
-        if (Button(leftX, startY + (rowH + gapY) * 3f, colW, rowH, shadowsText, true)) {
-            SaveSystem.EntityShadows = !SaveSystem.EntityShadows;
+        // 4. Мягкое освещение (Smooth Lighting)
+        string smoothLightText = SaveSystem.FancyGraphics ? "Мягкий свет: Вкл" : "Мягкий свет: Выкл (Быстро)";
+        if (Button(leftX, startY + (rowH + gapY) * 3f, colW, rowH, smoothLightText, true)) {
+            SaveSystem.FancyGraphics = !SaveSystem.FancyGraphics;
         }
 
         // Правая колонка
-        // 1. Режим экрана
-        bool isFs = Raylib.IsWindowState(ConfigFlags.UndecoratedWindow) || Raylib.IsWindowFullscreen();
-        string fsText = isFs ? "Экран: Полноэкранный (в окне)" : "Экран: Оконный";
-        if (Button(rightX, startY, colW, rowH, fsText, true)) {
-            Raylib.ToggleBorderlessWindowed();
+        // 1. Поле зрения (FOV)
+        string fovText = $"Поле зрения (FOV): {SaveSystem.FovSetting}°";
+        if (Slider(rightX, startY, colW, rowH, fovText, SaveSystem.FovSetting, 50f, 110f, out float newFov)) {
+            SaveSystem.FovSetting = Math.Clamp((int)MathF.Round(newFov), 50, 110);
         }
 
         // 2. Динамическое освещение в руке
@@ -416,6 +423,21 @@ public static partial class Screens {
             SaveSystem.RenderDistanceSetting = Math.Clamp((int)MathF.Round(newDist), 2, 16);
         }
 
+        // 4. Режим экрана
+        bool isFs = Raylib.IsWindowState(ConfigFlags.UndecoratedWindow) || Raylib.IsWindowFullscreen();
+        string fsText = isFs ? "Экран: Полноэкранный" : "Экран: Оконный";
+        if (Button(rightX, startY + (rowH + gapY) * 3f, colW, rowH, fsText, true)) {
+            Raylib.ToggleBorderlessWindowed();
+        }
+
+        // 5. Кинематографичные эффекты (пост-обработка)
+        string postFxText = SaveSystem.PostFxMode == 0
+            ? "Кино-эффекты: Выкл (FPS+)"
+            : $"Кино-эффекты: Вкл ({(SaveSystem.PostFxVignette ? "виньетка" : "без виньетки")}{(SaveSystem.PostFxBloom ? ", bloom" : "")}{(SaveSystem.PostFxGoldenHour ? ", закат" : "")})";
+        if (Button(rightX, startY + (rowH + gapY) * 4f, colW, rowH, postFxText, true)) {
+            SaveSystem.PostFxMode = SaveSystem.PostFxMode == 0 ? 1 : 0;
+        }
+
         // Кнопка Готово
         if (Button(w / 2f - 140f, h * 0.85f, 280f, 46f, "Готово", true)) {
             InGraphicsScreen = false;
@@ -424,7 +446,7 @@ public static partial class Screens {
     }
 
     public static void DrawAudio() {
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        int w = Ui.Vw, h = Ui.Vh;
         
         int tileSize = 64;
         for (int x = 0; x < w; x += tileSize) {
@@ -454,7 +476,7 @@ public static partial class Screens {
     }
 
     public static void DrawGameplay() {
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        int w = Ui.Vw, h = Ui.Vh;
         
         int tileSize = 64;
         for (int x = 0; x < w; x += tileSize) {
@@ -477,7 +499,7 @@ public static partial class Screens {
     }
 
     public static void DrawControls() {
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        int w = Ui.Vw, h = Ui.Vh;
         
         int tileSize = 64;
         for (int x = 0; x < w; x += tileSize) {
@@ -517,10 +539,18 @@ public static partial class Screens {
             }
         }
 
+        // Слайдер чувствительности мыши
+        float sensY = startY + 6 * (rowH + 8f);
+        string sensText = $"Чувствительность мыши: {SaveSystem.MouseSensitivity}%";
+        if (Slider(w / 2f - colW, sensY, colW * 2f + 20f, rowH, sensText, SaveSystem.MouseSensitivity, 20f, 200f, out float newSens)) {
+            SaveSystem.MouseSensitivity = Math.Clamp((int)MathF.Round(newSens), 20, 200);
+        }
+
         float bottomY = h * 0.85f;
         if (Button(w / 2f - 210f, bottomY, 200f, 44f, "Сбросить по умолч.", true)) {
             ActiveRebindIndex = -1;
             KeyBinds.ResetToDefaults();
+            SaveSystem.MouseSensitivity = 100;
             SaveSystem.SaveSettings();
         }
 
@@ -534,7 +564,7 @@ public static partial class Screens {
     // ── Пауза ────────────────────────────────────────────────────────────────
 
     public static PauseAction DrawPause(GameSession session) {
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        int w = Ui.Vw, h = Ui.Vh;
         Raylib.DrawRectangle(0, 0, w, h, new Color(0, 0, 0, 150));
         Fonts.DrawCentered("ПАУЗА", w / 2f, h * 0.16f, 44f, Color.White);
 
@@ -551,7 +581,7 @@ public static partial class Screens {
     public enum DeathAction { None, Respawn, MainMenu }
 
     public static DeathAction DrawDeath(GameSession session) {
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        int w = Ui.Vw, h = Ui.Vh;
         // Красный градиент смерти
         Raylib.DrawRectangleGradientV(0, 0, w, h, new Color(170, 20, 20, 170), new Color(40, 5, 5, 235));
 
@@ -577,7 +607,7 @@ public static partial class Screens {
     // ── Экран загрузки ───────────────────────────────────────────────────────
 
     public static void DrawLoading(GameSession session) {
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        int w = Ui.Vw, h = Ui.Vh;
         Raylib.ClearBackground(new Color(10, 12, 20, 255));
 
         Fonts.DrawCentered("ЗАГРУЗКА МИРА", w / 2f, h * 0.35f, 48f, new Color(255, 220, 120, 255));
@@ -597,37 +627,65 @@ public static partial class Screens {
         Fonts.DrawCentered($"Чанков: {session.LoadDone}/{session.LoadTotal}", w / 2f, barY + 40f, 16f, new Color(170, 176, 190, 255));
     }
 
-    /// <summary>Титры после победы над Слизнем Края и выхода из Энда (прокрутка снизу вверх).</summary>
+    /// <summary>Титры: таинственные (после Слизня Края) или истинный финал (после Истинного Слизня).</summary>
     public static void DrawCredits(GameSession session) {
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
-        Raylib.ClearBackground(Color.Black);
+        int w = Ui.Vw, h = Ui.Vh;
+        Raylib.ClearBackground(new Color(6, 4, 10, 255));
 
-        string[] lines = {
-            "VoxelFrame",
+        string[] lines = session.CreditsType == 2 ? new[] {
+            "VoxelFrame: ИСТИННЫЙ ФИНАЛ",
             "",
-            "Спасибо, что прошли игру!",
+            "★ ВЕЛИКИЙ ТРИУМФ ★",
             "",
-            "Вы победили Слизня Края",
-            "и освободили измерение Энд.",
+            "Истинный Слизень Края повержен!",
+            "Бездна очищена от древней тьмы.",
             "",
-            "Мир ждёт новых приключений",
-            "и великих построек.",
+            "Все три измерения — Обычный мир, Незер и Энд —",
+            "навеки обрели покой и безопасность.",
             "",
-            "Играйте дальше!",
+            "Ты одолел всех стражей, собрал все реликвии",
+            "и покорил само Дно Реальности.",
+            "",
+            "Ты — Истинная Легенда VoxelFrame!",
+            "",
+            "Спасибо за невероятное прохождение!",
+            "Твой бесконечный мир ждёт тебя.",
+        } : new[] {
+            "VoxelFrame: ТЕНЬ КРАЯ",
+            "",
+            "Слизень Края повержен... но так ли это?",
+            "",
+            "Острова Энда хранят древнюю тайну,",
+            "забытую за гранью веков.",
+            "",
+            "Вдали на побочных островах спит Забытый Обелиск...",
+            "Тот, кто соединит Слизь с тремя реликвиями миров,",
+            "сковав Ключ Бездны...",
+            "",
+            "...и выдержит смертоносный спуск в Пустоту,",
+            "найдёт то, что скрывается глубже самого дна реальности.",
+            "",
+            "Это не конец истории.",
+            "Настоящий владыка Пустоты ещё наблюдает из Бездны...",
         };
 
         float elapsed = 32f - session.CreditsTimer;
-        float y = h + 60f - elapsed * 55f;
+        float y = h + 60f - elapsed * 52f;
         const float lineH = 46f;
         for (int i = 0; i < lines.Length; i++) {
             float ly = y + i * lineH;
             if (ly < -50f || ly > h + 50f) continue;
             bool isTitle = i == 0;
-            float size = isTitle ? 52f : 30f;
+            bool isSub = i == 2;
+            float size = isTitle ? 48f : isSub ? 32f : 24f;
             float mw = Fonts.Measure(lines[i], size);
-            Color col = isTitle ? new Color(255, 220, 120, 255) : new Color(220, 225, 235, 255);
+            Color col = isTitle ? (session.CreditsType == 2 ? new Color(255, 220, 90, 255) : new Color(190, 120, 255, 255))
+                      : isSub ? (session.CreditsType == 2 ? new Color(255, 240, 160, 255) : new Color(220, 180, 255, 255))
+                      : new Color(225, 230, 240, 255);
             Fonts.DrawShadowed(lines[i], w / 2f - mw / 2f, ly, size, col);
         }
+
+        Fonts.DrawShadowed("[ESC / ПРОБЕЛ] — Пропустить титры", w - 310, h - 30, 18f, new Color(160, 160, 180, 180));
     }
 
     // ── Инвентарь (сетка слотов, предмет за курсором) ─────────────────────────
@@ -702,7 +760,7 @@ public static partial class Screens {
             return;
         }
 
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        int w = Ui.Vw, h = Ui.Vh;
         var inv = session.Player.Inventory;
 
         int cols = 9, hotbarRows = 1, mainRows = 3;
@@ -735,7 +793,7 @@ public static partial class Screens {
         float offhandX = px + gridW + 30f;
         float offhandY = hotbarY;
         var offhandRec = new Rectangle(offhandX, offhandY, slot, slot);
-        bool offhandHover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), offhandRec);
+        bool offhandHover = Raylib.CheckCollisionPointRec(Ui.Mouse(), offhandRec);
         
         Raylib.DrawRectangleRec(offhandRec, SlotBg);
         Raylib.DrawRectangle((int)offhandX, (int)offhandY, slot, 2, SlotBorder);
@@ -759,7 +817,7 @@ public static partial class Screens {
         // Предмет за курсором.
         if (Held.HasValue && Held.Value.Quantity > 0) {
             var held = Held.Value;
-            var mouse = Raylib.GetMousePosition();
+            var mouse = Ui.Mouse();
             Hud.DrawItemIcon(held.Item.Definition, new Rectangle(mouse.X - 14f, mouse.Y - 14f, 28f, 28f), 1f);
             if (held.Quantity > 1) {
                 Fonts.Draw($"×{held.Quantity}", mouse.X - 14f, mouse.Y + 8f, 15f, Color.White);
@@ -773,14 +831,14 @@ public static partial class Screens {
     private static void DrawTooltip(GameSession session, VoxelFrame.Core.Inventory.Container inv) {
         if (Held.HasValue && Held.Value.Quantity > 0) return;
 
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Ui.Mouse();
         const int slot = 52, gap = 4;
         int cols = 9, mainRows = 3;
         int gridW = cols * slot + (cols - 1) * gap;
         int panelH = (mainRows + 1) * slot + mainRows * gap + 90;
         int panelW = gridW + 280;
-        float px = Raylib.GetScreenWidth() / 2f - panelW / 2f;
-        float py = (Raylib.GetScreenHeight() - panelH) / 2f;
+        float px = Ui.Vw / 2f - panelW / 2f;
+        float py = (Ui.Vh - panelH) / 2f;
         float gridX = px + 16f;
         float gridY = py + 38f;
         float hotbarY = gridY + mainRows * (slot + gap) + 12f;
@@ -817,7 +875,7 @@ public static partial class Screens {
 
     private static void DrawSlot(GameSession session, VoxelFrame.Core.Inventory.Container inv, float x, float y, int idx, bool hotbarSelected) {
         var rect = new Rectangle(x, y, 52, 52);
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Ui.Mouse();
         bool hovered = Raylib.CheckCollisionPointRec(mouse, rect);
 
         Raylib.DrawRectangleRec(rect, SlotBg);
@@ -842,14 +900,14 @@ public static partial class Screens {
     }
 
     private static void HandleHeldInput(GameSession session, VoxelFrame.Core.Inventory.Container inv) {
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Ui.Mouse();
         const int slot = 52, gap = 4;
         int cols = 9, mainRows = 3;
         int gridW = cols * slot + (cols - 1) * gap;
         int panelH = mainRows * slot + (mainRows - 1) * gap + slot + 120;
         int panelW = gridW + 270;
-        float px = Raylib.GetScreenWidth() / 2f - panelW / 2f;
-        float py = (Raylib.GetScreenHeight() - panelH) / 2f;
+        float px = Ui.Vw / 2f - panelW / 2f;
+        float py = (Ui.Vh - panelH) / 2f;
         float gridX = px + 16f;
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Left) || Raylib.IsMouseButtonPressed(MouseButton.Right)) {
@@ -941,8 +999,9 @@ public static partial class Screens {
             }
         }
 
-        // Выбрасывание предмета клавишей Q при наведении на слот
+        // Выбрасывание предмета клавишей Q / Ctrl+Q при наведении на слот
         if (Raylib.IsKeyPressed(KeyboardKey.Q)) {
+            bool ctrl = Raylib.IsKeyDown(KeyboardKey.LeftControl) || Raylib.IsKeyDown(KeyboardKey.RightControl);
             for (int row = 0; row < mainRows; row++) {
                 for (int col = 0; col < cols; col++) {
                     int idx = 9 + row * cols + col;
@@ -950,12 +1009,14 @@ public static partial class Screens {
                         var slotEntry = inv.Slots[idx];
                         if (slotEntry.HasValue && slotEntry.Value.Quantity > 0) {
                             var dropPos = session.Player.Eye + session.Player.Forward * 0.5f;
-                            var pickup = new ItemPickup(slotEntry.Value.Item, 1, dropPos) {
+                            int dropCount = ctrl ? slotEntry.Value.Quantity : 1;
+                            var pickup = new ItemPickup(slotEntry.Value.Item, dropCount, dropPos) {
                                 PickupDelay = 1.2f,
                                 Velocity = session.Player.Forward * 4.5f + new Vector3(0f, 2.0f, 0f)
                             };
                             session.World.Pickups.Add(pickup);
-                            if (slotEntry.Value.Quantity > 1) {
+                            SoundSystem.PlayPop();
+                            if (!ctrl && slotEntry.Value.Quantity > 1) {
                                 inv.Slots[idx] = slotEntry.Value with { Quantity = slotEntry.Value.Quantity - 1 };
                             } else {
                                 inv.RemoveAt(idx);
@@ -972,12 +1033,14 @@ public static partial class Screens {
                     var slotEntry = inv.Slots[idx];
                     if (slotEntry.HasValue && slotEntry.Value.Quantity > 0) {
                         var dropPos = session.Player.Eye + session.Player.Forward * 0.5f;
-                        var pickup = new ItemPickup(slotEntry.Value.Item, 1, dropPos) {
+                        int dropCount = ctrl ? slotEntry.Value.Quantity : 1;
+                        var pickup = new ItemPickup(slotEntry.Value.Item, dropCount, dropPos) {
                             PickupDelay = 1.2f,
                             Velocity = session.Player.Forward * 4.5f + new Vector3(0f, 2.0f, 0f)
                         };
                         session.World.Pickups.Add(pickup);
-                        if (slotEntry.Value.Quantity > 1) {
+                        SoundSystem.PlayPop();
+                        if (!ctrl && slotEntry.Value.Quantity > 1) {
                             inv.Slots[idx] = slotEntry.Value with { Quantity = slotEntry.Value.Quantity - 1 };
                         } else {
                             inv.RemoveAt(idx);
@@ -1024,7 +1087,7 @@ public static partial class Screens {
     private static bool SlotClicked(GameSession session, VoxelFrame.Core.Inventory.Container inv,
                                     float x, float y, int idx, bool rightClick) {
         var rect = new Rectangle(x, y, 52, 52);
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Ui.Mouse();
         if (!Raylib.CheckCollisionPointRec(mouse, rect)) return false;
 
         var entryInSlot = inv.Slots[idx];
@@ -1142,7 +1205,7 @@ public static partial class Screens {
     // ── Личный 2×2 крафт в инвентаре ─────────────────────────────────────────
     private static void DrawCraftPanel(GameSession session, float panelX, float panelY, float panelW, float panelH) {
         const int slotSz = 44, gap = 4;
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Ui.Mouse();
         bool leftClick = Raylib.IsMouseButtonPressed(MouseButton.Left);
         bool rightClick = Raylib.IsMouseButtonPressed(MouseButton.Right);
 
@@ -1298,6 +1361,9 @@ public static partial class Screens {
         new("Факелы (4 шт, древесный уголь)", GameData.TorchItem, 4, new[] { (GameData.CharcoalItem, 1), (GameData.StickItem, 1) }, new ItemDefinition?[] { GameData.CharcoalItem, null, GameData.StickItem, null }, false),
         new("Порох ифрита (2 шт)", GameData.BlazePowderItem, 2, new[] { (GameData.BlazeRodItem, 1) }, new ItemDefinition?[] { GameData.BlazeRodItem, null, null, null }, false),
         new("Око Эндера", GameData.EyeOfEnderItem, 1, new[] { (GameData.BlazePowderItem, 1), (GameData.EnderPearlItem, 1) }, new ItemDefinition?[] { GameData.BlazePowderItem, null, GameData.EnderPearlItem, null }, false),
+        new("Тотем Пламени (призыв в Аду)", GameData.NetherTotemItem, 1, new[] { (GameData.BlazeRodItem, 2), (GameData.GoldIngotItem, 1), (GameData.CoalItem, 1) }, new ItemDefinition?[] { GameData.BlazeRodItem, GameData.GoldIngotItem, null, GameData.CoalItem, GameData.BlazeRodItem, null, null, null, null }, true),
+        new("Тотем Песков (призыв в Пустыне)", GameData.DesertTotemItem, 1, new[] { (GameData.SandItem, 2), (GameData.GoldIngotItem, 1), (GameData.FlintItem, 1) }, new ItemDefinition?[] { GameData.SandItem, GameData.SandItem, null, GameData.GoldIngotItem, GameData.FlintItem, null, null, null, null }, true),
+        new("Тотем Топей (призыв в Болоте)", GameData.SwampTotemItem, 1, new[] { (GameData.StringItem, 2), (GameData.CharcoalItem, 1), (GameData.BoneItem, 1) }, new ItemDefinition?[] { GameData.StringItem, GameData.StringItem, null, GameData.CharcoalItem, GameData.BoneItem, null, null, null, null }, true),
 
         // Плавка в печке
         new("Железный слиток", GameData.IronIngotItem, 1, new[] { (GameData.IronOreItem, 1) }, null, false, IsSmelt: true),
@@ -1312,7 +1378,7 @@ public static partial class Screens {
     };
 
     private static void DrawRecipeBookSection(GameSession session, float rx, float ry, float rw, float rh, ItemEntry?[] targetGrid, bool is3x3) {
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Ui.Mouse();
         bool leftClick = Raylib.IsMouseButtonPressed(MouseButton.Left);
         var inv = session.Player.Inventory;
 
@@ -1461,9 +1527,9 @@ public static partial class Screens {
     // ── 3×3 экран верстака ───────────────────────────────────────────────────
 
     public static void DrawWorkbench(GameSession session) {
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        int w = Ui.Vw, h = Ui.Vh;
         var inv = session.Player.Inventory;
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Ui.Mouse();
         bool leftClick = Raylib.IsMouseButtonPressed(MouseButton.Left);
         bool rightClick = Raylib.IsMouseButtonPressed(MouseButton.Right);
 
@@ -1578,7 +1644,7 @@ public static partial class Screens {
                                               float invX, float invY, float hotY,
                                               float gridX, float gridY, int slotSz, int gap) {
         if (Held.HasValue && Held.Value.Quantity > 0) return;
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Ui.Mouse();
         ItemDefinition? def = null;
         for (int r = 0; r < 3; r++)
             for (int c = 0; c < 3; c++)
@@ -1603,9 +1669,9 @@ public static partial class Screens {
     // ── Экран печки (Автономная фоновая плавка) ───────────────────────────────
 
     public static void DrawFurnaceUI(GameSession session) {
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        int w = Ui.Vw, h = Ui.Vh;
         var inv = session.Player.Inventory;
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Ui.Mouse();
         bool leftClick = Raylib.IsMouseButtonPressed(MouseButton.Left);
         bool rightClick = Raylib.IsMouseButtonPressed(MouseButton.Right);
 
@@ -1794,10 +1860,10 @@ public static partial class Screens {
     // ── Экран сундука (27 слотов сундука + 36 слотов игрока) ─────────────────
 
     public static void DrawChestUI(GameSession session) {
-        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        int w = Ui.Vw, h = Ui.Vh;
         var pInv = session.Player.Inventory;
         var chestInv = session.World.GetOrCreateChest(session.ActiveChestPos);
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Ui.Mouse();
         bool leftClick = Raylib.IsMouseButtonPressed(MouseButton.Left);
         bool rightClick = Raylib.IsMouseButtonPressed(MouseButton.Right);
 
@@ -2076,7 +2142,7 @@ public static partial class Screens {
     private static void DrawHeldItem() {
         if (!Held.HasValue || Held.Value.Quantity <= 0) return;
         var held = Held.Value;
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Ui.Mouse();
         Hud.DrawItemIcon(held.Item.Definition, new Rectangle(mouse.X - 14f, mouse.Y - 14f, 28f, 28f), 1f);
         if (held.Quantity > 1)
             Fonts.Draw($"×{held.Quantity}", mouse.X - 14f, mouse.Y + 8f, 15f, Color.White);
@@ -2086,33 +2152,56 @@ public static partial class Screens {
         string title = def.Name;
         ushort itemId = def.Id;
 
-        string subtext = "";
+        string subtext1 = "";
+        string subtext2 = "";
+
         if (GameData.FoodValue.TryGetValue(itemId, out float food)) {
-            subtext = $"Пища: +{food} HP";
+            subtext1 = $"Восстанавливает: +{food} сытости";
         } else if (GameData.GetToolTier(itemId) > 0) {
-            subtext = $"Урон: {GameData.GetWeaponDamage(itemId)} HP";
+            float dmg = GameData.GetWeaponDamage(itemId);
+            float cd = GameData.GetWeaponCooldown(itemId);
+            float spd = cd > 0 ? 1f / cd : 4f;
+            int maxDur = GameData.GetMaxToolDurability(itemId);
+            subtext1 = $"Урон: {dmg} HP · Скорость: {spd:0.#}";
+            subtext2 = $"Прочность: {maxDur} / {maxDur}";
+        } else if (GameData.TryGetBlockByItem(itemId, out var blk) && blk != null) {
+            subtext1 = blk.IsSolid ? "Твёрдый строительный блок" : "Декоративный объект";
         }
 
-        float w = MathF.Max(Fonts.Measure(title, 16f), Fonts.Measure(subtext, 14f)) + 28f;
-        float h = string.IsNullOrEmpty(subtext) ? 32f : 52f;
+        // Цвета редкости предмета
+        Color titleCol = itemId switch {
+            var id when id == GameData.GoldenAppleItem.Id || id == GameData.TotemItem.Id || id == GameData.GoldSwordItem.Id => new Color(255, 220, 70, 255),
+            var id when id == GameData.DiamondSwordItem.Id || id == GameData.DiamondPickaxeItem.Id || id == GameData.DiamondAxeItem.Id || id == GameData.DiamondShovelItem.Id || id == GameData.DiamondHoeItem.Id => new Color(100, 235, 255, 255),
+            var id when id == GameData.EnchantedBookItem.Id || id == GameData.MusicDiscItem.Id || id == GameData.DesertArtifactItem.Id || id == GameData.SwampArtifactItem.Id || id == GameData.NetherArtifactItem.Id || id == GameData.VoidKeyItem.Id || id == GameData.NetherTotemItem.Id || id == GameData.DesertTotemItem.Id || id == GameData.SwampTotemItem.Id => new Color(220, 130, 255, 255),
+            var id when id == GameData.IronSwordItem.Id || id == GameData.IronPickaxeItem.Id || id == GameData.IronAxeItem.Id || id == GameData.IronShovelItem.Id || id == GameData.IronHoeItem.Id => new Color(220, 230, 240, 255),
+            _ => new Color(255, 255, 255, 255)
+        };
+
+        float w = MathF.Max(Fonts.Measure(title, 16f), MathF.Max(Fonts.Measure(subtext1, 13f), Fonts.Measure(subtext2, 13f))) + 24f;
+        float h = string.IsNullOrEmpty(subtext1) ? 32f : string.IsNullOrEmpty(subtext2) ? 52f : 68f;
 
         float tx = mouse.X + 14f;
         float ty = mouse.Y - 14f;
         
-        if (tx + w > Raylib.GetScreenWidth() - 8f) tx = mouse.X - w - 8f;
-        if (ty + h > Raylib.GetScreenHeight() - 8f) ty = Raylib.GetScreenHeight() - h - 8f;
+        if (tx + w > Ui.Vw - 8f) tx = mouse.X - w - 8f;
+        if (ty + h > Ui.Vh - 8f) ty = Ui.Vh - h - 8f;
         if (ty < 8f) ty = 8f;
         if (tx < 8f) tx = 8f;
 
-        var bg = new Color(16, 12, 28, 255);
+        var bg = new Color(16, 12, 28, 245);
         var border = new Color(85, 55, 145, 255);
+        var innerBorder = new Color(45, 25, 80, 255);
         
-        Raylib.DrawRectangleRounded(new Rectangle(tx, ty, w, h), 0.15f, 6, bg);
-        Raylib.DrawRectangleRoundedLinesEx(new Rectangle(tx, ty, w, h), 0.15f, 6, 2f, border);
+        Raylib.DrawRectangleRounded(new Rectangle(tx, ty, w, h), 0.12f, 6, bg);
+        Raylib.DrawRectangleRoundedLinesEx(new Rectangle(tx, ty, w, h), 0.12f, 6, 2f, border);
+        Raylib.DrawRectangleRoundedLinesEx(new Rectangle(tx + 2, ty + 2, w - 4, h - 4), 0.10f, 6, 1f, innerBorder);
 
-        Fonts.DrawShadowed(title, tx + 12f, ty + 7f, 16f, new Color(255, 220, 100, 255));
-        if (!string.IsNullOrEmpty(subtext)) {
-            Fonts.Draw(subtext, tx + 12f, ty + 28f, 14f, new Color(180, 190, 210, 255));
+        Fonts.DrawShadowed(title, tx + 10f, ty + 7f, 16f, titleCol);
+        if (!string.IsNullOrEmpty(subtext1)) {
+            Fonts.Draw(subtext1, tx + 10f, ty + 28f, 13f, new Color(175, 185, 210, 255));
+        }
+        if (!string.IsNullOrEmpty(subtext2)) {
+            Fonts.Draw(subtext2, tx + 10f, ty + 46f, 13f, new Color(125, 215, 130, 255));
         }
     }
 
@@ -2120,8 +2209,8 @@ public static partial class Screens {
         float tw = Fonts.Measure(name, 16f) + 16f;
         float th = 28f;
         float tx = mouse.X + 12f, ty = mouse.Y - 12f;
-        if (tx + tw > Raylib.GetScreenWidth()) tx = mouse.X - tw - 8f;
-        if (ty + th > Raylib.GetScreenHeight()) ty = Raylib.GetScreenHeight() - th - 8f;
+        if (tx + tw > Ui.Vw) tx = mouse.X - tw - 8f;
+        if (ty + th > Ui.Vh) ty = Ui.Vh - th - 8f;
         if (ty < 8f) ty = 8f;
         Raylib.DrawRectangleRec(new Rectangle(tx, ty, tw, th), new Color(16, 8, 24, 240));
         Raylib.DrawRectangleLinesEx(new Rectangle(tx, ty, tw, th), 1.5f, new Color(42, 16, 76, 255));
@@ -2143,7 +2232,7 @@ public static partial class Screens {
 
     private static bool Button(float x, float y, float width, float height, string label, bool enabled) {
         var rect = new Rectangle(x, y, width, height);
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Ui.Mouse();
         bool hovered = Raylib.CheckCollisionPointRec(mouse, rect);
         
         Color faceColor = !enabled 
@@ -2173,7 +2262,7 @@ public static partial class Screens {
     }
 
     private static void DrawPanel(float x, float y, float width, float height) {
-        Raylib.DrawRectangle(0, 0, Raylib.GetScreenWidth(), Raylib.GetScreenHeight(), new Color(0, 0, 0, 140));
+        Raylib.DrawRectangle(0, 0, Ui.Vw, Ui.Vh, new Color(0, 0, 0, 140));
         var rect = new Rectangle(x, y, width, height);
         Raylib.DrawRectangleRec(rect, Panel);
         Raylib.DrawRectangleLinesEx(rect, 2f, Color.Black);
