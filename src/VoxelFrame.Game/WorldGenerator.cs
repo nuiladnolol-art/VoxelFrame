@@ -678,10 +678,8 @@ public sealed class WorldGenerator {
                     bool surfaceBreach = surface > SeaLevel + 1 && wy >= surface - 3 && (isSpaghetti || isNoodle || inRavine) && cheese > 0.42f;
 
                     if (isCheese || isSpaghetti || isNoodle || inRavine || surfaceBreach) {
-                        // Редкие естественные лавовые озера на глубине Y=5..10 (вместо сплошного океана лавы)
-                        ushort replaceWith = (wy <= 10 && _lavaPoolNoise.Get(wx * 0.04f + 123f, wz * 0.04f + 456f) > 0.70f)
-                            ? GameData.BLava.Id
-                            : (ushort)0;
+                        // Естественные лавовые озера на самом дне мира (Y <= 8) с единой ровной гладью
+                        ushort replaceWith = (wy <= 8) ? GameData.BLava.Id : (ushort)0;
 
                         var v = MakeVoxel(replaceWith);
                         chunk.SetVoxel(idx, in v);
