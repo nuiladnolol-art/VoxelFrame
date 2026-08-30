@@ -88,13 +88,35 @@ public sealed partial class Player {
     public float PortalTimer { get; set; }
     public bool PortalLocked { get; set; }   // Блокирует повторный вход, пока игрок не покинет порталы
     public float VoidFallTimer;              // Сколько игрок выживает в пустоте (путь в Бездну)
+    public string Name { get; set; } = "Steve";
+    public bool IsMoving => Velocity.X * Velocity.X + Velocity.Z * Velocity.Z > 0.01f;
+    public bool IsCrouching => CurrentEyeHeight < EyeHeight - 0.1f;
     public bool IsFlying { get; set; }
     public float SpaceDoubleTapTimer { get; set; }
+    public readonly ItemEntry?[] Armor = new ItemEntry?[4]; // 0=Helmet, 1=Chestplate, 2=Leggings, 3=Boots
+    public float BreakGraceTimer;
 
-    public void ApplyDamage(float amount, GameSession session, Vector3? attackerPos = null) {
+    public int GetTotalArmorPoints() {
+        int pts = 0;
+        for (int i = 0; i < 4; i++) {
+            if (Armor[i] is { } ae && ae.Quantity > 0) {
+                pts += GameData.GetArmorPoints(ae.Item.Definition.Id);
+            }
+        }
+        return pts;
+    }
+
+    public void ApplyDamage(float amount, GameSession session, Vector3? attackerPos = null, string cause = "") {
         if (session.GameMode == GameMode.Creative) return; // В Творческом режиме игрок бессмертен
         if (amount <= 0f) return;
         if (InvulnerabilityTimer > 0f) return;
+
+        if (!string.IsNullOrEmpty(cause)) {
+            session.LastDeathCause = cause;
+        } else if (attackerPos.HasValue) {
+            session.LastDeathCause = "Атака врага";
+        }
+        session.LastDeathPos = Position;
 
         // Блокирование урона щитом
         bool hasShield = (OffhandItem != null && OffhandItem.Id == GameData.ShieldItem.Id) || (SelectedItem != null && SelectedItem.Id == GameData.ShieldItem.Id);
@@ -107,6 +129,28 @@ public sealed partial class Player {
                 ScreenShake = MathF.Min(0.2f, ScreenShake + 0.1f);
                 session.AddMessage("Удар заблокирован щитом!");
                 return;
+            }
+        }
+
+        // Поглощение урона броней (кроме пустоты и истощения от голода)
+        int armorPts = GetTotalArmorPoints();
+        if (armorPts > 0 && cause != "Падение в Бездну" && cause != "Истощение от голода" && cause != "Голод") {
+            float reduction = Math.Clamp(armorPts * 0.035f, 0.05f, 0.75f);
+            amount *= (1.0f - reduction);
+
+            // Изнашивание надетой брони
+            for (int i = 0; i < 4; i++) {
+                if (Armor[i] is { } ae && ae.Quantity > 0) {
+                    var inst = ae.Item;
+                    inst.Durability--;
+                    if (inst.Durability <= 0) {
+                        session.AddMessage($"Броня «{ae.Item.Definition.Name}» сломалась!");
+                        SoundSystem.PlayBreakTool();
+                        Armor[i] = null;
+                    } else {
+                        Armor[i] = ae with { Item = inst };
+                    }
+                }
             }
         }
 
@@ -302,11 +346,17 @@ public sealed partial class Player {
             } else {
                 SlotToastText = SelectedItem?.Name ?? "";
             }
+            int itemId = SelectedItem?.Id ?? 0;
+            GameClient.Active?.SendAction(PlayerActionType.ItemChange, itemId);
+            GameServer.Active?.BroadcastHostAction(PlayerActionType.ItemChange, itemId);
         }
 
         // Быстрая смена предмета между основной и второй рукой по клавише F
         if (Raylib_cs.Raylib.IsKeyPressed(Raylib_cs.KeyboardKey.F)) {
             SwapMainAndOffhand();
+            int itemId = SelectedItem?.Id ?? 0;
+            GameClient.Active?.SendAction(PlayerActionType.ItemChange, itemId);
+            GameServer.Active?.BroadcastHostAction(PlayerActionType.ItemChange, itemId);
         }
 
         SlotToastTimer = MathF.Max(0f, SlotToastTimer - dt);
@@ -363,7 +413,7 @@ public sealed partial class Player {
             IsSprinting = true;
             speed = WalkSpeed * 1.35f;
             SprintFovProgress = MathF.Min(1f, SprintFovProgress + dt * 4f);
-            Exhaustion += dt * 0.15f;
+            Exhaustion += dt * 0.06f;
         } else {
             IsSprinting = false;
             SprintFovProgress = MathF.Max(0f, SprintFovProgress - dt * 5f);
@@ -467,7 +517,7 @@ public sealed partial class Player {
                         Velocity.X += wish.X * 1.8f;
                         Velocity.Z += wish.Z * 1.8f;
                     }
-                    Exhaustion += IsSprinting ? 0.2f : 0.05f;
+                    Exhaustion += IsSprinting ? 0.08f : 0.02f;
                 }
             } else {
                 // Управление в воздухе (Air control) с сохранением импульса
@@ -636,13 +686,43 @@ public sealed partial class Player {
         if (HurtTimer > 0f) HurtTimer = MathF.Max(0f, HurtTimer - dt);
         if (InvulnerabilityTimer > 0f) InvulnerabilityTimer = MathF.Max(0f, InvulnerabilityTimer - dt);
 
-        // 1. Атака сущностей (мобы/животные/босс/истинный босс) требует дискретного клика ЛКМ (AttackPressed)
+        // 1. Атака сущностей (игроки/мобы/животные/босс/истинный босс) требует дискретного клика ЛКМ (AttackPressed)
         Animal? targetedAnimal = null;
         HostileMob? targetedHostile = null;
         EndSlime? targetedBoss = null;
         TrueEndSlime? targetedTrueBoss = null;
+        int targetedPlayerId = -1;
         float bestEntityDist = float.MaxValue;
         const float EntityAttackReach = 3.2f;
+
+        // PvP: Проверка попадания по другим игрокам в сетевой игре
+        if (GameClient.Active != null) {
+            foreach (var rp in GameClient.Active.RemotePlayers) {
+                var pMin = rp.Position - new Vector3(0.35f, 0.9f, 0.35f);
+                var pMax = rp.Position + new Vector3(0.35f, 0.9f, 0.35f);
+                if (RayAabb(Eye, Forward, pMin, pMax, out float pt) && pt < bestEntityDist && pt <= EntityAttackReach) {
+                    bestEntityDist = pt;
+                    targetedPlayerId = rp.Id;
+                    targetedAnimal = null;
+                    targetedHostile = null;
+                    targetedBoss = null;
+                    targetedTrueBoss = null;
+                }
+            }
+        } else if (GameServer.Active != null) {
+            foreach (var cl in GameServer.Active.Clients) {
+                var pMin = cl.Position - new Vector3(0.35f, 0.9f, 0.35f);
+                var pMax = cl.Position + new Vector3(0.35f, 0.9f, 0.35f);
+                if (RayAabb(Eye, Forward, pMin, pMax, out float pt) && pt < bestEntityDist && pt <= EntityAttackReach) {
+                    bestEntityDist = pt;
+                    targetedPlayerId = cl.Id;
+                    targetedAnimal = null;
+                    targetedHostile = null;
+                    targetedBoss = null;
+                    targetedTrueBoss = null;
+                }
+            }
+        }
 
         foreach (var a in world.Animals) {
             if (!a.Alive) continue;
@@ -654,6 +734,7 @@ public sealed partial class Player {
                     bestEntityDist = t;
                     targetedAnimal = a;
                     targetedHostile = null;
+                    targetedPlayerId = -1;
                 }
             }
         }
@@ -671,6 +752,7 @@ public sealed partial class Player {
                     targetedAnimal = null;
                     targetedBoss = null;
                     targetedTrueBoss = null;
+                    targetedPlayerId = -1;
                 }
             }
         }
@@ -687,6 +769,7 @@ public sealed partial class Player {
                     targetedAnimal = null;
                     targetedHostile = null;
                     targetedTrueBoss = null;
+                    targetedPlayerId = -1;
                 }
             }
         }
@@ -703,23 +786,30 @@ public sealed partial class Player {
                     targetedBoss = null;
                     targetedAnimal = null;
                     targetedHostile = null;
+                    targetedPlayerId = -1;
                 }
             }
         }
 
         // Метка замаха: ЛКМ всегда создаёт «свинг» (даже по воздуху) — для удара по эндер-кристаллу.
         SwingMarker = MathF.Max(0f, SwingMarker - dt);
-        if (input.AttackPressed) SwingMarker = AttackCooldown;
+        if (input.AttackPressed) {
+            SwingMarker = AttackCooldown;
+            int itemId = SelectedItem?.Id ?? 0;
+            GameClient.Active?.SendAction(PlayerActionType.SwingArm, itemId);
+            GameServer.Active?.BroadcastHostAction(PlayerActionType.SwingArm, itemId);
+        }
 
-        if (input.AttackPressed && (targetedAnimal != null || targetedHostile != null || targetedBoss != null || targetedTrueBoss != null) && bestEntityDist <= EntityAttackReach + 1.0f) {
+        if (input.AttackPressed && (targetedPlayerId != -1 || targetedAnimal != null || targetedHostile != null || targetedBoss != null || targetedTrueBoss != null) && bestEntityDist <= EntityAttackReach + 1.0f) {
             BreakTarget = new Vec3i(int.MinValue, int.MinValue, int.MinValue);
             BreakProgress = 0f;
             BreakDuration = 0f;
-            if (targetedAnimal != null) AttackAnimal(world, session);
+            if (targetedPlayerId != -1) AttackRemotePlayer(targetedPlayerId, session);
+            else if (targetedAnimal != null) AttackAnimal(world, session);
             else if (targetedHostile != null) AttackHostile(targetedHostile, world, session);
             else if (targetedBoss != null) AttackBoss(targetedBoss, world, session);
             else if (targetedTrueBoss != null) AttackTrueBoss(targetedTrueBoss, world, session);
-        } else if ((input.AttackHeld || input.AttackPressed) && (targetedAnimal == null && targetedHostile == null && targetedBoss == null && targetedTrueBoss == null)) {
+        } else if ((input.AttackHeld || input.AttackPressed) && (targetedPlayerId == -1 && targetedAnimal == null && targetedHostile == null && targetedBoss == null && targetedTrueBoss == null)) {
             // 2. Ломание блоков (в Креативе мгновенно любые блоки, включая бедрок, в Выживании по времени)
             if (hasTarget && GameData.TryGetBlock(world.GetVoxel(hit).TypeId, out var targetBlock)) {
                 if (session.GameMode == GameMode.Creative) {
@@ -729,32 +819,52 @@ public sealed partial class Player {
                     BreakTarget = new Vec3i(int.MinValue, int.MinValue, int.MinValue);
                 } else if (!targetBlock.IsUnbreakable) {
                     if (hit != BreakTarget) {
-                        BreakTarget = hit;
-                        BreakProgress = 0f;
-                        ushort tId = SelectedItem?.Id ?? 0;
-                        if (!GameData.CanHarvestBlock(targetBlock, tId) && GameData.GetRequiredTier(targetBlock.Id) > 0) {
-                            session.AddMessage("Внимание: нужен более прочный инструмент для добычи этого блока!");
+                        if (BreakGraceTimer > 0f && BreakTarget.X != int.MinValue) {
+                            BreakGraceTimer -= dt;
+                        } else {
+                            BreakTarget = hit;
+                            BreakProgress = 0f;
+                            BreakGraceTimer = 0.25f;
+                            ushort tId = SelectedItem?.Id ?? 0;
+                            if (!GameData.CanHarvestBlock(targetBlock, tId) && GameData.GetRequiredTier(targetBlock.Id) > 0) {
+                                session.AddMessage("Внимание: нужен более прочный инструмент для добычи этого блока!");
+                            }
+                        }
+                    } else {
+                        BreakGraceTimer = 0.25f;
+                    }
+
+                    if (hit == BreakTarget || BreakGraceTimer > 0f) {
+                        var targetBlk = hit == BreakTarget ? targetBlock : (GameData.TryGetBlock(world.GetVoxel(BreakTarget).TypeId, out var b) ? b : targetBlock);
+                        float breakTime = GameData.GetMiningTime(targetBlk, SelectedItem);
+                        BreakDuration = breakTime;
+                        BreakProgress += dt;
+                        if (BreakProgress >= breakTime) {
+                            BreakBlock(world, session, BreakTarget, targetBlk);
+                            BreakProgress = 0f;
+                            BreakDuration = 0f;
+                            BreakGraceTimer = 0f;
+                            BreakTarget = new Vec3i(int.MinValue, int.MinValue, int.MinValue);
                         }
                     }
-                    float breakTime = GameData.GetMiningTime(targetBlock, SelectedItem);
-                    BreakDuration = breakTime;
-                    BreakProgress += dt;
-                    if (BreakProgress >= breakTime) {
-                        BreakBlock(world, session, hit, targetBlock);
-                        BreakProgress = 0f;
-                        BreakDuration = 0f;
-                        BreakTarget = new Vec3i(int.MinValue, int.MinValue, int.MinValue);
-                    }
                 }
+            } else {
+                if (BreakGraceTimer > 0f) {
+                    BreakGraceTimer -= dt;
+                } else {
+                    BreakTarget = new Vec3i(int.MinValue, int.MinValue, int.MinValue);
+                    BreakProgress = 0f;
+                    BreakDuration = 0f;
+                }
+            }
+        } else {
+            if (BreakGraceTimer > 0f) {
+                BreakGraceTimer -= dt;
             } else {
                 BreakTarget = new Vec3i(int.MinValue, int.MinValue, int.MinValue);
                 BreakProgress = 0f;
                 BreakDuration = 0f;
             }
-        } else {
-            BreakTarget = new Vec3i(int.MinValue, int.MinValue, int.MinValue);
-            BreakProgress = 0f;
-            BreakDuration = 0f;
         }
 
         if (input.Drop) {
@@ -821,8 +931,47 @@ public sealed partial class Player {
         bool wantUse = input.UsePressed || (input.UseHeld && PlaceCooldown <= 0f);
         if (wantUse) {
             PlaceCooldown = 0.25f;
+
+            // Проверка кормления животных (Размножение / Режим любви)
+            if (input.UsePressed) {
+                var origin = Eye;
+                var dir = Forward;
+                Animal? bestAnimal = null;
+                float bestAnimalDist = float.MaxValue;
+                foreach (var a in world.Animals) {
+                    if (!a.Alive) continue;
+                    var min = a.Position - new Vector3(a.HalfSizeX, a.HalfSizeY, a.HalfSizeZ);
+                    var max = a.Position + new Vector3(a.HalfSizeX, a.HalfSizeY, a.HalfSizeZ);
+                    if (RayAabb(origin, dir, min, max, out float t) && t < bestAnimalDist) {
+                        bestAnimalDist = t;
+                        bestAnimal = a;
+                    }
+                }
+
+                if (bestAnimal != null && bestAnimalDist <= 3.5f) {
+                    var heldDef = SelectedEntry?.Item.Definition;
+                    if (heldDef != null && bestAnimal.LikesFood(heldDef.Id)) {
+                        if (!bestAnimal.IsBaby && bestAnimal.BreedCooldown <= 0f && bestAnimal.LoveTimer <= 0f) {
+                            if (TryConsumeSelected(heldDef, 1, session)) {
+                                bestAnimal.LoveTimer = 25f;
+                                SoundSystem.PlayPop();
+                                session.AddMessage("Животное довольно и ищет пару!");
+                                wantUse = false;
+                            }
+                        } else if (bestAnimal.IsBaby) {
+                            if (TryConsumeSelected(heldDef, 1, session)) {
+                                bestAnimal.BabyAgeTimer -= 25f;
+                                SoundSystem.PlayPop();
+                                session.AddMessage("Детеныш растет быстрее!");
+                                wantUse = false;
+                            }
+                        }
+                    }
+                }
+            }
+
             // Проверка ПКМ на верстак / печку / сундук / кровать
-            if (input.UsePressed && session.HasTarget) {
+            if (wantUse && input.UsePressed && session.HasTarget) {
                 var targetVox = world.GetVoxel(session.TargetBlock);
                 if (targetVox.TypeId == GameData.BWorkbench.Id) {
                     session.Ui = UiState.Workbench;
@@ -859,6 +1008,10 @@ public sealed partial class Player {
                     uVox.SubGridLayerMask = newMask;
                     world.SetVoxelRaw(lowerPos, in lVox);
                     world.SetVoxelRaw(upperPos, in uVox);
+                    GameClient.Active?.SendBlockChange(lowerPos.X, lowerPos.Y, lowerPos.Z, lVox.TypeId, newMask, isBreak: false);
+                    GameClient.Active?.SendBlockChange(upperPos.X, upperPos.Y, upperPos.Z, uVox.TypeId, newMask, isBreak: false);
+                    GameServer.Active?.BroadcastHostBlockChange(lowerPos.X, lowerPos.Y, lowerPos.Z, lVox.TypeId, newMask, isBreak: false);
+                    GameServer.Active?.BroadcastHostBlockChange(upperPos.X, upperPos.Y, upperPos.Z, uVox.TypeId, newMask, isBreak: false);
                     if (isOpen) SoundSystem.PlayDoorClose();
                     else SoundSystem.PlayDoorOpen();
                     wantUse = false;
@@ -907,18 +1060,37 @@ public sealed partial class Player {
                             wantUse = false;
                         }
                     }
-                } else if (item.Id == GameData.WheatSeedsItem.Id) {
+                } else if (item.Id == GameData.WheatSeedsItem.Id || item.Id == GameData.CarrotItem.Id || item.Id == GameData.PotatoItem.Id) {
                     wantUse = false;
-                    // Посадка семян пшеницы СТРОГО на вспаханную грядку (Farmland)
+                    // Посадка семян пшеницы / моркови / картофеля на вспаханную грядку (Farmland)
                     if (session.HasTarget) {
                         var targetVox = world.GetVoxel(session.TargetBlock);
                         if (targetVox.TypeId == GameData.BFarmland.Id) {
                             var cropPos = session.TargetBlock + new Vec3i(0, 1, 0);
                             var cropVox = world.GetVoxel(cropPos);
                             if (cropVox.TypeId == 0) {
-                                if (TryConsumeSelected(item, 1)) {
-                                    var planted = GameData.BWheatCrop;
+                                if (TryConsumeSelected(item, 1, session)) {
+                                    var planted = item.Id == GameData.WheatSeedsItem.Id ? GameData.BWheatCrop :
+                                                  item.Id == GameData.CarrotItem.Id ? GameData.BCarrotCrop : GameData.BPotatoCrop;
                                     world.PlacePlacedBlock(cropPos, planted, 0);
+                                    SoundSystem.PlayDig(GameData.BGrass.Id);
+                                }
+                            }
+                        }
+                    }
+                } else if (item.Id == GameData.OakSaplingItem.Id || item.Id == GameData.RedFlowerItem.Id || item.Id == GameData.YellowFlowerItem.Id) {
+                    wantUse = false;
+                    // Посадка саженца дуба / мака / одуванчика на траву или землю
+                    if (session.HasTarget) {
+                        var targetVox = world.GetVoxel(session.TargetBlock);
+                        if (targetVox.TypeId == GameData.BGrass.Id || targetVox.TypeId == GameData.BDirt.Id) {
+                            var plantPos = session.TargetBlock + new Vec3i(0, 1, 0);
+                            var plantVox = world.GetVoxel(plantPos);
+                            if (plantVox.TypeId == 0) {
+                                if (TryConsumeSelected(item, 1, session)) {
+                                    var planted = item.Id == GameData.OakSaplingItem.Id ? GameData.BSapling :
+                                                  item.Id == GameData.RedFlowerItem.Id ? GameData.BRedFlower : GameData.BYellowFlower;
+                                    world.PlacePlacedBlock(plantPos, planted, 0);
                                     SoundSystem.PlayDig(GameData.BGrass.Id);
                                 }
                             }
@@ -928,18 +1100,26 @@ public sealed partial class Player {
                     wantUse = false;
                     if (session.HasTarget) {
                         var targetVox = world.GetVoxel(session.TargetBlock);
-                        if (targetVox.TypeId == GameData.BWheatCrop.Id) {
+                        if (targetVox.TypeId == GameData.BWheatCrop.Id || targetVox.TypeId == GameData.BCarrotCrop.Id || targetVox.TypeId == GameData.BPotatoCrop.Id) {
                             int curStage = targetVox.SubGridLayerMask; // 0..3
                             if (curStage < 3) {
-                                if (TryConsumeSelected(item, 1)) {
+                                if (TryConsumeSelected(item, 1, session)) {
                                     byte nextStage = (byte)Math.Min(3, curStage + 1 + Random.Shared.Next(2));
-                                    world.PlacePlacedBlock(session.TargetBlock, GameData.BWheatCrop, nextStage);
+                                    var blk = targetVox.TypeId == GameData.BWheatCrop.Id ? GameData.BWheatCrop :
+                                              targetVox.TypeId == GameData.BCarrotCrop.Id ? GameData.BCarrotCrop : GameData.BPotatoCrop;
+                                    world.PlacePlacedBlock(session.TargetBlock, blk, nextStage);
                                     SoundSystem.PlayFertilize();
-                                    session.AddMessage("Пшеница удобрена и выросла!");
+                                    session.AddMessage("Культура удобрена и подросла!");
                                 }
                             }
+                        } else if (targetVox.TypeId == GameData.BSapling.Id) {
+                            if (TryConsumeSelected(item, 1, session)) {
+                                SoundSystem.PlayFertilize();
+                                world.GrowTree(session.TargetBlock);
+                                session.AddMessage("Саженец вырос в дерево!");
+                            }
                         } else if (targetVox.TypeId == GameData.BGrass.Id) {
-                            if (TryConsumeSelected(item, 1)) {
+                            if (TryConsumeSelected(item, 1, session)) {
                                 SoundSystem.PlayFertilize();
                                 for (int dx = -2; dx <= 2; dx++) {
                                     for (int dz = -2; dz <= 2; dz++) {
@@ -947,13 +1127,18 @@ public sealed partial class Player {
                                         var posBelow = session.TargetBlock + new Vec3i(dx, 0, dz);
                                         var posAbove = posBelow + new Vec3i(0, 1, 0);
                                         if (world.GetVoxel(posBelow).TypeId == GameData.BGrass.Id && world.GetVoxel(posAbove).TypeId == 0) {
-                                            if (Random.Shared.NextDouble() < 0.65) {
+                                            double roll = Random.Shared.NextDouble();
+                                            if (roll < 0.45) {
                                                 world.PlacePlacedBlock(posAbove, GameData.BTallGrass, 0);
+                                            } else if (roll < 0.65) {
+                                                world.PlacePlacedBlock(posAbove, GameData.BRedFlower, 0);
+                                            } else if (roll < 0.85) {
+                                                world.PlacePlacedBlock(posAbove, GameData.BYellowFlower, 0);
                                             }
                                         }
                                     }
                                 }
-                                session.AddMessage("Поляна расцвела густой травой!");
+                                session.AddMessage("Поляна расцвела густой травой и цветами!");
                             }
                         }
                     }
@@ -1360,14 +1545,14 @@ public sealed partial class Player {
             if (HealthRegenTimer >= 0.5f) {
                 HealthRegenTimer = 0f;
                 Health = MathF.Min(MaxHealth, Health + 1f);
-                Exhaustion += 6.0f;
+                Exhaustion += 3.0f;
             }
         } else if (Hunger >= 18f && Health < MaxHealth) {
             HealthRegenTimer += dt;
             if (HealthRegenTimer >= 4.0f) {
                 HealthRegenTimer = 0f;
                 Health = MathF.Min(MaxHealth, Health + 1f);
-                Exhaustion += 6.0f;
+                Exhaustion += 3.0f;
             }
         } else {
             HealthRegenTimer = 0f;
@@ -1378,7 +1563,7 @@ public sealed partial class Player {
             StarveTimer += dt;
             if (StarveTimer >= 4.0f) {
                 StarveTimer = 0f;
-                ApplyDamage(1f, session);
+                ApplyDamage(1f, session, cause: "Истощение от голода");
                 session.AddMessage("Вы умираете от голода!");
             }
         } else {
@@ -1407,6 +1592,8 @@ public sealed partial class Player {
         var oldVox = world.GetVoxel(pos);
         world.RemoveBlock(pos);
         SoundSystem.PlayDig(block.Id);
+        GameClient.Active?.SendBlockChange(pos.X, pos.Y, pos.Z, 0, 0, isBreak: true);
+        GameServer.Active?.BroadcastHostBlockChange(pos.X, pos.Y, pos.Z, 0, 0, isBreak: true);
 
         // Проверка песка/гравия выше — каскадное падение от гравитации!
         var curAbove = pos + new Vec3i(0, 1, 0);
@@ -1446,9 +1633,39 @@ public sealed partial class Player {
                     // Недозрелая: только 1 семечко
                     world.SpawnPickup(GameData.WheatSeedsItem.Id, 1, pos);
                 }
+            } else if (block.Id == GameData.BCarrotCrop.Id) {
+                int stage = oldVox.SubGridLayerMask;
+                if (stage >= 3) {
+                    int count = DropRng.Next(2, 5); // 2..4 моркови
+                    world.SpawnPickup(GameData.CarrotItem.Id, count, pos);
+                } else {
+                    world.SpawnPickup(GameData.CarrotItem.Id, 1, pos);
+                }
+            } else if (block.Id == GameData.BPotatoCrop.Id) {
+                int stage = oldVox.SubGridLayerMask;
+                if (stage >= 3) {
+                    int count = DropRng.Next(2, 5); // 2..4 картофеля
+                    world.SpawnPickup(GameData.PotatoItem.Id, count, pos);
+                } else {
+                    world.SpawnPickup(GameData.PotatoItem.Id, 1, pos);
+                }
             } else if (block.Id == GameData.BTallGrass.Id) {
-                if (DropRng.NextDouble() < 0.30) {
+                double roll = DropRng.NextDouble();
+                if (roll < 0.25) {
                     world.SpawnPickup(GameData.WheatSeedsItem.Id, 1, pos);
+                } else if (roll < 0.33) {
+                    world.SpawnPickup(GameData.CarrotItem.Id, 1, pos);
+                } else if (roll < 0.41) {
+                    world.SpawnPickup(GameData.PotatoItem.Id, 1, pos);
+                }
+            } else if (block.Id == GameData.BLeaves.Id) {
+                double roll = DropRng.NextDouble();
+                if (roll < 0.15) {
+                    world.SpawnPickup(GameData.OakSaplingItem.Id, 1, pos); // Саженец дуба (15%)!
+                } else if (roll < 0.20) {
+                    world.SpawnPickup(GameData.AppleItem.Id, 1, pos);
+                } else if (roll < 0.35) {
+                    world.SpawnPickup(GameData.StickItem.Id, 1, pos);
                 }
             } else if (block.DropItemId != 0 && GameData.Items.TryGetValue(block.DropItemId, out var drop)) {
                 if (block.Id == GameData.BGravel.Id && DropRng.NextDouble() < 0.25) {
@@ -1459,12 +1676,6 @@ public sealed partial class Player {
                 // При рубке бревна иногда высыпаются древесные опилки
                 if (block.Id == GameData.BLog.Id && DropRng.NextDouble() < 0.35) {
                     world.SpawnPickup(GameData.SawdustItem.Id, 1, pos);
-                }
-            } else if (block.Id == GameData.BLeaves.Id) {
-                double roll = DropRng.NextDouble();
-                ItemDefinition? leafDrop = roll < 0.12 ? GameData.AppleItem : roll < 0.30 ? GameData.StickItem : null;
-                if (leafDrop != null) {
-                    world.SpawnPickup(leafDrop.Id, 1, pos);
                 }
             }
         }
@@ -1544,6 +1755,10 @@ public sealed partial class Player {
                 world.PlacePlacedBlock(cell, GameData.BDoorLower, facing);
                 world.PlacePlacedBlock(above, GameData.BDoorUpper, facing);
                 SoundSystem.PlayPlace();
+                GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, GameData.BDoorLower.Id, facing, isBreak: false);
+                GameClient.Active?.SendBlockChange(above.X, above.Y, above.Z, GameData.BDoorUpper.Id, facing, isBreak: false);
+                GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, GameData.BDoorLower.Id, facing, isBreak: false);
+                GameServer.Active?.BroadcastHostBlockChange(above.X, above.Y, above.Z, GameData.BDoorUpper.Id, facing, isBreak: false);
                 return true;
             }
             return false;
@@ -1551,10 +1766,16 @@ public sealed partial class Player {
 
         // Специальная установка 2-блочной кровати (изножье + изголовье)
         if (block.Id == GameData.BBed.Id) {
+            // Кровать ставится только на верхнюю грань блока (горизонтально)
+            if (session.TargetBlock.Y >= cell.Y) return false;
+
             var headCell = cell + forwardH;
+            var exFoot = world.GetVoxel(cell);
             var exHead = world.GetVoxel(headCell);
-            if (exHead.TypeId != 0 && (GameData.GetBlock(exHead.TypeId).IsSolid || GameData.GetBlock(exHead.TypeId).IsOpaque))
+            // Обе клетки кровати должны быть свободным воздухом
+            if (exFoot.TypeId != 0 || exHead.TypeId != 0)
                 return false;
+            // Оба опорных блока снизу должны быть твёрдыми
             if (!world.IsSolidAt(cell + new Vec3i(0, -1, 0)) || !world.IsSolidAt(headCell + new Vec3i(0, -1, 0)))
                 return false;
 
@@ -1562,6 +1783,10 @@ public sealed partial class Player {
                 world.PlacePlacedBlock(cell, GameData.BBed, facing);
                 world.PlacePlacedBlock(headCell, GameData.BBedHead, facing);
                 SoundSystem.PlayPlace();
+                GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, GameData.BBed.Id, facing, isBreak: false);
+                GameClient.Active?.SendBlockChange(headCell.X, headCell.Y, headCell.Z, GameData.BBedHead.Id, facing, isBreak: false);
+                GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, GameData.BBed.Id, facing, isBreak: false);
+                GameServer.Active?.BroadcastHostBlockChange(headCell.X, headCell.Y, headCell.Z, GameData.BBedHead.Id, facing, isBreak: false);
                 return true;
             }
             return false;
@@ -1579,6 +1804,8 @@ public sealed partial class Player {
             if (TryConsumeSelected(item, 1, session)) {
                 world.PlacePlacedBlock(cell, block, torchFacing);
                 SoundSystem.PlayPlace();
+                GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, block.Id, torchFacing, isBreak: false);
+                GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, block.Id, torchFacing, isBreak: false);
                 return true;
             }
             return false;
@@ -1604,12 +1831,43 @@ public sealed partial class Player {
         if (TryConsumeSelected(item, 1, session)) {
             world.PlacePlacedBlock(cell, block, facing);
             SoundSystem.PlayPlace();
+            GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, block.Id, facing, isBreak: false);
+            GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, block.Id, facing, isBreak: false);
             return true;
         }
         return false;
     }
 
     // ── Бой ──────────────────────────────────────────────────────────────────
+
+    public void AttackRemotePlayer(int targetId, GameSession session) {
+        if (AttackTimer > 0f) return;
+        ushort toolId = SelectedItem?.Id ?? 0;
+        float weaponCd = GameData.GetWeaponCooldown(toolId);
+        float charge = Math.Clamp(AttackRechargeTimer / weaponCd, 0f, 1f);
+        AttackRechargeTimer = 0f;
+        AttackTimer = AttackCooldown;
+
+        bool isStrong = charge >= 0.85f;
+        bool isCrit = isStrong && !OnGround && Velocity.Y < -0.2f;
+
+        float baseDmg = GameData.GetWeaponDamage(toolId);
+        float dmg = baseDmg * (0.2f + 0.8f * charge * charge);
+
+        if (isCrit) {
+            dmg *= 1.5f;
+            session.AddMessage("Критический удар! ×1.5");
+        }
+
+        if (GameClient.Active != null) {
+            GameClient.Active.SendHit(targetId, dmg);
+        } else if (GameServer.Active != null) {
+            GameServer.Active.BroadcastHostHit(targetId, dmg);
+        }
+
+        if (isStrong) SoundSystem.PlayStrongAttack();
+        else SoundSystem.PlayWeakAttack();
+    }
 
     public void AttackAnimal(GameWorld world, GameSession session) {
         if (AttackTimer > 0f) return;
@@ -1702,6 +1960,31 @@ public sealed partial class Player {
 
         if (isStrong) SoundSystem.PlayStrongAttack();
         else SoundSystem.PlayWeakAttack();
+
+        // Круговой срез мечом (Sweeping Edge) при полном заряде атаки на земле
+        bool isSword = toolId == GameData.WoodSwordItem.Id || toolId == GameData.StoneSwordItem.Id ||
+                       toolId == GameData.IronSwordItem.Id || toolId == GameData.GoldSwordItem.Id ||
+                       toolId == GameData.DiamondSwordItem.Id;
+        if (isSword && isStrong && OnGround && !isCrit) {
+            float sweepRadius = 2.8f;
+            foreach (var other in world.HostileMobs) {
+                if (other == mob || other.Health <= 0f) continue;
+                float d = Vector3.Distance(Position, other.Position);
+                if (d <= sweepRadius) {
+                    var toOther = Vector3.Normalize(other.Position - Position);
+                    float dot = Vector3.Dot(Forward, toOther);
+                    if (dot > 0.25f) { // В конусе перед игроком
+                        other.Health -= dmg * 0.5f;
+                        other.HurtTime = 0.35f;
+                        var sPush = Vector2.Normalize(new Vector2(toOther.X, toOther.Z));
+                        other.Velocity += new Vector3(sPush.X * 4.0f, 1.5f, sPush.Y * 4.0f);
+                        world.SpawnCrit(other.Position + new Vector3(0f, 0.6f, 0f), 5);
+                        if (other.Health <= 0f) other.Die(world, session);
+                    }
+                }
+            }
+            world.SpawnCrit(Position + Forward * 1.5f + Vector3.UnitY * 0.6f, 8);
+        }
 
         if (mob.Health <= 0f) {
             mob.Die(world, session);

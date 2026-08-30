@@ -26,6 +26,7 @@ public sealed class GameSession {
 
     public GameMode GameMode = GameMode.Survival;
     public bool KeepInventory = false;
+    public bool CheatsEnabled = false;
     public int MasterSeed;
 
     // Титры при выходе из Энда / Бездны после победы над боссом
@@ -83,10 +84,12 @@ public sealed class GameSession {
     public bool HasTarget;
     public float TotalPlaySeconds;
 
-    // Сон и смена времени
     public bool IsSleeping;
     public float SleepProgress;
     public Vec3i BedPosition;
+
+    public string LastDeathCause = "Неизвестная причина";
+    public Vector3 LastDeathPos;
 
     private Vector3 _lastChunkLoadPos = new(float.MaxValue, 0, 0);
 
@@ -528,6 +531,10 @@ public sealed class GameSession {
     public void DiePlayer(string message = "Вы погибли!") {
         if (Ui == UiState.Death) return;
         Screens.ReturnHeld(this);
+        LastDeathPos = Player.Position;
+        if (string.IsNullOrEmpty(LastDeathCause) || LastDeathCause == "Неизвестная причина") {
+            LastDeathCause = message;
+        }
         if (!KeepInventory) {
             // Дроп всех предметов из инвентаря на месте гибели с разлетом и задержкой подбора 2.5с
             var dropPos = Player.Position + new Vector3(0f, 0.5f, 0f);
@@ -554,6 +561,19 @@ public sealed class GameSession {
                 World.Pickups.Add(pickup);
                 Player.OffhandEntry = null;
             }
+            // Дроп брони
+            for (int i = 0; i < 4; i++) {
+                if (Player.Armor[i] is { } ae && ae.Quantity > 0) {
+                    float angle = rng.NextSingle() * MathF.Tau;
+                    float speed = 1.2f + rng.NextSingle() * 2.0f;
+                    var pickup = new ItemPickup(ae.Item, ae.Quantity, dropPos) {
+                        PickupDelay = 2.5f,
+                        Velocity = new Vector3(MathF.Cos(angle) * speed, 3.5f + rng.NextSingle() * 2.0f, MathF.Sin(angle) * speed)
+                    };
+                    World.Pickups.Add(pickup);
+                    Player.Armor[i] = null;
+                }
+            }
             Player.Inventory.Clear();
         }
         Player.Health = 0f;
@@ -570,6 +590,8 @@ public sealed class GameSession {
         AddChatMessage("> " + cmd, new Color(220, 220, 220, 255));
 
         if (!cmd.StartsWith("/")) {
+            GameClient.Active?.SendChatMessage(cmd);
+            GameServer.Active?.BroadcastHostChat(Player.Name, cmd);
             return;
         }
 
@@ -577,14 +599,43 @@ public sealed class GameSession {
         if (parts.Length == 0) return;
 
         string c = parts[0].ToLowerInvariant();
+
+        // Команды, доступные всегда без читов
+        if (c is "help" or "?" or "seed") {
+            if (c is "seed") {
+                AddChatMessage($"Сид мира: {World.Seed}", Color.Gold);
+                return;
+            }
+            AddChatMessage("=== Доступные команды ===", Color.Gold);
+            AddChatMessage("/gamemode <survival|creative|s|c|0|1> — сменить режим", Color.White);
+            AddChatMessage("/gamerule keepInventory <true|false> — сохранение инвентаря", Color.White);
+            AddChatMessage("/give <предмет|id> [кол-во] — выдать предмет", Color.White);
+            AddChatMessage("/tp <x> <y> <z> — телепортация", Color.White);
+            AddChatMessage("/time set <day|night|число> — сменить время суток", Color.White);
+            AddChatMessage("/weather <clear|rain|thunder> — изменить погоду", Color.White);
+            AddChatMessage("/locate <biome|structure> <название> — найти биом/структуру", Color.White);
+            AddChatMessage("/kill — самоуничтожение", Color.White);
+            AddChatMessage("/clear — очистить инвентарь", Color.White);
+            AddChatMessage("/seed — узнать сид текущего мира", Color.White);
+            return;
+        }
+
+        // Проверка прав на использование читов в этом мире
+        if (!CheatsEnabled) {
+            AddChatMessage("Читы отключены в этом мире! Включите их через Меню паузы (Esc) -> «Открыть для сети...»", Color.Red);
+            return;
+        }
+
         switch (c) {
             case "gamemode":
             case "gm":
-                if (parts.Length < 2) {
+            case "gmc":
+            case "gms":
+                string modeStr = c == "gmc" ? "creative" : (c == "gms" ? "survival" : (parts.Length > 1 ? parts[1].ToLowerInvariant() : ""));
+                if (string.IsNullOrEmpty(modeStr)) {
                     AddChatMessage("Использование: /gamemode <survival|creative|0|1|s|c>", Color.Yellow);
                     return;
                 }
-                string modeStr = parts[1].ToLowerInvariant();
                 if (modeStr is "creative" or "c" or "1") {
                     GameMode = GameMode.Creative;
                     Player.Health = Player.MaxHealth;
@@ -600,6 +651,17 @@ public sealed class GameSession {
                 break;
 
             case "gamerule":
+            case "keepinventory":
+                if (c == "keepinventory") {
+                    if (parts.Length >= 2 && bool.TryParse(parts[1], out bool kv)) {
+                        KeepInventory = kv;
+                        AddChatMessage($"Игровое правило keepInventory установлено в {kv}", Color.Green);
+                    } else {
+                        KeepInventory = !KeepInventory;
+                        AddChatMessage($"Игровое правило keepInventory установлено в {KeepInventory}", Color.Green);
+                    }
+                    break;
+                }
                 if (parts.Length < 3) {
                     AddChatMessage("Использование: /gamerule keepInventory <true|false>", Color.Yellow);
                     return;
@@ -614,6 +676,65 @@ public sealed class GameSession {
                 } else {
                     AddChatMessage($"Неизвестное правило: {parts[1]}", Color.Red);
                 }
+                break;
+
+            case "give":
+                if (parts.Length < 2) {
+                    AddChatMessage("Использование: /give <предмет|id> [кол-во]", Color.Yellow);
+                    return;
+                }
+                int count = 1;
+                if (parts.Length >= 3 && int.TryParse(parts[2], out int cParsed)) {
+                    count = Math.Clamp(cParsed, 1, 6400);
+                }
+                string query = parts[1].ToLowerInvariant().Replace("_", " ");
+                ItemDefinition? foundDef = null;
+
+                if (int.TryParse(parts[1], out int itemId) && GameData.Items.TryGetValue((ushort)itemId, out var itemById)) {
+                    foundDef = itemById;
+                } else {
+                    foreach (var kvp in GameData.Items) {
+                        if (kvp.Value.Name.Equals(query, StringComparison.OrdinalIgnoreCase) ||
+                            kvp.Value.Name.ToLowerInvariant().Contains(query)) {
+                            foundDef = kvp.Value;
+                            break;
+                        }
+                    }
+                }
+
+                if (foundDef == null) {
+                    AddChatMessage($"Предмет не найден: {parts[1]}", Color.Red);
+                } else {
+                    int remaining = count;
+                    while (remaining > 0) {
+                        int stack = Math.Min(remaining, foundDef.MaxStack);
+                        var itemInst = GameData.NewItem(foundDef);
+                        if (!Player.Inventory.TryInsert(itemInst, stack)) {
+                            World.Pickups.Add(new ItemPickup(itemInst, stack, Player.Position));
+                        }
+                        remaining -= stack;
+                    }
+                    AddChatMessage($"Выдано {count} шт. «{foundDef.Name}»", Color.Green);
+                }
+                break;
+
+            case "tp":
+            case "teleport":
+                if (parts.Length < 4 || !float.TryParse(parts[1], out float tpx) ||
+                    !float.TryParse(parts[2], out float tpy) || !float.TryParse(parts[3], out float tpz)) {
+                    AddChatMessage("Использование: /tp <x> <y> <z>", Color.Yellow);
+                    return;
+                }
+                Player.Position = new Vector3(tpx, tpy, tpz);
+                Player.Velocity = Vector3.Zero;
+                AddChatMessage($"Телепортирован на координаты X:{tpx:F1} Y:{tpy:F1} Z:{tpz:F1}", Color.Green);
+                break;
+
+            case "kill":
+                Player.Health = 0f;
+                LastDeathCause = "пал жертвой консольной команды";
+                DiePlayer("пал жертвой консольной команды");
+                AddChatMessage("Игрок самоуничтожен", Color.Red);
                 break;
 
             case "time":
@@ -702,17 +823,6 @@ public sealed class GameSession {
                 } else {
                     AddChatMessage($"Неизвестный тип локации: {parts[1]}", Color.Red);
                 }
-                break;
-
-            case "help":
-            case "?":
-                AddChatMessage("=== Доступные команды ===", Color.Gold);
-                AddChatMessage("/gamemode <survival|creative|s|c|0|1> — сменить режим", Color.White);
-                AddChatMessage("/gamerule keepInventory <true|false> — сохранение инвентаря", Color.White);
-                AddChatMessage("/time set <day|night|число> — сменить время", Color.White);
-                AddChatMessage("/weather <clear|rain|thunder> — изменить погоду", Color.White);
-                AddChatMessage("/locate <biome|structure> <название> — найти биом/структуру", Color.White);
-                AddChatMessage("/clear — очистить инвентарь", Color.White);
                 break;
 
             default:

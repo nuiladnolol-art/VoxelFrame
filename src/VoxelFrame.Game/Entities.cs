@@ -21,9 +21,7 @@ public static class Collision {
                     if ((v.Flags & VoxelFlags.Solid) == 0) continue;
 
                     if (GameData.IsDoor(v.TypeId)) {
-                        // Мобы (ignoreDoors) проходят сквозь двери, не застревая.
-                        if (ignoreDoors) continue;
-                        // Открытая дверь проходима для всех, закрытая — тонкая панель.
+                        // Открытая дверь проходима для всех, закрытая — твердая преграда.
                         bool isOpen = (v.SubGridLayerMask & 8) != 0;
                         if (isOpen) continue;
                     }
@@ -247,16 +245,22 @@ public sealed class Animal {
     public Vector2 WanderDir;
     public float FleeTimer;
 
+    // Размножение (Breeding) и возраст
+    public float LoveTimer;
+    public float BreedCooldown;
+    public bool IsBaby;
+    public float BabyAgeTimer = 180f;
+
     private static readonly Random _random = new();
 
     public const float HalfSize = 0.45f;
-    public float HalfSizeX => 0.45f;
-    public float HalfSizeY => Type switch {
+    public float HalfSizeX => IsBaby ? 0.25f : 0.45f;
+    public float HalfSizeY => (Type switch {
         AnimalType.Cow => 0.65f,
         AnimalType.Sheep => 0.55f,
         _ => 0.45f // Pig
-    };
-    public float HalfSizeZ => 0.45f;
+    }) * (IsBaby ? 0.55f : 1.0f);
+    public float HalfSizeZ => IsBaby ? 0.25f : 0.45f;
 
     public Animal() {
         Health = 10f;
@@ -272,6 +276,12 @@ public sealed class Animal {
         };
     }
 
+    public bool LikesFood(ushort itemId) => Type switch {
+        AnimalType.Cow or AnimalType.Sheep => itemId == GameData.WheatItem.Id,
+        AnimalType.Pig => itemId == GameData.CarrotItem.Id || itemId == GameData.PotatoItem.Id || itemId == GameData.AppleItem.Id || itemId == GameData.BreadItem.Id,
+        _ => false
+    };
+
     public void TakeDamage(float damage, GameWorld world, GameSession? session = null) {
         if (!Alive) return;
         Health -= damage;
@@ -279,6 +289,7 @@ public sealed class Animal {
         FleeTimer = 3.0f;
         if (Health <= 0f) {
             Alive = false;
+            if (IsBaby) return; // С детенышей нет дропа
             var pos = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z));
             switch (Type) {
                 case AnimalType.Pig:
@@ -302,12 +313,21 @@ public sealed class Animal {
         TakeDamage(999f, world, session);
     }
 
-    public void Tick(float dt, GameWorld world, Player? player = null) {
+    public void Tick(float dt, GameWorld world, Player? player = null, GameSession? session = null) {
         if (!Alive) return;
         if (Position.Y < FallingBlock.VoidY) { Alive = false; return; }
         
         HurtTime -= dt;
         FleeTimer -= dt;
+        if (LoveTimer > 0f) LoveTimer -= dt;
+        if (BreedCooldown > 0f) BreedCooldown -= dt;
+
+        if (IsBaby) {
+            BabyAgeTimer -= dt;
+            if (BabyAgeTimer <= 0f) {
+                IsBaby = false;
+            }
+        }
 
         var feetPos = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y - HalfSizeY + 0.1f), (int)MathF.Floor(Position.Z));
         if (world.GetVoxel(feetPos).TypeId == GameData.BLava.Id) {
@@ -316,12 +336,50 @@ public sealed class Animal {
             if (Health <= 0f) { Alive = false; return; }
         }
 
-        // Привлечение животного едой в руках игрока (яблоки, хлеб)
-        if (player != null && FleeTimer <= 0f) {
+        // Поиск партнера для спаривания в режиме любви
+        bool headingToMate = false;
+        if (LoveTimer > 0f && !IsBaby && BreedCooldown <= 0f && FleeTimer <= 0f) {
+            Animal? bestMate = null;
+            float bestDistSq = 12f * 12f;
+            foreach (var other in world.Animals) {
+                if (other == this || !other.Alive || other.Type != Type || other.IsBaby || other.LoveTimer <= 0f || other.BreedCooldown > 0f) continue;
+                float dsq = Vector3.DistanceSquared(Position, other.Position);
+                if (dsq < bestDistSq) {
+                    bestDistSq = dsq;
+                    bestMate = other;
+                }
+            }
+
+            if (bestMate != null) {
+                headingToMate = true;
+                float dist = MathF.Sqrt(bestDistSq);
+                var toMate = bestMate.Position - Position;
+                WanderDir = Vector2.Normalize(new Vector2(toMate.X, toMate.Z));
+                WanderTimer = 0.5f;
+
+                if (dist < 1.4f) {
+                    // Рождение детеныша!
+                    var babyPos = (Position + bestMate.Position) * 0.5f;
+                    var baby = new Animal(Type, babyPos) { IsBaby = true, BabyAgeTimer = 180f };
+                    world.Animals.Add(baby);
+
+                    LoveTimer = 0f;
+                    bestMate.LoveTimer = 0f;
+                    BreedCooldown = 180f;
+                    bestMate.BreedCooldown = 180f;
+
+                    SoundSystem.PlayPop();
+                    session?.AddMessage("Родилось маленькое животное!");
+                }
+            }
+        }
+
+        // Привлечение животного любимой едой в руках игрока
+        if (!headingToMate && player != null && FleeTimer <= 0f) {
             ushort heldId = player.SelectedEntry?.Item.Definition.Id ?? 0;
-            bool isFood = heldId == GameData.AppleItem.Id || heldId == GameData.BreadItem.Id;
+            bool isFood = LikesFood(heldId);
             float dist = Vector3.Distance(Position, player.Position);
-            if (isFood && dist < 8.5f && dist > 1.5f) {
+            if (isFood && dist < 10.0f && dist > 1.8f) {
                 var toP = player.Position - Position;
                 WanderDir = Vector2.Normalize(new Vector2(toP.X, toP.Z));
                 WanderTimer = 0.8f;
@@ -329,7 +387,7 @@ public sealed class Animal {
         }
 
         WanderTimer -= dt;
-        if (WanderTimer <= 0f && FleeTimer <= 0f) {
+        if (WanderTimer <= 0f && FleeTimer <= 0f && !headingToMate) {
             WanderTimer = 2.5f + (float)_random.NextDouble() * 4.5f;
             if (_random.NextDouble() < 0.25) {
                 WanderDir = Vector2.Zero;
@@ -339,7 +397,7 @@ public sealed class Animal {
             }
         }
         
-        float speed = FleeTimer > 0f ? 2.8f : 1.1f;
+        float speed = FleeTimer > 0f ? 2.8f : headingToMate ? 1.4f : 1.1f;
         Velocity.X = WanderDir.X * speed;
         Velocity.Z = WanderDir.Y * speed;
         // Проверка прыжка на 1 блок вверх при препятствии

@@ -974,9 +974,9 @@ internal static class SmokeTest {
         Screens.InAudioScreen = true;
         Check(Screens.InSettingsScreen && Screens.InAudioScreen, "экран настроек звука активируется");
         Screens.InAudioScreen = false;
-        Screens.InGameplayScreen = true;
-        Check(Screens.InGameplayScreen, "экран игрового процесса активируется");
-        Screens.InGameplayScreen = false;
+        Screens.InOpenToLanScreen = true;
+        Check(Screens.InOpenToLanScreen, "экран открытия мира для сети активируется");
+        Screens.InOpenToLanScreen = false;
         Screens.InSettingsScreen = false;
 
         // 18. Детерминированные сиды (FNV-1a)

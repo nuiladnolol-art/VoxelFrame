@@ -13,7 +13,7 @@ namespace VoxelFrame.Game;
 /// </summary>
 public static class SaveSystem {
     public const uint Magic = 0x56465331;   // "VFS1"
-    public const int Version = 18;
+    public const int Version = 20;
 
     public static string CurrentWorldPath = "";
     public static int SelectedWorldSlot = 1;
@@ -91,6 +91,7 @@ public static class SaveSystem {
             bw.Write(session.DayNight.TimeOfDay);
             bw.Write((int)session.GameMode);
             bw.Write(session.KeepInventory);
+            bw.Write(session.CheatsEnabled);
             bw.Write((int)session.Dimension);
 
             var p = session.Player;
@@ -123,6 +124,18 @@ public static class SaveSystem {
                 if (GameData.GetToolTier(p.OffhandEntry.Value.Item.Definition.Id) > 0) bw.Write(p.OffhandEntry.Value.Item.Durability);
             } else {
                 bw.Write(false);
+            }
+
+            // 4 слота экипировки брони
+            for (int a = 0; a < 4; a++) {
+                if (p.Armor[a] is { } ae && ae.Quantity > 0) {
+                    bw.Write(true);
+                    bw.Write(ae.Item.Definition.Id);
+                    bw.Write(ae.Quantity);
+                    bw.Write(ae.Item.Durability);
+                } else {
+                    bw.Write(false);
+                }
             }
 
             // Пишем все существующие миры: Обычный + каждый посещённый Нижний/Энд.
@@ -332,6 +345,7 @@ public static class SaveSystem {
         var savedDim = version >= 11 ? (Dimension)br.ReadInt32() : Dimension.Overworld;
         var savedGameMode = version >= 12 ? (GameMode)br.ReadInt32() : GameMode.Survival;
         bool savedKeepInv = version >= 12 && br.ReadBoolean();
+        bool savedCheats = version >= 20 ? br.ReadBoolean() : (savedGameMode == GameMode.Creative);
 
         var session = new GameSession(headless) {
             World = new GameWorld(seed) { Dimension = savedDim },
@@ -339,6 +353,7 @@ public static class SaveSystem {
             Player = new Player(),
             GameMode = savedGameMode,
             KeepInventory = savedKeepInv,
+            CheatsEnabled = savedCheats,
         };
         session.World.SpawnBlock = spawn;
         if (savedDim == Dimension.Nether) {
@@ -391,6 +406,21 @@ public static class SaveSystem {
                     var item = GameData.NewItem(def);
                     if (dur > 0) item.Durability = dur;
                     session.Player.OffhandEntry = new ItemEntry(item, qty);
+                }
+            }
+        }
+
+        if (version >= 19) {
+            for (int a = 0; a < 4; a++) {
+                if (br.ReadBoolean()) {
+                    ushort defId = br.ReadUInt16();
+                    int qty = br.ReadInt32();
+                    int dur = br.ReadInt32();
+                    if (GameData.Items.TryGetValue(defId, out var def)) {
+                        var item = GameData.NewItem(def);
+                        if (dur > 0) item.Durability = dur;
+                        session.Player.Armor[a] = new ItemEntry(item, qty);
+                    }
                 }
             }
         }
@@ -572,6 +602,7 @@ public static class SaveSystem {
         float timeOfDay = br.ReadSingle();
         var savedGameMode = (GameMode)br.ReadInt32();
         bool savedKeepInv = br.ReadBoolean();
+        bool savedCheats = version >= 20 ? br.ReadBoolean() : (savedGameMode == GameMode.Creative);
         var currentDim = (Dimension)br.ReadInt32();
 
         var session = new GameSession(headless) {
@@ -580,6 +611,7 @@ public static class SaveSystem {
             Player = new Player(),
             GameMode = savedGameMode,
             KeepInventory = savedKeepInv,
+            CheatsEnabled = savedCheats,
         };
 
         var p = session.Player;
@@ -613,6 +645,21 @@ public static class SaveSystem {
                 var item = GameData.NewItem(def);
                 if (dur > 0) item.Durability = dur;
                 p.OffhandEntry = new ItemEntry(item, qty);
+            }
+        }
+
+        if (version >= 19) {
+            for (int a = 0; a < 4; a++) {
+                if (br.ReadBoolean()) {
+                    ushort defId = br.ReadUInt16();
+                    int qty = br.ReadInt32();
+                    int dur = br.ReadInt32();
+                    if (GameData.Items.TryGetValue(defId, out var def)) {
+                        var item = GameData.NewItem(def);
+                        if (dur > 0) item.Durability = dur;
+                        p.Armor[a] = new ItemEntry(item, qty);
+                    }
+                }
             }
         }
 
@@ -885,6 +932,9 @@ public static class SaveSystem {
                 ["PostFxVignetteStrength"] = PostFxVignetteStrength,
                 ["PostFxGoldenHour"] = PostFxGoldenHour,
                 ["PostFxBloom"] = PostFxBloom,
+                ["PlayerNick"] = Screens.PlayerNick,
+                ["DirectConnectIp"] = Screens.DirectConnectIp,
+                ["DirectConnectPort"] = Screens.DirectConnectPort,
             };
             File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(obj, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
         } catch { }
@@ -898,6 +948,7 @@ public static class SaveSystem {
             var root = doc.RootElement;
             void R(string key, Action<int> set) { if (root.TryGetProperty(key, out var v)) set(v.GetInt32()); }
             void B(string key, Action<bool> set) { if (root.TryGetProperty(key, out var v)) set(v.GetBoolean()); }
+            void S(string key, Action<string> set) { if (root.TryGetProperty(key, out var v) && v.GetString() is { } s && !string.IsNullOrWhiteSpace(s)) set(s); }
             R("Forward", v => KeyBinds.Forward = (Raylib_cs.KeyboardKey)v);
             R("Backward", v => KeyBinds.Backward = (Raylib_cs.KeyboardKey)v);
             R("Left", v => KeyBinds.Left = (Raylib_cs.KeyboardKey)v);
@@ -931,6 +982,9 @@ public static class SaveSystem {
             R("PostFxVignetteStrength", v => PostFxVignetteStrength = Math.Clamp(v, 0, 60));
             B("PostFxGoldenHour", v => PostFxGoldenHour = v);
             B("PostFxBloom", v => PostFxBloom = v);
+            S("PlayerNick", v => Screens.PlayerNick = v);
+            S("DirectConnectIp", v => Screens.DirectConnectIp = v);
+            S("DirectConnectPort", v => Screens.DirectConnectPort = v);
         } catch { }
     }
 }

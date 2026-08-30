@@ -140,10 +140,20 @@ internal static class Program {
                 Raylib.BeginDrawing();
                 MenuAction action = MenuAction.None;
                 Ui.Begin();
-                if (Screens.InSettingsScreen) {
+                if (Screens.InMultiplayerScreen) {
+                    Screens.DrawMultiplayer(ref session);
+                    Ui.End();
+                    Raylib.EndDrawing();
+                    if (session != null) {
+                        renderer = new WorldRenderer(session);
+                        session.Ui = UiState.Loading;
+                        session.LoadTotal = 32;
+                        session.LoadDone = 0;
+                    }
+                    continue;
+                } else if (Screens.InSettingsScreen) {
                     if (Screens.InGraphicsScreen) Screens.DrawGraphics();
                     else if (Screens.InAudioScreen) Screens.DrawAudio();
-                    else if (Screens.InGameplayScreen) Screens.DrawGameplay();
                     else if (Screens.InControlsScreen) Screens.DrawControls();
                     else Screens.DrawSettings();
                     Ui.End();
@@ -151,7 +161,6 @@ internal static class Program {
                     if (Raylib.IsKeyPressed(KeyBinds.Pause)) {
                         if (Screens.InGraphicsScreen) { Screens.InGraphicsScreen = false; SaveSystem.SaveSettings(); }
                         else if (Screens.InAudioScreen) { Screens.InAudioScreen = false; SaveSystem.SaveSettings(); }
-                        else if (Screens.InGameplayScreen) { Screens.InGameplayScreen = false; SaveSystem.SaveSettings(); }
                         else if (Screens.InControlsScreen) { Screens.InControlsScreen = false; SaveSystem.SaveSettings(); }
                         else Screens.InSettingsScreen = false;
                     }
@@ -223,7 +232,6 @@ internal static class Program {
                     Ui.Begin();
                     if (Screens.InGraphicsScreen) Screens.DrawGraphics();
                     else if (Screens.InAudioScreen) Screens.DrawAudio();
-                    else if (Screens.InGameplayScreen) Screens.DrawGameplay();
                     else if (Screens.InControlsScreen) Screens.DrawControls();
                     else Screens.DrawSettings();
                     Ui.End();
@@ -233,9 +241,21 @@ internal static class Program {
                         pauseDebounce = 0.25f;
                         if (Screens.InGraphicsScreen) { Screens.InGraphicsScreen = false; SaveSystem.SaveSettings(); }
                         else if (Screens.InAudioScreen) { Screens.InAudioScreen = false; SaveSystem.SaveSettings(); }
-                        else if (Screens.InGameplayScreen) { Screens.InGameplayScreen = false; SaveSystem.SaveSettings(); }
                         else if (Screens.InControlsScreen) { Screens.InControlsScreen = false; SaveSystem.SaveSettings(); }
                         else Screens.InSettingsScreen = false;
+                    }
+                    continue;
+                }
+
+                if (Screens.InOpenToLanScreen) {
+                    Ui.Begin();
+                    Screens.DrawOpenToLan(session);
+                    Ui.End();
+                    PostProcessing.EndScene();
+                    Raylib.EndDrawing();
+                    if (pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause)) {
+                        pauseDebounce = 0.25f;
+                        Screens.InOpenToLanScreen = false;
                     }
                     continue;
                 }
@@ -261,12 +281,17 @@ internal static class Program {
                 if ((pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause)) || pauseAction == PauseAction.Resume) {
                     session.Ui = UiState.Playing;
                     pauseDebounce = 0.25f;
+                } else if (pauseAction == PauseAction.OpenToLan) {
+                    Screens.InOpenToLanScreen = true;
+                    pauseDebounce = 0.25f;
                 } else if (pauseAction == PauseAction.Settings) {
                     Screens.InSettingsScreen = true;
                     Screens.SettingsOpenedFromGame = true;
                     pauseDebounce = 0.25f;
                 } else if (pauseAction == PauseAction.SaveAndExit) {
                     SoundSystem.StopTotem();
+                    GameClient.Disconnect();
+                    GameServer.Stop();
                     session.SaveTo(SaveSystem.SavePath);
                     session.Ui = UiState.Playing;
                     session = null;
@@ -284,6 +309,17 @@ internal static class Program {
             CrashDiag("01_pre_tick");
             session.Tick(dt, input);
             CrashDiag("02_post_tick");
+
+            // Сетевой обмен: обновление позиций игроков и отправка локального состояния
+            GameClient.Active?.UpdateRemotePlayers(dt);
+            GameServer.Active?.Update(dt);
+            if (GameClient.Active != null) {
+                GameClient.Active.SendMovement(session.Player.Position, session.Player.Yaw, session.Player.Pitch, session.Player.IsMoving, session.Player.IsCrouching, session.Player.IsFlying, session.Player.Health);
+            }
+            if (GameServer.Active != null) {
+                GameServer.Active.BroadcastHostMovement(session.Player.Position, session.Player.Yaw, session.Player.Pitch, session.Player.IsMoving, session.Player.IsCrouching, session.Player.IsFlying, session.Player.Health);
+            }
+
             // Автосейв раз в AutosaveInterval секунд игрового времени.
             session.AutosaveTimer -= dt;
             if (session.AutosaveTimer <= 0f) {
@@ -317,6 +353,9 @@ internal static class Program {
 
             // Пост-обработка: композит сцены с виньеткой/цветокором ДО отрисовки UI
             PostProcessing.EndScene();
+
+            // Отрисовка 2D-никнеймов игроков над головами
+            renderer.DrawRemotePlayerNameTags(session.Camera);
 
             // Защита от X-Ray (если камера внутри непрозрачного блока — черная заглушка)
             var camCell = new VoxelFrame.Core.Vec3i((int)MathF.Floor(session.Camera.Position.X), (int)MathF.Floor(session.Camera.Position.Y), (int)MathF.Floor(session.Camera.Position.Z));
@@ -366,9 +405,13 @@ internal static class Program {
                         if (Raylib.IsWindowFocused() && !cursorCaptured) {
                             Raylib.DisableCursor();
                             cursorCaptured = true;
-                        } else if (!Raylib.IsWindowFocused() && cursorCaptured) {
-                            Raylib.EnableCursor();
-                            cursorCaptured = false;
+                        } else if (!Raylib.IsWindowFocused()) {
+                            // Автопауза при потере фокуса (Alt-Tab)
+                            session.Ui = UiState.Paused;
+                            if (cursorCaptured) {
+                                Raylib.EnableCursor();
+                                cursorCaptured = false;
+                            }
                         }
                     }
                     CrashDiag("10_pre_hud");
@@ -491,9 +534,10 @@ internal static class Program {
         }
 
         if (uiState != UiState.Playing) {
+            bool suppressInventoryKey = Screens.RecipeSearchActive || Screens.InMultiplayerScreen;
             return new PlayerInput {
-                OpenInventory = Raylib.IsKeyPressed(KeyBinds.Inventory),
-                Pause = pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause),
+                OpenInventory = !suppressInventoryKey && Raylib.IsKeyPressed(KeyBinds.Inventory),
+                Pause = pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause) && !Screens.RecipeSearchActive,
             };
         }
 
@@ -560,8 +604,12 @@ internal static class Program {
         TextureAtlas.SetBlockTiles(GameData.BLava.Id, TextureAtlas.TLava, TextureAtlas.TLava, TextureAtlas.TLava);
         TextureAtlas.SetBlockTiles(GameData.BGoldOre.Id, TextureAtlas.TGoldOre, TextureAtlas.TGoldOre, TextureAtlas.TGoldOre);
         TextureAtlas.SetBlockTiles(GameData.BDiamondOre.Id, TextureAtlas.TDiamondOre, TextureAtlas.TDiamondOre, TextureAtlas.TDiamondOre);
-        TextureAtlas.SetBlockTiles(GameData.BRedstoneOre.Id, TextureAtlas.TRedstoneOre, TextureAtlas.TRedstoneOre, TextureAtlas.TRedstoneOre);
         TextureAtlas.SetBlockTiles(GameData.BObsidian.Id, TextureAtlas.TObsidian, TextureAtlas.TObsidian, TextureAtlas.TObsidian);
+        TextureAtlas.SetBlockTiles(GameData.BSapling.Id, TextureAtlas.TSapling, TextureAtlas.TSapling, TextureAtlas.TSapling);
+        TextureAtlas.SetBlockTiles(GameData.BRedFlower.Id, TextureAtlas.TRedFlower, TextureAtlas.TRedFlower, TextureAtlas.TRedFlower);
+        TextureAtlas.SetBlockTiles(GameData.BYellowFlower.Id, TextureAtlas.TYellowFlower, TextureAtlas.TYellowFlower, TextureAtlas.TYellowFlower);
+        TextureAtlas.SetBlockTiles(GameData.BCarrotCrop.Id, TextureAtlas.TCarrotCrop0, TextureAtlas.TCarrotCrop0, TextureAtlas.TCarrotCrop0);
+        TextureAtlas.SetBlockTiles(GameData.BPotatoCrop.Id, TextureAtlas.TPotatoCrop0, TextureAtlas.TPotatoCrop0, TextureAtlas.TPotatoCrop0);
 
         TextureAtlas.SetItemTile(GameData.DirtItem.Id, TextureAtlas.TDirt);
         TextureAtlas.SetItemTile(GameData.StoneItem.Id, TextureAtlas.TStone);
@@ -583,7 +631,12 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.GoldIngotItem.Id, TextureAtlas.TGoldIngot);
         TextureAtlas.SetItemTile(GameData.DiamondItem.Id, TextureAtlas.TDiamond);
         TextureAtlas.SetItemTile(GameData.DiamondOreItem.Id, TextureAtlas.TDiamondOre);
-        TextureAtlas.SetItemTile(GameData.RedstoneItem.Id, TextureAtlas.TRedstoneDust);
+        TextureAtlas.SetItemTile(GameData.OakSaplingItem.Id, TextureAtlas.TSapling);
+        TextureAtlas.SetItemTile(GameData.RedFlowerItem.Id, TextureAtlas.TRedFlower);
+        TextureAtlas.SetItemTile(GameData.YellowFlowerItem.Id, TextureAtlas.TYellowFlower);
+        TextureAtlas.SetItemTile(GameData.CarrotItem.Id, TextureAtlas.TCarrot);
+        TextureAtlas.SetItemTile(GameData.PotatoItem.Id, TextureAtlas.TPotato);
+        TextureAtlas.SetItemTile(GameData.BakedPotatoItem.Id, TextureAtlas.TBakedPotato);
         TextureAtlas.SetItemTile(GameData.SandItem.Id, TextureAtlas.TSand);
         TextureAtlas.SetItemTile(GameData.GravelItem.Id, TextureAtlas.TGravel);
         TextureAtlas.SetItemTile(GameData.CobblestoneItem.Id, TextureAtlas.TCobblestone);
@@ -713,5 +766,21 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.NetherTotemItem.Id, TextureAtlas.TNetherArtifact);
         TextureAtlas.SetItemTile(GameData.SwampTotemItem.Id, TextureAtlas.TSwampArtifact);
         TextureAtlas.SetItemTile(GameData.DesertTotemItem.Id, TextureAtlas.TDesertArtifact);
+
+        // Броня
+        TextureAtlas.SetItemTile(GameData.LeatherHelmetItem.Id, TextureAtlas.TLeatherHelmet);
+        TextureAtlas.SetItemTile(GameData.LeatherChestplateItem.Id, TextureAtlas.TLeatherChestplate);
+        TextureAtlas.SetItemTile(GameData.LeatherLeggingsItem.Id, TextureAtlas.TLeatherLeggings);
+        TextureAtlas.SetItemTile(GameData.LeatherBootsItem.Id, TextureAtlas.TLeatherBoots);
+
+        TextureAtlas.SetItemTile(GameData.IronHelmetItem.Id, TextureAtlas.TIronHelmet);
+        TextureAtlas.SetItemTile(GameData.IronChestplateItem.Id, TextureAtlas.TIronChestplate);
+        TextureAtlas.SetItemTile(GameData.IronLeggingsItem.Id, TextureAtlas.TIronLeggings);
+        TextureAtlas.SetItemTile(GameData.IronBootsItem.Id, TextureAtlas.TIronBoots);
+
+        TextureAtlas.SetItemTile(GameData.DiamondHelmetItem.Id, TextureAtlas.TDiamondHelmet);
+        TextureAtlas.SetItemTile(GameData.DiamondChestplateItem.Id, TextureAtlas.TDiamondChestplate);
+        TextureAtlas.SetItemTile(GameData.DiamondLeggingsItem.Id, TextureAtlas.TDiamondLeggings);
+        TextureAtlas.SetItemTile(GameData.DiamondBootsItem.Id, TextureAtlas.TDiamondBoots);
     }
 }

@@ -84,8 +84,11 @@ namespace VoxelFrame.Game;
                     var block = GameData.GetBlock(v.TypeId);
                     bool isFluid = v.TypeId == GameData.BWater.Id || v.TypeId == GameData.BLava.Id;
                     bool isWater = v.TypeId == GameData.BWater.Id;
-                    bool isFoliage = v.TypeId == GameData.BTallGrass.Id || v.TypeId == GameData.BWheatCrop.Id;
-                    bool isTranslucent = (isFluid && isWater) || isFoliage || GameData.IsDoor(v.TypeId) || v.TypeId == GameData.BGlass.Id || v.TypeId == GameData.BBed.Id || v.TypeId == GameData.BBedHead.Id
+                    bool isFoliage = v.TypeId == GameData.BTallGrass.Id || v.TypeId == GameData.BWheatCrop.Id ||
+                                     v.TypeId == GameData.BSapling.Id || v.TypeId == GameData.BRedFlower.Id ||
+                                     v.TypeId == GameData.BYellowFlower.Id || v.TypeId == GameData.BCarrotCrop.Id ||
+                                     v.TypeId == GameData.BPotatoCrop.Id;
+                    bool isTranslucent = (isFluid && isWater) || isFoliage || GameData.IsDoor(v.TypeId) || v.TypeId == GameData.BGlass.Id
                         || v.TypeId == GameData.BNetherPortal.Id || v.TypeId == GameData.BEndPortal.Id;
                     if (pass == 0 && isTranslucent) continue;
                     if (pass == 1 && !isTranslucent) continue;
@@ -102,6 +105,16 @@ namespace VoxelFrame.Game;
                                 BiomeType.Swamp => (byte)TextureAtlas.TTallGrassSwamp,
                                 _ => (byte)TextureAtlas.TTallGrass
                             };
+                        } else if (v.TypeId == GameData.BSapling.Id) {
+                            foliageTile = (byte)TextureAtlas.TSapling;
+                        } else if (v.TypeId == GameData.BRedFlower.Id) {
+                            foliageTile = (byte)TextureAtlas.TRedFlower;
+                        } else if (v.TypeId == GameData.BYellowFlower.Id) {
+                            foliageTile = (byte)TextureAtlas.TYellowFlower;
+                        } else if (v.TypeId == GameData.BCarrotCrop.Id) {
+                            foliageTile = (byte)(TextureAtlas.TCarrotCrop0 + Math.Clamp((int)v.SubGridLayerMask, 0, 3));
+                        } else if (v.TypeId == GameData.BPotatoCrop.Id) {
+                            foliageTile = (byte)(TextureAtlas.TPotatoCrop0 + Math.Clamp((int)v.SubGridLayerMask, 0, 3));
                         } else {
                             foliageTile = (byte)(TextureAtlas.TWheatCrop0 + Math.Clamp((int)v.SubGridLayerMask, 0, 3));
                         }
@@ -403,6 +416,17 @@ namespace VoxelFrame.Game;
                         } else if (v.TypeId == GameData.BLeaves.Id) {
                             // Листва не рисует внутренние соприкасающиеся грани с соседней листвой (буст FPS в 3-4 раза в лесу)
                             visible = neighborType != GameData.BLeaves.Id && !IsFaceOccluding(neighborType);
+                        } else if (v.TypeId == GameData.BBed.Id || v.TypeId == GameData.BBedHead.Id) {
+                            // Изножье и изголовье кровати соединяются бесшовно: внутренняя стыковочная грань не рисуется
+                            byte facing = (byte)(v.SubGridLayerMask & 3);
+                            int partnerFace = (v.TypeId == GameData.BBed.Id)
+                                ? (facing switch { 3 => 0, 1 => 1, 2 => 4, _ => 5 })
+                                : (facing switch { 3 => 1, 1 => 0, 2 => 5, _ => 4 });
+                            if (f == partnerFace && (neighborType == GameData.BBed.Id || neighborType == GameData.BBedHead.Id)) {
+                                visible = false;
+                            } else {
+                                visible = !IsFaceOccluding(neighborType);
+                            }
                         } else {
                             // Твёрдый блок показывает грань, если рядом воздух, стекло, листва или жидкость
                             // (вода/лава не заслоняют грань — иначе блок «исчезает» у лавы).
@@ -672,11 +696,11 @@ namespace VoxelFrame.Game;
     }
 
     /// <summary>
-    /// Заслоняет ли блок грань соседа. Вода НЕ заслоняет (полупрозрачна),
-    /// лава и твёрдые блоки — заслоняют.
+    /// Заслоняет ли блок грань соседа. Вода и лава НЕ заслоняют (жидкости ниже 1.0f блока),
+    /// только твёрдые непрозрачные блоки заслоняют грань.
     /// </summary>
     private static bool IsFaceOccluding(ushort typeId) {
-        if (typeId == 0 || typeId == GameData.BWater.Id) return false;
+        if (typeId == 0 || typeId == GameData.BWater.Id || typeId == GameData.BLava.Id) return false;
         return GameData.GetBlock(typeId).IsOpaque;
     }
 

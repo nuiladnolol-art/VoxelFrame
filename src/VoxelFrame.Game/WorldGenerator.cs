@@ -44,13 +44,13 @@ public sealed class WorldGenerator {
     private readonly Noise _coalNoise;
     private readonly Noise _ironNoise;
     private readonly Noise _goldNoise;
-    private readonly Noise _redstoneNoise;
     private readonly Noise _diamondNoise;
     private readonly Noise _caveCheese;
     private readonly Noise _caveSpaghetti1;
     private readonly Noise _caveSpaghetti2;
     private readonly Noise _caveNoodle;
     private readonly Noise _bedrockNoise;
+    private readonly Noise _lavaPoolNoise;
 
     public WorldGenerator(int seed) {
         _seed = seed;
@@ -65,13 +65,13 @@ public sealed class WorldGenerator {
         _coalNoise = new Noise(seed * 32452843 + 41);
         _ironNoise = new Noise(seed * 48611 + 53);
         _goldNoise = new Noise(seed * 67891 + 59);
-        _redstoneNoise = new Noise(seed * 84631 + 61);
         _diamondNoise = new Noise(seed * 987654 + 67);
         _caveCheese = new Noise(seed * 791999 + 71);
         _caveSpaghetti1 = new Noise(seed * 123457 + 79);
         _caveSpaghetti2 = new Noise(seed * 654321 + 83);
         _caveNoodle = new Noise(seed * 999983 + 89);
         _bedrockNoise = new Noise(seed * 333331 + 97);
+        _lavaPoolNoise = new Noise(seed * 65537 + 97);
     }
 
     public int Seed => _seed;
@@ -604,11 +604,21 @@ public sealed class WorldGenerator {
                         bool isSavanna = biome == BiomeType.Savanna;
                         bool isSwamp = biome == BiomeType.Swamp;
                         if (isForest || isPlains || isSavanna || isSwamp) {
-                            // Оптимизированная естественная плотность 2D-травы (кластерами)
-                            float chance = isSavanna ? 0.30f : isSwamp ? 0.35f : isPlains ? 0.22f : 0.12f;
-                            if (fNoise < chance && ((wx * 19 + wz * 37) % 4 == 0)) {
+                            // Естественная трава и аккуратные редкие полянки цветов
+                            float grassChance = isSavanna ? 0.30f : isSwamp ? 0.35f : isPlains ? 0.22f : 0.15f;
+                            
+                            // Редкие кластеры цветов (маки и одуванчики появляются отдельными полянками)
+                            float flowerNoise = _treeNoise.Get(wx * 0.04f + 800f, wz * 0.04f + 800f);
+                            if (flowerNoise > 0.78f && (isPlains || isForest) && ((wx * 17 + wz * 31) % 6 == 0)) {
+                                ushort flowerId = ((wx * 7 + wz * 13) % 2 == 0) ? GameData.BRedFlower.Id : GameData.BYellowFlower.Id;
+                                var vf = MakeVoxel(flowerId);
+                                chunk.SetVoxel(idx, in vf);
+                            } else if (fNoise < grassChance && ((wx * 19 + wz * 37) % 4 == 0)) {
                                 var vx = MakeVoxel(GameData.BTallGrass.Id);
                                 chunk.SetVoxel(idx, in vx);
+                            } else if (isForest && fNoise > 0.85f && ((wx * 13 + wz * 29) % 19 == 0)) {
+                                var vs = MakeVoxel(GameData.BSapling.Id);
+                                chunk.SetVoxel(idx, in vs);
                             }
                         }
                     }
@@ -620,9 +630,9 @@ public sealed class WorldGenerator {
     /// <summary>
     /// Генерация пещер:
     /// - Cheese Caves (объемные залы)
-    /// - Spaghetti Caves (сети туннелей)
+    /// - Spaghetti Caves (сети 3D-туннелей во всех направлениях)
     /// - Noodle Caves (разломы)
-    /// - Aquifers (затопленные пещеры ниже уровня моря) и лавовые озера на глубине Y &lt;= 8
+    /// - Лавовые бассейны только на самом дне (Y <= 3)
     /// </summary>
     private void CarveNoiseCaves(Chunk chunk, int ox, int oy, int oz) {
         for (int lx = 0; lx < Chunk.SizeX; lx++) {
@@ -630,14 +640,15 @@ public sealed class WorldGenerator {
                 int wx = ox + lx, wz = oz + lz;
                 int surface = SurfaceHeight(wx, wz);
 
-                // Вертикальные разломы / Каньоны (Ravines)
+                // Вертикальные разломы / Каньоны (Ravines) — локализованные в отдельных зонах
+                float ravineRegion = _caveNoodle.Get(wx * 0.005f + 400f, wz * 0.005f + 400f);
                 float ravineAngle = wx * 0.018f + wz * 0.012f;
                 float ravineDist = MathF.Abs(MathF.Sin(ravineAngle) * 35f - (wz * 0.035f));
-                bool isRavine = ravineDist < 1.1f;
+                bool isRavine = ravineRegion > 0.40f && ravineDist < (1.1f + ravineRegion * 0.5f);
 
                 for (int ly = 0; ly < Chunk.SizeY; ly++) {
                     int wy = oy + ly;
-                    if (wy <= 3) continue; // коренная порода
+                    if (wy <= 4) continue; // Коренная порода (Bedrock) абсолютно нерушима и не прорезается пещерами
                     if (wy > surface + 2) continue; // воздух
 
                     int idx = Chunk.Index(lx, ly, lz);
@@ -648,28 +659,29 @@ public sealed class WorldGenerator {
                     if (surface <= SeaLevel + 1 && wy >= surface - 4) continue;
 
                     // 1. Cheese Caves (Просторные гроты и залы)
-                    float cheese = _caveCheese.Fractal(wx * 0.012f, wy * 0.018f + 100f, wz * 0.012f, 3, 0.5f);
-                    bool isCheese = (wy < 36 ? cheese > 0.50f : cheese > 0.58f) && wy < surface - 3;
+                    float cheese = _caveCheese.Fractal(wx * 0.014f, wy * 0.020f + 100f, wz * 0.014f, 3, 0.5f);
+                    bool isCheese = (wy < 32 ? cheese > 0.48f : cheese > 0.56f) && wy < surface - 3;
 
-                    // 2. Spaghetti Caves (Узкие извилистые туннели)
-                    float sp1 = _caveSpaghetti1.Get(wx * 0.022f + wy * 0.014f, wz * 0.022f);
-                    float sp2 = _caveSpaghetti2.Get(wx * 0.022f, wz * 0.022f + wy * 0.014f + 500f);
-                    bool isSpaghetti = (sp1 * sp1 + sp2 * sp2) < 0.018f && wy < surface - 2;
+                    // 2. Spaghetti Caves (Извилистые 3D-туннели во всех направлениях)
+                    float sp1 = _caveSpaghetti1.Fractal(wx * 0.022f, wy * 0.030f, wz * 0.022f, 2, 0.5f);
+                    float sp2 = _caveSpaghetti2.Fractal(wx * 0.022f + 150f, wy * 0.030f + 150f, wz * 0.022f + 150f, 2, 0.5f);
+                    bool isSpaghetti = (sp1 * sp1 + sp2 * sp2) < 0.015f && wy < surface - 2;
 
                     // 3. Noodle Caves (Узкие вертикальные расщелины)
-                    float noodle = _caveNoodle.Get(wx * 0.015f + 2000f, wz * 0.015f + wy * 0.028f);
-                    bool isNoodle = MathF.Abs(noodle) < 0.018f && wy > 6 && wy < surface - 2;
+                    float noodle = _caveNoodle.Fractal(wx * 0.018f + 2000f, wy * 0.028f, wz * 0.018f + 2000f, 2, 0.5f);
+                    bool isNoodle = MathF.Abs(noodle) < 0.016f && wy > 5 && wy < surface - 2;
 
                     // 4. Каньон / Разлом (глубокий вертикальный разрез)
-                    bool inRavine = isRavine && wy >= 9 && wy <= surface - 4;
+                    bool inRavine = isRavine && wy >= 8 && wy <= surface - 4;
 
                     // Выходы пещер и разломов на сушу (но не под водой)
-                    bool surfaceBreach = surface > SeaLevel + 1 && wy >= surface - 3 && (isSpaghetti || isNoodle || inRavine) && cheese > 0.48f;
+                    bool surfaceBreach = surface > SeaLevel + 1 && wy >= surface - 3 && (isSpaghetti || isNoodle || inRavine) && cheese > 0.42f;
 
                     if (isCheese || isSpaghetti || isNoodle || inRavine || surfaceBreach) {
-                        ushort replaceWith = (wy <= 8)
-                            ? GameData.BLava.Id // Подземные лавовые озера на самом дне (Y <= 8)
-                            : (ushort)0;        // Чистый воздух в пещерах
+                        // Редкие естественные лавовые озера на глубине Y=5..10 (вместо сплошного океана лавы)
+                        ushort replaceWith = (wy <= 10 && _lavaPoolNoise.Get(wx * 0.04f + 123f, wz * 0.04f + 456f) > 0.70f)
+                            ? GameData.BLava.Id
+                            : (ushort)0;
 
                         var v = MakeVoxel(replaceWith);
                         chunk.SetVoxel(idx, in v);
@@ -767,58 +779,47 @@ public sealed class WorldGenerator {
 
                 for (int ly = 0; ly < Chunk.SizeY; ly++) {
                     int wy = oy + ly;
-                    if (wy <= 2 || wy >= 86) continue;
+                    if (wy <= 4 || wy >= 86) continue;
 
                     int idx = Chunk.Index(lx, ly, lz);
                     if (chunk.Get(idx).TypeId != GameData.BStone.Id) continue;
 
-                    // Уголь (Coal) — частые крупные жилы на высотах Y=4..85 (горы, пещеры, шахты)
+                    // Уголь (Coal) — жилы на высотах Y=5..85 (горы, пещеры)
                     if (wy <= 85) {
-                        float coalN = _coalNoise.Fractal(wx * 0.18f, wy * 0.18f, wz * 0.18f, 2, 0.5f);
-                        if (coalN > 0.67f) {
+                        float coalN = _coalNoise.Fractal(wx * 0.16f, wy * 0.16f, wz * 0.16f, 2, 0.5f);
+                        if (coalN > 0.78f) {
                             var v = MakeVoxel(GameData.BCoalOre.Id);
                             chunk.SetVoxel(idx, in v);
                             continue;
                         }
                     }
 
-                    // Железо (Iron) — сбалансированные жилы на высотах Y=4..58
-                    if (wy <= 58) {
-                        float ironN = _ironNoise.Fractal(wx * 0.22f, wy * 0.22f + 300f, wz * 0.22f, 2, 0.5f);
-                        if (ironN > 0.76f) {
+                    // Железо (Iron) — сбалансированные жилы на высотах Y=5..54
+                    if (wy <= 54) {
+                        float ironN = _ironNoise.Fractal(wx * 0.20f, wy * 0.20f + 300f, wz * 0.20f, 2, 0.5f);
+                        if (ironN > 0.79f) {
                             var v = MakeVoxel(GameData.BIronOre.Id);
                             chunk.SetVoxel(idx, in v);
                             continue;
                         }
                     }
 
-                    // Золото (Gold) — жилы на глубине Y=2..34 (и до 65 в столовых горах/пустыне)
+                    // Золото (Gold) — жилы на глубине Y=5..32 (и до 56 в пустынях)
                     var biome = GetBiome(wx, BaseHeight, wz);
-                    int maxGoldY = (biome == BiomeType.Desert) ? 65 : 34;
+                    int maxGoldY = (biome == BiomeType.Desert) ? 56 : 32;
                     if (wy <= maxGoldY) {
                         float goldN = _goldNoise.Fractal(wx * 0.22f + 700f, wy * 0.22f, wz * 0.22f, 2, 0.5f);
-                        if (goldN > 0.77f) {
+                        if (goldN > 0.81f) {
                             var v = MakeVoxel(GameData.BGoldOre.Id);
                             chunk.SetVoxel(idx, in v);
                             continue;
                         }
                     }
 
-                    // Редстоун (Redstone) — жилы на глубине Y=1..22
-                    if (wy <= 22) {
-                        float redN = _redstoneNoise.Fractal(wx * 0.23f + 1200f, wy * 0.23f, wz * 0.23f, 2, 0.5f);
-                        if (redN > 0.77f) {
-                            var v = MakeVoxel(GameData.BRedstoneOre.Id);
-                            chunk.SetVoxel(idx, in v);
-                            continue;
-                        }
-                    }
-
-                    // Алмазы (Diamond) — жилы на глубине Y=1..16 (чем глубже, тем больше)
-                    if (wy <= 16) {
-                        float diaN = _diamondNoise.Fractal(wx * 0.24f + 5000f, wy * 0.24f, wz * 0.24f, 2, 0.5f);
-                        float threshold = wy <= 8 ? 0.77f : 0.80f;
-                        if (diaN > threshold) {
+                    // Алмазы (Diamond) — РЕДКИЕ драгоценные жилы на глубине Y=5..15 (значительно реже золота)
+                    if (wy <= 15) {
+                        float diaN = _diamondNoise.Fractal(wx * 0.26f + 5000f, wy * 0.26f, wz * 0.26f, 2, 0.5f);
+                        if (diaN > 0.86f) {
                             var v = MakeVoxel(GameData.BDiamondOre.Id);
                             chunk.SetVoxel(idx, in v);
                             continue;
@@ -1171,7 +1172,13 @@ public sealed class WorldGenerator {
                             SetVillageBlock(chunk, ox, oz, gwx, gwy, gwz, GameData.BWater.Id);
                         } else {
                             SetVillageBlock(chunk, ox, oz, gwx, gwy, gwz, GameData.BFarmland.Id);
-                            SetVillageBlock(chunk, ox, oz, gwx, gwy + 1, gwz, GameData.BWheatCrop.Id);
+                            ushort cropId = ((fx + fz) % 3) switch {
+                                0 => GameData.BWheatCrop.Id,
+                                1 => GameData.BCarrotCrop.Id,
+                                _ => GameData.BPotatoCrop.Id
+                            };
+                            byte stage = (byte)(((fx * 3 + fz * 7) % 3) + 1); // стадии 1..3
+                            SetVillageBlock(chunk, ox, oz, gwx, gwy + 1, gwz, cropId, stage);
                         }
                     }
                 }

@@ -50,11 +50,16 @@ public static class Hud {
             Raylib.DrawRectangle(0, 0, w, h, new Color((byte)130, (byte)30, (byte)210, (byte)(110 + portalWave * 45)));
         }
 
-        // Красная вспышка/виньетка при получении урона
+        // Красная виньетка по краям экрана при получении урона
         if (player.HurtTimer > 0f) {
             float alphaProgress = player.HurtTimer / 0.5f;
-            int redAlpha = (int)(110 * Math.Clamp(alphaProgress, 0f, 1f));
-            Raylib.DrawRectangle(0, 0, w, h, new Color(220, 20, 20, redAlpha));
+            int redAlpha = (int)(170 * Math.Clamp(alphaProgress, 0f, 1f));
+            int redAlphaCenter = (int)(25 * Math.Clamp(alphaProgress, 0f, 1f));
+            Raylib.DrawRectangle(0, 0, w, h, new Color(200, 20, 20, redAlphaCenter));
+            Raylib.DrawRectangleGradientV(0, 0, w, 90, new Color(190, 0, 0, redAlpha), new Color(190, 0, 0, 0));
+            Raylib.DrawRectangleGradientV(0, h - 90, w, 90, new Color(190, 0, 0, 0), new Color(190, 0, 0, redAlpha));
+            Raylib.DrawRectangleGradientH(0, 0, 90, h, new Color(190, 0, 0, redAlpha), new Color(190, 0, 0, 0));
+            Raylib.DrawRectangleGradientH(w - 90, 0, 90, h, new Color(190, 0, 0, 0), new Color(190, 0, 0, redAlpha));
         }
 
         // Индикатор перезарядки удара (Attack Meter под прицелом)
@@ -286,6 +291,12 @@ public static class Hud {
             bool isLowHealth = player.Health <= 4f;
             DrawStatusRow(TextureAtlas.THeart, TextureAtlas.THeartEmpty, w / 2f - 165f, vitalsY, iconSize, spacing, player.Health, isHurt || isLowHealth);
 
+            // Шкала брони над сердечками здоровья
+            int totalArmor = player.GetTotalArmorPoints();
+            if (totalArmor > 0) {
+                DrawStatusRow(TextureAtlas.TArmorIcon, TextureAtlas.TArmorIconEmpty, w / 2f - 165f, vitalsY - 14f, iconSize, spacing, totalArmor, false);
+            }
+
             bool isStarving = player.Hunger <= 6f;
             DrawStatusRow(TextureAtlas.TFood, TextureAtlas.TFoodEmpty, w / 2f + 15f, vitalsY, iconSize, spacing, player.Hunger, isStarving);
 
@@ -368,6 +379,57 @@ public static class Hud {
             string displayText = "> " + session.ChatInput + (cursorBlink ? "_" : "");
             Fonts.DrawShadowed(displayText, 12f, h - 30, 20f, Color.White);
         }
+
+        // ── СПИСОК ИГРОКОВ (TAB PLAYER LIST) В МУЛЬТИПЛЕЕРЕ ─────────────────
+        if (Raylib.IsKeyDown(KeyboardKey.Tab) && (GameClient.Active != null || GameServer.Active != null)) {
+            var playerList = new System.Collections.Generic.List<(string name, float hp, bool isHost)>();
+            playerList.Add((session.Player.Name, session.Player.Health, GameServer.Active != null));
+
+            if (GameClient.Active != null) {
+                foreach (var rp in GameClient.Active.RemotePlayers) {
+                    playerList.Add((rp.Name, rp.Health, rp.Id == 1));
+                }
+            } else if (GameServer.Active != null) {
+                foreach (var cl in GameServer.Active.Clients) {
+                    playerList.Add((cl.Name, cl.Health, false));
+                }
+            }
+
+            int tabW = Math.Min(400, w - 80);
+            int rowH = 26;
+            int tabH = 34 + playerList.Count * rowH;
+            int tabX = (w - tabW) / 2;
+            int tabY = 32;
+
+            var tabRect = new Rectangle(tabX, tabY, tabW, tabH);
+            Raylib.DrawRectangleRounded(tabRect, 0.12f, 4, new Color(18, 22, 32, 220));
+            Raylib.DrawRectangleRoundedLinesEx(tabRect, 0.12f, 4, 1.2f, new Color(55, 75, 110, 230));
+
+            Fonts.DrawCentered($"Игроки онлайн ({playerList.Count})", tabX + tabW / 2f, tabY + 8f, 15f, new Color(255, 215, 90, 255));
+
+            float curRowY = tabY + 30f;
+            foreach (var p in playerList) {
+                var rowRect = new Rectangle(tabX + 8, curRowY, tabW - 16, rowH - 4);
+                Raylib.DrawRectangleRounded(rowRect, 0.15f, 2, new Color(28, 34, 48, 180));
+
+                string prefix = p.isHost ? "👑 " : "👤 ";
+                Fonts.Draw(prefix + p.name, rowRect.X + 8f, curRowY + 4f, 14f, Color.White);
+
+                float hpPct = Math.Clamp(p.hp / 20f, 0f, 1f);
+                int hpBarW = 70;
+                int hpBarH = 8;
+                int hpBarX = (int)(rowRect.X + rowRect.Width - hpBarW - 10);
+                int hpBarY = (int)(curRowY + (rowH - 4 - hpBarH) / 2f);
+
+                Raylib.DrawRectangleRounded(new Rectangle(hpBarX, hpBarY, hpBarW, hpBarH), 0.4f, 2, new Color(20, 20, 20, 200));
+                if (hpPct > 0f) {
+                    Color hpCol = hpPct > 0.5f ? new Color(60, 220, 70, 240) : (hpPct > 0.25f ? new Color(240, 200, 40, 240) : new Color(240, 60, 50, 240));
+                    Raylib.DrawRectangleRounded(new Rectangle(hpBarX, hpBarY, hpBarW * hpPct, hpBarH), 0.4f, 2, hpCol);
+                }
+
+                curRowY += rowH;
+            }
+        }
     }
 
     private static void DrawStatusRow(byte filledTile, byte emptyTile, float xStart, float y, float size, float spacing, float value, bool shake = false) {
@@ -419,6 +481,8 @@ public static class Hud {
     private static void DrawHandHeldItem(VoxelFrame.Core.Inventory.ItemDefinition def, Rectangle slot, float scale, float rotation, float hStretch = 1f) {
         if (GameData.TryGetBlockByItem(def.Id, out var block) && block != null &&
             block.Id != GameData.BTorch.Id && block.Id != GameData.BWheatCrop.Id && block.Id != GameData.BTallGrass.Id &&
+            block.Id != GameData.BSapling.Id && block.Id != GameData.BRedFlower.Id && block.Id != GameData.BYellowFlower.Id &&
+            block.Id != GameData.BCarrotCrop.Id && block.Id != GameData.BPotatoCrop.Id &&
             block.Id != GameData.BChorusPlant.Id && block.Id != GameData.BChorusFlower.Id && block.Id != GameData.BEnderCrystal.Id &&
             !GameData.IsDoor(block.Id)) {
             // ── 3D Изометрический куб блока в руке ─────────────────────────
@@ -463,24 +527,24 @@ public static class Hud {
             Rlgl.PopMatrix();
             Rlgl.SetTexture(0);
         } else {
-            // ── 2D/3D Предмет в руке ──────────────────────────────────────────
+            // ── 2D Предмет в руке ──────────────────────────────────────────
             byte tile = TextureAtlas.ItemTile(def.Id);
             var src = TextureAtlas.TilePixelRect(tile);
-            float size = MathF.Min(slot.Width, slot.Height) * scale * 1.15f;
-            float drawW = size * hStretch;                       // растянутая ширина
-            float itemCx = slot.X + slot.Width / 2f + size / 2f; // центр предмета (как было)
-            float itemCy = slot.Y + slot.Height / 2f + size / 2f;
-            var origin = new System.Numerics.Vector2(drawW / 2f, size / 2f);
+            float size = MathF.Min(slot.Width, slot.Height) * scale * 1.05f;
+            float drawW = size * hStretch;
+            float cx = slot.X + slot.Width * 0.5f;
+            float cy = slot.Y + slot.Height * 0.5f;
+            var origin = new System.Numerics.Vector2(drawW * 0.5f, size * 0.5f);
             float rotDeg = rotation * (180f / MathF.PI);
 
-            // Мягкая динамическая тень, строго синхронизированная с поворотом предмета
-            var shadowDest = new Rectangle(itemCx - drawW / 2f + 3f, itemCy - size / 2f + 3f, drawW, size);
+            // Мягкая динамическая тень
+            var shadowDest = new Rectangle(cx + 3f, cy + 3f, drawW, size);
             unsafe {
-                Raylib.DrawTexturePro(TextureAtlas.Atlas, src, shadowDest, origin, rotDeg, new Color((byte)30, (byte)30, (byte)30, (byte)120));
+                Raylib.DrawTexturePro(TextureAtlas.Atlas, src, shadowDest, origin, rotDeg, new Color((byte)20, (byte)20, (byte)20, (byte)100));
             }
 
             // Основной лицевой слой предмета
-            var frontDest = new Rectangle(itemCx - drawW / 2f, itemCy - size / 2f, drawW, size);
+            var frontDest = new Rectangle(cx, cy, drawW, size);
             unsafe {
                 Raylib.DrawTexturePro(TextureAtlas.Atlas, src, frontDest, origin, rotDeg, Color.White);
             }
@@ -506,7 +570,7 @@ public static class Hud {
             y += 20f;
         }
 
-        LineL($"VoxelFrame 0.9.9 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
+        LineL($"VoxelFrame 1.0.0-pre1 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
         LineL($"XYZ: {player.Position.X:F3} / {player.Position.Y:F5} / {player.Position.Z:F3}", new Color(255, 240, 120, 255));
         LineL($"Block: {px} {py} {pz} [{(px & 15)} {(py & 15)} {(pz & 15)} in sub-chunk]");
         LineL($"Chunk: {px >> 4} {py >> 4} {pz >> 4} in chunk [{px >> 4}, {pz >> 4}]");

@@ -7,7 +7,7 @@ using VoxelFrame.Core.Materials;
 namespace VoxelFrame.Game;
 
 public enum MenuAction { None, NewGame, Continue, Exit }
-public enum PauseAction { None, Resume, SaveAndExit, Settings }
+public enum PauseAction { None, Resume, SaveAndExit, Settings, OpenToLan }
 
 /// <summary>Экраны: главное меню, пауза, инвентарь, крафт. Мышь — прямоугольные кнопки.</summary>
 public static partial class Screens {
@@ -33,7 +33,7 @@ public static partial class Screens {
     public static bool InControlsScreen = false;
     public static bool InGraphicsScreen = false;
     public static bool InAudioScreen = false;
-    public static bool InGameplayScreen = false;
+    public static bool InOpenToLanScreen = false;
     public static bool SettingsOpenedFromGame = false;
     public static int ActiveRebindIndex = -1;
 
@@ -79,51 +79,182 @@ public static partial class Screens {
         }
     }
 
-    // ── Главное меню ─────────────────────────────────────────────────────────
+    // ── Частицы и Splash Text меню ──────────────────────────────────────────
 
-    public static MenuAction DrawMenu(float dt) {
+    private struct MenuParticle {
+        public Vector2 Pos;
+        public Vector2 Vel;
+        public float Size;
+        public float Alpha;
+        public Color Tint;
+    }
+
+    private static MenuParticle[]? _particles;
+
+    private static void InitMenuParticles() {
+        if (_particles != null) return;
+        var rng = new Random(1337);
+        _particles = new MenuParticle[40];
+        for (int i = 0; i < _particles.Length; i++) {
+            _particles[i] = new MenuParticle {
+                Pos = new Vector2(rng.Next(0, 1920), rng.Next(0, 1080)),
+                Vel = new Vector2((float)(rng.NextDouble() - 0.5) * 16f, -12f - (float)rng.NextDouble() * 22f),
+                Size = 2f + (float)rng.NextDouble() * 3.5f,
+                Alpha = 0.3f + (float)rng.NextDouble() * 0.5f,
+                Tint = rng.NextDouble() < 0.65 ? new Color(255, 200, 75, 255) : new Color(90, 180, 255, 255)
+            };
+        }
+    }
+
+    public static void DrawMenuBackground(float dt) {
         int w = Ui.Vw, h = Ui.Vh;
-        
+        InitMenuParticles();
+
+        // 1. Глубокий градиентный темный фон (от космического индиго к темному сланцу)
+        Raylib.DrawRectangleGradientV(0, 0, w, h, new Color(16, 20, 30, 255), new Color(10, 12, 18, 255));
+
+        // 2. Стильная тонкая воксельная сетка с мягким затемнением
         int tileSize = 64;
         for (int x = 0; x < w; x += tileSize) {
             for (int y = 0; y < h; y += tileSize) {
                 bool isEven = ((x / tileSize) + (y / tileSize)) % 2 == 0;
-                Raylib.DrawRectangle(x, y, tileSize, tileSize, isEven ? new Color(42, 34, 30, 255) : new Color(34, 27, 24, 255));
+                if (isEven) {
+                    Raylib.DrawRectangle(x, y, tileSize, tileSize, new Color(28, 34, 48, 35));
+                }
             }
         }
+
+        // 3. Атмосферные частицы / золотистые и лазурные искры
+        float time = (float)Raylib.GetTime();
+        if (_particles != null) {
+            for (int i = 0; i < _particles.Length; i++) {
+                ref var p = ref _particles[i];
+                p.Pos.X += (p.Vel.X + MathF.Sin(time * 1.5f + i) * 8f) * dt;
+                p.Pos.Y += p.Vel.Y * dt;
+                if (p.Pos.Y < -10f) p.Pos.Y = h + 10f;
+                if (p.Pos.X < -10f) p.Pos.X = w + 10f;
+                else if (p.Pos.X > w + 10f) p.Pos.X = -10f;
+
+                float flicker = 0.7f + 0.3f * MathF.Sin(time * 3f + i * 1.3f);
+                Color c = new(p.Tint.R, p.Tint.G, p.Tint.B, (byte)(p.Alpha * flicker * 255));
+                Raylib.DrawRectangle((int)p.Pos.X, (int)p.Pos.Y, (int)p.Size, (int)p.Size, c);
+            }
+        }
+
+        // 4. Мягкая виньетка по краям экрана
+        Raylib.DrawRectangleGradientV(0, 0, w, 140, new Color(0, 0, 0, 180), new Color(0, 0, 0, 0));
+        Raylib.DrawRectangleGradientV(0, h - 160, w, 160, new Color(0, 0, 0, 0), new Color(0, 0, 0, 210));
+    }
+
+    private static readonly string[] SplashTexts = {
+        "100% Pure C# & Raylib!",
+        "Теперь без редстоуна!",
+        "Алмазы спасены из лавы!",
+        "3D-пещеры без лавы!",
+        "Не копай прямо под себя!",
+        "Покорми овечку пшеницей!",
+        "Осторожно: криперы не спят!",
+        "Кастомный воксельный движок!",
+        "С любовью от SenStol Studio!",
+        "Зомби боятся утреннего солнца!",
+        "Дерево само себя не срубит!",
+        "Скрафти верстак первым делом!",
+        "Болотный страж ждет во тьме...",
+        "Ночь темна и полна криперов!",
+        "Где мой факел?!",
+        "Костная мука творит чудеса!",
+        "Морковь полезна для зрения!",
+        "Жареная картошечка в печи!",
+        "60 кадров в секунду на чистом C#!",
+        "Бесконечные процедурные миры!",
+        "Никакой Java, только .NET 10!",
+        "Воксели правят миром!",
+        "Не забудь поставить кровать!",
+        "Убей дракона — спаси Энд!",
+        "Свинки обожают морковь!",
+        "Шерсть для кровати добыта!",
+        "Книга рецептов всегда под рукой!",
+        "Слушай шаги за спиной...",
+        "Алмазная кирка — лучший друг!",
+        "Не смотри в глаза Эндермену!",
+        "Лава течет на самом дне!",
+        "Огороды цветут и пахнут!",
+        "Посади дуб около дома!",
+        "Секретные данжи ждут тебя!",
+        "Улучшай броню вовремя!",
+        "Крипер уже шипит сзади...",
+        "Уютный домик из дубовых досок!",
+        "Печка греет, хлеб печется!",
+        "Золотые яблоки спасают жизнь!",
+        "Скелеты стреляют метко!",
+        "Портал в Нижний мир готов!",
+        "Ифриты не любят воду!",
+        "Зачаруй свой меч на остроту!",
+        "Генерация чанков на лету!",
+        "Никаких фризов и лагов!",
+        "Построй свой замок мечты!",
+        "Рецепты крафта на любой вкус!",
+        "Спасибо, что играешь в VoxelFrame!",
+        "Сделано с душой!",
+        "Приятной игры!"
+    };
+    private static int _splashIndex = -1;
+
+    private static void DrawSplashText(float x, float y) {
+        if (_splashIndex < 0) {
+            _splashIndex = Random.Shared.Next(SplashTexts.Length);
+        }
+        string splash = SplashTexts[_splashIndex];
+        float time = (float)Raylib.GetTime();
+        float pulse = 1.0f + MathF.Sin(time * 4.5f) * 0.06f;
+        float baseSize = splash.Length > 28 ? 14f : splash.Length > 20 ? 16f : 18f;
+        float fontSize = baseSize * pulse;
+
+        Rlgl.PushMatrix();
+        Rlgl.Translatef(x, y, 0f);
+        Rlgl.Rotatef(-14f, 0f, 0f, 1f);
+        Fonts.DrawShadowed(splash, 0f, 0f, fontSize, new Color(255, 245, 60, 255), 2f);
+        Rlgl.PopMatrix();
+    }
+
+    // ── Главное меню ─────────────────────────────────────────────────────────
+
+    public static MenuAction DrawMenu(float dt) {
+        int w = Ui.Vw, h = Ui.Vh;
+        DrawMenuBackground(dt);
 
         var action = MenuAction.None;
 
         if (InCreateWorldScreen) {
-            Fonts.DrawCentered("СОЗДАНИЕ МИРА", w / 2f, h * 0.10f, 40f, new Color(255, 220, 120, 255));
+            Fonts.DrawTitle3D("СОЗДАНИЕ МИРА", w / 2f, h * 0.10f, 44f);
 
-            float boxW = 380f;
+            float boxW = 420f;
             float cx = w / 2f - boxW / 2f;
 
             // Название мира
-            Fonts.Draw("Название мира:", cx, h * 0.22f, 18f, new Color(200, 200, 200, 255));
-            var nameRec = new Rectangle(cx, h * 0.26f, boxW, 42f);
+            Fonts.DrawShadowed("Название мира:", cx, h * 0.22f, 18f, new Color(220, 225, 235, 255));
+            var nameRec = new Rectangle(cx, h * 0.26f, boxW, 44f);
             if (Raylib.IsMouseButtonPressed(MouseButton.Left)) {
                 if (Raylib.CheckCollisionPointRec(Ui.Mouse(), nameRec)) ActiveTextInputField = 1;
             }
-            Raylib.DrawRectangleRec(nameRec, ActiveTextInputField == 1 ? new Color(60, 65, 80, 255) : new Color(40, 45, 55, 255));
-            Raylib.DrawRectangleLinesEx(nameRec, 1.5f, ActiveTextInputField == 1 ? new Color(255, 220, 120, 255) : new Color(90, 100, 120, 255));
-            Fonts.Draw(WorldNameInput + (ActiveTextInputField == 1 && ((int)(Raylib.GetTime() * 2) % 2 == 0) ? "_" : ""), cx + 10f, h * 0.26f + 11f, 18f, Color.White);
+            Raylib.DrawRectangleRec(nameRec, ActiveTextInputField == 1 ? new Color(42, 50, 68, 255) : new Color(28, 34, 46, 255));
+            Raylib.DrawRectangleLinesEx(nameRec, 1.5f, ActiveTextInputField == 1 ? new Color(255, 215, 80, 255) : new Color(60, 72, 95, 255));
+            Fonts.Draw(WorldNameInput + (ActiveTextInputField == 1 && ((int)(Raylib.GetTime() * 2) % 2 == 0) ? "_" : ""), cx + 12f, h * 0.26f + 12f, 18f, Color.White);
 
             // Режим игры (Выживание)
-            Fonts.Draw("Режим игры: Выживание", cx, h * 0.36f, 18f, new Color(200, 200, 200, 255));
-            Fonts.Draw("Поиск ресурсов, крафт, опасные мобы и шкала здоровья.", cx, h * 0.40f, 13f, new Color(150, 160, 170, 255));
+            Fonts.DrawShadowed("Режим игры: Выживание", cx, h * 0.37f, 18f, new Color(220, 225, 235, 255));
+            Fonts.Draw("Добыча ресурсов, крафт, опасные мобы и исследование 3D-мира.", cx, h * 0.41f, 14f, new Color(150, 165, 185, 255));
 
             // Сид генерации
-            Fonts.Draw("Сид для генератора мира (оставьте пустым для случайного):", cx, h * 0.48f, 16f, new Color(200, 200, 200, 255));
-            var seedRec = new Rectangle(cx, h * 0.52f, boxW, 42f);
+            Fonts.DrawShadowed("Сид генератора мира (оставьте пустым для случайного):", cx, h * 0.49f, 16f, new Color(220, 225, 235, 255));
+            var seedRec = new Rectangle(cx, h * 0.53f, boxW, 44f);
             if (Raylib.IsMouseButtonPressed(MouseButton.Left)) {
                 if (Raylib.CheckCollisionPointRec(Ui.Mouse(), seedRec)) ActiveTextInputField = 2;
                 else if (!Raylib.CheckCollisionPointRec(Ui.Mouse(), nameRec)) ActiveTextInputField = 0;
             }
-            Raylib.DrawRectangleRec(seedRec, ActiveTextInputField == 2 ? new Color(60, 65, 80, 255) : new Color(40, 45, 55, 255));
-            Raylib.DrawRectangleLinesEx(seedRec, 1.5f, ActiveTextInputField == 2 ? new Color(255, 220, 120, 255) : new Color(90, 100, 120, 255));
-            Fonts.Draw(WorldSeedInput + (ActiveTextInputField == 2 && ((int)(Raylib.GetTime() * 2) % 2 == 0) ? "_" : ""), cx + 10f, h * 0.52f + 11f, 18f, Color.White);
+            Raylib.DrawRectangleRec(seedRec, ActiveTextInputField == 2 ? new Color(42, 50, 68, 255) : new Color(28, 34, 46, 255));
+            Raylib.DrawRectangleLinesEx(seedRec, 1.5f, ActiveTextInputField == 2 ? new Color(255, 215, 80, 255) : new Color(60, 72, 95, 255));
+            Fonts.Draw(WorldSeedInput + (ActiveTextInputField == 2 && ((int)(Raylib.GetTime() * 2) % 2 == 0) ? "_" : ""), cx + 12f, h * 0.53f + 12f, 18f, Color.White);
 
             // Обработка ввода с клавиатуры
             int key = Raylib.GetCharPressed();
@@ -140,8 +271,8 @@ public static partial class Screens {
             }
 
             // Кнопки Создать и Отмена
-            float btnY = h * 0.72f;
-            if (Button(w / 2f - 195f, btnY, 190f, 46f, "Создать новый мир", true)) {
+            float btnY = h * 0.74f;
+            if (Button(w / 2f - 215f, btnY, 210f, 48f, "Создать новый мир", true)) {
                 string name = string.IsNullOrWhiteSpace(WorldNameInput) ? "Новый мир" : WorldNameInput.Trim();
                 SaveSystem.CurrentWorldPath = SaveSystem.CreateWorldSavePath(name);
                 CustomWorldSeed = GameData.ParseSeed(WorldSeedInput);
@@ -149,91 +280,116 @@ public static partial class Screens {
                 InCreateWorldScreen = false;
                 InWorldSelectScreen = false;
             }
-            if (Button(w / 2f + 5f, btnY, 190f, 46f, "Отмена", true)) {
+            if (Button(w / 2f + 5f, btnY, 210f, 48f, "Отмена", true)) {
                 InCreateWorldScreen = false;
             }
         } else if (InWorldSelectScreen) {
-            Fonts.DrawCentered("ВЫБОР МИРА", w / 2f, h * 0.08f, 40f, new Color(255, 220, 120, 255));
+            Fonts.DrawTitle3D("ВЫБОР МИРА", w / 2f, h * 0.08f, 44f);
 
             var worlds = SaveSystem.GetAllWorlds();
             if (SelectedWorldListIndex >= worlds.Count) SelectedWorldListIndex = Math.Max(0, worlds.Count - 1);
 
             float listY = h * 0.16f;
-            float listH = h * 0.58f;
-            float cardW = MathF.Min(560f, w - 80f);
-            float cardH = 64f;
+            float cardW = MathF.Min(600f, w - 80f);
+            float cardH = 68f;
             float cardX = w / 2f - cardW / 2f;
 
             if (worlds.Count == 0) {
-                Fonts.DrawCentered("Нет созданных миров. Нажмите 'Создать новый мир'", w / 2f, h * 0.40f, 20f, new Color(180, 180, 180, 255));
+                Fonts.DrawCenteredShadowed("Нет созданных миров. Нажмите 'Создать новый мир'", w / 2f, h * 0.40f, 20f, new Color(180, 190, 205, 255));
             } else {
                 for (int i = 0; i < worlds.Count && i < 5; i++) {
                     var wi = worlds[i];
-                    float cy = listY + i * (cardH + 8f);
+                    float cy = listY + i * (cardH + 10f);
                     var cardRec = new Rectangle(cardX, cy, cardW, cardH);
                     bool isSelected = (i == SelectedWorldListIndex);
+                    bool cardHover = Raylib.CheckCollisionPointRec(Ui.Mouse(), cardRec);
 
-                    if (Raylib.IsMouseButtonPressed(MouseButton.Left) && Raylib.CheckCollisionPointRec(Ui.Mouse(), cardRec)) {
+                    if (Raylib.IsMouseButtonPressed(MouseButton.Left) && cardHover) {
                         SelectedWorldListIndex = i;
                     }
 
-                    Raylib.DrawRectangleRec(cardRec, isSelected ? new Color(60, 68, 85, 240) : new Color(36, 42, 54, 200));
-                    Raylib.DrawRectangleLinesEx(cardRec, isSelected ? 2f : 1f, isSelected ? new Color(255, 220, 120, 255) : new Color(65, 75, 95, 255));
+                    // Фон карточки
+                    Color cBg = isSelected ? new Color(55, 66, 92, 245) : (cardHover ? new Color(42, 50, 70, 220) : new Color(30, 36, 50, 200));
+                    Color cBorder = isSelected ? new Color(255, 215, 80, 255) : (cardHover ? new Color(110, 135, 175, 255) : new Color(55, 65, 85, 255));
 
-                    Fonts.Draw(wi.Name, cardX + 12f, cy + 8f, 20f, Color.White);
+                    Raylib.DrawRectangleRec(cardRec, cBg);
+                    Raylib.DrawRectangleLinesEx(cardRec, isSelected ? 2f : 1.5f, cBorder);
+
+                    Fonts.DrawShadowed(wi.Name, cardX + 16f, cy + 10f, 22f, isSelected ? new Color(255, 245, 180, 255) : Color.White);
                     string dateStr = $"{wi.LastPlayed:dd.MM.yyyy HH:mm}";
                     string sizeStr = $"{wi.SizeBytes / 1024} KB";
-                    string seedStr = wi.Seed != 0 ? $" (Сид: {wi.Seed})" : "";
-                    Fonts.Draw($"{dateStr} • {sizeStr}{seedStr}", cardX + 12f, cy + 34f, 14f, new Color(160, 175, 195, 255));
+                    string seedStr = wi.Seed != 0 ? $" • Сид: {wi.Seed}" : "";
+                    Fonts.Draw($"Выживание • {dateStr} • {sizeStr}{seedStr}", cardX + 16f, cy + 38f, 14f, new Color(160, 180, 210, 255));
                 }
             }
 
             // Нижняя панель действий
             float bY1 = h * 0.78f;
             float bY2 = h * 0.86f;
-            float bW = 180f;
+            float bW = 200f;
 
             bool hasSelection = worlds.Count > 0 && SelectedWorldListIndex >= 0 && SelectedWorldListIndex < worlds.Count;
-            if (Button(w / 2f - bW - 6f, bY1, bW, 44f, "Играть в мире", hasSelection)) {
+            if (Button(w / 2f - bW - 8f, bY1, bW, 46f, "Играть в мире", hasSelection)) {
                 SaveSystem.CurrentWorldPath = worlds[SelectedWorldListIndex].FilePath;
                 action = MenuAction.Continue;
                 InWorldSelectScreen = false;
             }
-            if (Button(w / 2f + 6f, bY1, bW, 44f, "Создать новый мир", true)) {
+            if (Button(w / 2f + 8f, bY1, bW, 46f, "Создать новый мир", true)) {
                 InCreateWorldScreen = true;
                 WorldNameInput = "Новый мир";
                 WorldSeedInput = "";
                 ActiveTextInputField = 0;
             }
 
-            if (Button(w / 2f - bW - 6f, bY2, bW, 44f, "Удалить", hasSelection)) {
+            if (Button(w / 2f - bW - 8f, bY2, bW, 46f, "Удалить", hasSelection)) {
                 SaveSystem.DeleteSave(worlds[SelectedWorldListIndex].FilePath);
                 if (SelectedWorldListIndex >= worlds.Count - 1) SelectedWorldListIndex = Math.Max(0, worlds.Count - 2);
             }
-            if (Button(w / 2f + 6f, bY2, bW, 44f, "Отмена", true)) {
+            if (Button(w / 2f + 8f, bY2, bW, 46f, "Отмена", true)) {
                 InWorldSelectScreen = false;
             }
         } else {
-            Fonts.DrawCentered("VOXELFRAME", w / 2f + 4f, h * 0.16f + 4f, 72f, new Color(50, 45, 35, 255));
-            Fonts.DrawCentered("VOXELFRAME", w / 2f, h * 0.16f, 72f, new Color(255, 220, 120, 255));
+            // ── ЛОГОТИП ──────────────────────────────────────────────────────
+            Fonts.DrawTitle3D("VOXELFRAME", w / 2f, h * 0.15f, 76f);
+            DrawSplashText(w / 2f + 210f, h * 0.15f + 56f);
 
-            float cy = h * 0.35f;
-            if (Button(w / 2f - 140f, cy, 280f, 46f, "Одиночная игра", true)) {
+            // ── КНОПКИ МЕНЮ ──────────────────────────────────────────────────
+            float cy = h * 0.36f;
+            float btnW = 360f;
+            float btnH = 48f;
+            float gapY = 12f;
+
+            if (Button(w / 2f - btnW / 2f, cy, btnW, btnH, "Одиночная игра", true)) {
                 InWorldSelectScreen = true;
             }
-            if (Button(w / 2f - 140f, cy + 52f, 280f, 46f, "Сетевая игра", false)) { }
+            if (Button(w / 2f - btnW / 2f, cy + btnH + gapY, btnW, btnH, "Сетевая игра", true)) {
+                OpenMultiplayerMenu();
+            }
 
-            if (Button(w / 2f - 140f, cy + 104f, 138f, 46f, "Настройки...", true)) {
+            float halfW = (btnW - 12f) / 2f;
+            if (Button(w / 2f - btnW / 2f, cy + (btnH + gapY) * 2, halfW, btnH, "Настройки...", true)) {
                 InSettingsScreen = true;
                 SettingsOpenedFromGame = false;
             }
-            if (Button(w / 2f + 2f, cy + 104f, 138f, 46f, "Выход", true)) action = MenuAction.Exit;
+            if (Button(w / 2f - btnW / 2f + halfW + 12f, cy + (btnH + gapY) * 2, halfW, btnH, "Выход", true)) {
+                action = MenuAction.Exit;
+            }
 
             if (MenuError.Length > 0)
-                Fonts.DrawCentered(MenuError, w / 2f, h * 0.68f, 18f, new Color(255, 120, 120, 255));
+                Fonts.DrawCenteredShadowed(MenuError, w / 2f, h * 0.72f, 18f, new Color(255, 120, 120, 255));
 
-            Fonts.Draw("VoxelFrame Alpha 0.9.9", 10f, h - 25f, 14f, new Color(200, 200, 200, 180));
-            Fonts.Draw("SenStol Studio", w - 180f, h - 25f, 14f, new Color(200, 200, 200, 180));
+            // ── ПОДВАЛ (FOOTER) ───────────────────────────────────────────────
+            // Левый бейдж версии
+            var verRec = new Rectangle(14f, h - 34f, 190f, 24f);
+            Raylib.DrawRectangleRec(verRec, new Color(20, 24, 34, 180));
+            Raylib.DrawRectangleLinesEx(verRec, 1f, new Color(50, 60, 80, 180));
+            Fonts.Draw("VoxelFrame 1.0.0-pre1", 22f, h - 30f, 14f, new Color(190, 205, 230, 220));
+
+            // Правый копирайт
+            var copyRec = new Rectangle(w - 200f, h - 34f, 186f, 24f);
+            Raylib.DrawRectangleRec(copyRec, new Color(20, 24, 34, 180));
+            Raylib.DrawRectangleLinesEx(copyRec, 1f, new Color(50, 60, 80, 180));
+            Fonts.DrawCentered("SenStol Studio • 2026", w - 107f, h - 30f, 14f, new Color(190, 205, 230, 220));
         }
 
         return action;
@@ -243,20 +399,13 @@ public static partial class Screens {
 
     public static void DrawSettings() {
         int w = Ui.Vw, h = Ui.Vh;
-        
-        int tileSize = 64;
-        for (int x = 0; x < w; x += tileSize) {
-            for (int y = 0; y < h; y += tileSize) {
-                bool isEven = ((x / tileSize) + (y / tileSize)) % 2 == 0;
-                Raylib.DrawRectangle(x, y, tileSize, tileSize, isEven ? new Color(42, 34, 30, 255) : new Color(34, 27, 24, 255));
-            }
-        }
+        DrawMenuBackground(Raylib.GetFrameTime());
 
-        Fonts.DrawCentered("НАСТРОЙКИ", w / 2f, h * 0.18f, 44f, new Color(255, 220, 120, 255));
+        Fonts.DrawTitle3D("НАСТРОЙКИ", w / 2f, h * 0.16f, 48f);
 
         float cy = h * 0.34f;
-        float btnW = 210f;
-        float btnH = 46f;
+        float btnW = 300f;
+        float btnH = 48f;
         float gapX = 20f;
         float gapY = 16f;
 
@@ -270,30 +419,27 @@ public static partial class Screens {
             InAudioScreen = true;
         }
 
-        if (Button(leftX, cy + btnH + gapY, btnW, btnH, "Игровой процесс...", true)) {
-            InGameplayScreen = true;
-        }
-        if (Button(rightX, cy + btnH + gapY, btnW, btnH, "Управление...", true)) {
+        if (Button(leftX, cy + btnH + gapY, btnW, btnH, "Управление...", true)) {
             InControlsScreen = true;
         }
 
         // Масштаб интерфейса: авто по высоте окна или фиксированный процент
         string scaleText = SaveSystem.UiScaleMode switch {
             0 => "Масштаб интерфейса: Авто",
-            _ => $"Масштаб интерфейса: {SaveSystem.UiScaleMode}%",
+            _ => $"Масштаб: {SaveSystem.UiScaleMode}%",
         };
-        if (Button(w / 2f - 140f, cy + (btnH + gapY) * 2, 280f, btnH, scaleText, true)) {
+        if (Button(rightX, cy + btnH + gapY, btnW, btnH, scaleText, true)) {
             int[] steps = { 0, 75, 100, 125, 150, 200 };
             int idx = Array.IndexOf(steps, SaveSystem.UiScaleMode);
             SaveSystem.UiScaleMode = steps[(idx + 1) % steps.Length];
         }
 
-        if (Button(w / 2f - 140f, cy + (btnH + gapY) * 2 + 28f + btnH, 280f, 46f, "Готово", true)) {
+        if (Button(w / 2f - 160f, cy + (btnH + gapY) * 2 + 20f, 320f, 48f, "Готово", true)) {
             InSettingsScreen = false;
         }
     }
 
-        private static bool Slider(float x, float y, float w, float h, string text, float value, float min, float max, out float newValue) {
+    private static bool Slider(float x, float y, float w, float h, string text, float value, float min, float max, out float newValue) {
         newValue = value;
         var mouse = Ui.Mouse();
         var rect = new Rectangle(x, y, w, h);
@@ -305,40 +451,42 @@ public static partial class Screens {
             newValue = min + ratio * (max - min);
         }
 
-        // Фон кнопки-слайдера
-        Raylib.DrawRectangle((int)x, (int)y, (int)w, (int)h, new Color(38, 38, 38, 255));
-        Raylib.DrawRectangleLinesEx(rect, 2f, hovered ? new Color(160, 160, 160, 255) : new Color(60, 60, 60, 255));
+        // Фон слайдера в классическом стиле светлых воксельных кнопок
+        Color topColor = hovered ? new Color(175, 185, 205, 255) : new Color(145, 145, 145, 255);
+        Color botColor = hovered ? new Color(145, 155, 175, 255) : new Color(115, 115, 115, 255);
+        Raylib.DrawRectangleGradientV((int)x, (int)y, (int)w, (int)h, topColor, botColor);
 
         // Полоса заполнения прогресса
         float currentRatio = Math.Clamp((value - min) / (max - min), 0f, 1f);
         int fillW = (int)((w - 4f) * currentRatio);
         if (fillW > 0) {
-            Raylib.DrawRectangle((int)x + 2, (int)y + 2, fillW, (int)h - 4, new Color(75, 95, 125, 200));
+            Raylib.DrawRectangleGradientV((int)x + 2, (int)y + 2, fillW, (int)h - 4, new Color(100, 150, 220, 160), new Color(70, 115, 180, 180));
         }
 
-        // Бегунок-разделитель
-        float thumbX = x + 2f + currentRatio * (w - 12f);
-        var thumbRect = new Rectangle(thumbX, y + 2f, 8f, h - 4f);
-        Raylib.DrawRectangleRec(thumbRect, new Color(255, 220, 120, 255));
+        // 3D-фаски
+        Raylib.DrawRectangle((int)x, (int)y, (int)w, 2, new Color(255, 255, 255, hovered ? 180 : 120));
+        Raylib.DrawRectangle((int)x, (int)y, 2, (int)h, new Color(255, 255, 255, hovered ? 180 : 120));
+        Raylib.DrawRectangle((int)x, (int)(y + h - 2), (int)w, 2, new Color(45, 45, 45, 200));
+        Raylib.DrawRectangle((int)(x + w - 2), (int)y, 2, (int)h, new Color(45, 45, 45, 200));
+        Raylib.DrawRectangleLinesEx(rect, 1.5f, hovered ? new Color(255, 220, 80, 255) : new Color(55, 55, 55, 255));
+
+        // Бегунок
+        float thumbX = x + 2f + currentRatio * (w - 14f);
+        var thumbRect = new Rectangle(thumbX, y + 2f, 10f, h - 4f);
+        Raylib.DrawRectangleRec(thumbRect, hovered ? new Color(255, 235, 120, 255) : new Color(240, 240, 240, 255));
+        Raylib.DrawRectangleLinesEx(thumbRect, 1f, new Color(40, 40, 40, 255));
 
         // Текст поверх слайдера
-        Fonts.DrawCentered(text, x + w / 2f, y + (h - 18f) / 2f, 18f, Color.White);
+        Fonts.DrawCenteredShadowed(text, x + w / 2f, y + (h - 18f) / 2f, 18f, Color.White, 1.5f);
 
         return dragging;
     }
 
     public static void DrawGraphics() {
         int w = Ui.Vw, h = Ui.Vh;
-        
-        int tileSize = 64;
-        for (int x = 0; x < w; x += tileSize) {
-            for (int y = 0; y < h; y += tileSize) {
-                bool isEven = ((x / tileSize) + (y / tileSize)) % 2 == 0;
-                Raylib.DrawRectangle(x, y, tileSize, tileSize, isEven ? new Color(42, 34, 30, 255) : new Color(34, 27, 24, 255));
-            }
-        }
+        DrawMenuBackground(Raylib.GetFrameTime());
 
-        Fonts.DrawCentered("НАСТРОЙКИ ГРАФИКИ", w / 2f, h * 0.10f, 44f, new Color(255, 220, 120, 255));
+        Fonts.DrawTitle3D("НАСТРОЙКИ ГРАФИКИ", w / 2f, h * 0.10f, 44f);
 
         float colW = 340f;
         float rowH = 44f;
@@ -363,11 +511,6 @@ public static partial class Screens {
                 SaveSystem.ParticlesMode = 0;
                 SaveSystem.DynamicLighting = false;
                 SaveSystem.EntityShadows = false;
-            } else if (SaveSystem.GraphicsQuality == SaveSystem.GraphicsPreset.Fancy) {
-                SaveSystem.CloudsMode = 2;
-                SaveSystem.ParticlesMode = 2;
-                SaveSystem.DynamicLighting = true;
-                SaveSystem.EntityShadows = true;
             } else {
                 SaveSystem.CloudsMode = 2;
                 SaveSystem.ParticlesMode = 2;
@@ -430,11 +573,13 @@ public static partial class Screens {
             Raylib.ToggleBorderlessWindowed();
         }
 
-        // 5. Кинематографичные эффекты (пост-обработка)
+        // 5. Кинематографичные эффекты (по центру на всю ширину)
+        float centerBtnW = colW * 2f + 20f;
+        float centerBtnX = w / 2f - centerBtnW / 2f;
         string postFxText = SaveSystem.PostFxMode == 0
             ? "Кино-эффекты: Выкл (FPS+)"
             : $"Кино-эффекты: Вкл ({(SaveSystem.PostFxVignette ? "виньетка" : "без виньетки")}{(SaveSystem.PostFxBloom ? ", bloom" : "")}{(SaveSystem.PostFxGoldenHour ? ", закат" : "")})";
-        if (Button(rightX, startY + (rowH + gapY) * 4f, colW, rowH, postFxText, true)) {
+        if (Button(centerBtnX, startY + (rowH + gapY) * 4f, centerBtnW, rowH, postFxText, true)) {
             SaveSystem.PostFxMode = SaveSystem.PostFxMode == 0 ? 1 : 0;
         }
 
@@ -447,16 +592,9 @@ public static partial class Screens {
 
     public static void DrawAudio() {
         int w = Ui.Vw, h = Ui.Vh;
-        
-        int tileSize = 64;
-        for (int x = 0; x < w; x += tileSize) {
-            for (int y = 0; y < h; y += tileSize) {
-                bool isEven = ((x / tileSize) + (y / tileSize)) % 2 == 0;
-                Raylib.DrawRectangle(x, y, tileSize, tileSize, isEven ? new Color(42, 34, 30, 255) : new Color(34, 27, 24, 255));
-            }
-        }
+        DrawMenuBackground(Raylib.GetFrameTime());
 
-        Fonts.DrawCentered("НАСТРОЙКИ ЗВУКА", w / 2f, h * 0.15f, 44f, new Color(255, 220, 120, 255));
+        Fonts.DrawTitle3D("НАСТРОЙКИ ЗВУКА", w / 2f, h * 0.15f, 44f);
 
         float cy = h * 0.36f;
         string volText = SaveSystem.SoundVolume > 0 ? $"Общая громкость: {SaveSystem.SoundVolume}%" : "Общая громкость: Выкл";
@@ -475,39 +613,88 @@ public static partial class Screens {
         }
     }
 
-    public static void DrawGameplay() {
+    // ── Открыть для сети (LAN / Читы) ────────────────────────────────────────
+    private static GameMode _lanGameMode = GameMode.Survival;
+    private static bool _lanAllowCheats = true;
+    private static bool _lanKeepInventory = false;
+    private static bool _lanInitialized = false;
+
+    public static void DrawOpenToLan(GameSession session) {
         int w = Ui.Vw, h = Ui.Vh;
-        
-        int tileSize = 64;
-        for (int x = 0; x < w; x += tileSize) {
-            for (int y = 0; y < h; y += tileSize) {
-                bool isEven = ((x / tileSize) + (y / tileSize)) % 2 == 0;
-                Raylib.DrawRectangle(x, y, tileSize, tileSize, isEven ? new Color(42, 34, 30, 255) : new Color(34, 27, 24, 255));
-            }
+        Raylib.DrawRectangleGradientV(0, 0, w, h, new Color(10, 14, 22, 210), new Color(5, 7, 12, 245));
+
+        Fonts.DrawTitle3D("ОТКРЫТЬ ДЛЯ СЕТИ", w / 2f, h * 0.14f, 48f);
+
+        if (!_lanInitialized) {
+            _lanGameMode = session.GameMode;
+            _lanAllowCheats = session.CheatsEnabled;
+            _lanKeepInventory = session.KeepInventory;
+            _lanInitialized = true;
         }
 
-        Fonts.DrawCentered("ИГРОВОЙ ПРОЦЕСС", w / 2f, h * 0.15f, 44f, new Color(255, 220, 120, 255));
+        Fonts.DrawCenteredShadowed("Настройки мира и использование чит-команд", w / 2f, h * 0.25f, 18f, new Color(200, 215, 235, 230));
 
-        float cy = h * 0.36f;
-        Button(w / 2f - 180f, cy, 360f, 46f, "Режим игры: Классическое выживание", false);
-        Button(w / 2f - 180f, cy + 56f, 360f, 46f, "Потеря вещей при смерти: Включена", false);
+        float btnW = 420f;
+        float btnH = 46f;
+        float gapY = 14f;
+        float cy = h * 0.32f;
 
-        if (Button(w / 2f - 140f, h * 0.82f, 280f, 46f, "Готово", true)) {
-            InGameplayScreen = false;
-            SaveSystem.SaveSettings();
+        // 1. Игровой режим
+        string modeText = _lanGameMode == GameMode.Creative ? "Режим игры: Творческий (Creative)" : "Режим игры: Выживание (Survival)";
+        if (Button(w / 2f - btnW / 2f, cy, btnW, btnH, modeText, true)) {
+            _lanGameMode = _lanGameMode == GameMode.Creative ? GameMode.Survival : GameMode.Creative;
+        }
+
+        // 2. Использование читов
+        string cheatsText = _lanAllowCheats ? "Использование читов: ВКЛ" : "Использование читов: ВЫКЛ";
+        if (Button(w / 2f - btnW / 2f, cy + btnH + gapY, btnW, btnH, cheatsText, true)) {
+            _lanAllowCheats = !_lanAllowCheats;
+        }
+
+        // 3. Сохранение инвентаря
+        string keepInvText = _lanKeepInventory ? "Сохранение инвентаря (keepInventory): ВКЛ" : "Сохранение инвентаря (keepInventory): ВЫКЛ";
+        if (Button(w / 2f - btnW / 2f, cy + (btnH + gapY) * 2f, btnW, btnH, keepInvText, true)) {
+            _lanKeepInventory = !_lanKeepInventory;
+        }
+
+        // Подсказка / предупреждение
+        Fonts.DrawCenteredShadowed("Включение читов активирует команды /gamemode, /gamerule, /give, /time, /tp", w / 2f, h * 0.62f, 16f, new Color(255, 220, 110, 230));
+
+        // Кнопки внизу
+        float actBtnW = 250f;
+        float actGapX = 20f;
+        float actY = h * 0.74f;
+
+        if (Button(w / 2f - actBtnW - actGapX / 2f, actY, actBtnW, 48f, "Открыть мир для сети", true)) {
+            session.CheatsEnabled = _lanAllowCheats;
+            session.GameMode = _lanGameMode;
+            session.KeepInventory = _lanKeepInventory;
+            if (_lanGameMode == GameMode.Creative) {
+                session.Player.Health = session.Player.MaxHealth;
+                session.Player.Hunger = 20f;
+            }
+            GameServer.Start(session, NetworkProtocol.DefaultPort);
+            _lanDiscovery ??= new LanDiscovery();
+            _lanDiscovery.StartBroadcaster(NetworkProtocol.DefaultPort, "LAN World", session.Player.Name, () => (GameServer.Active?.ClientCount ?? 0) + 1);
+
+            session.AddChatMessage("Локальный мир открыт на порту 25565", Color.Green);
+            if (session.CheatsEnabled) {
+                session.AddChatMessage("Читы и консольные команды активированы! Введите /help для списка.", Color.Gold);
+            }
+            InOpenToLanScreen = false;
+            _lanInitialized = false;
+            session.Ui = UiState.Playing;
+        }
+
+        if (Button(w / 2f + actGapX / 2f, actY, actBtnW, 48f, "Отмена", true)) {
+            InOpenToLanScreen = false;
+            _lanInitialized = false;
         }
     }
 
     public static void DrawControls() {
         int w = Ui.Vw, h = Ui.Vh;
-        
-        int tileSize = 64;
-        for (int x = 0; x < w; x += tileSize) {
-            for (int y = 0; y < h; y += tileSize) {
-                bool isEven = ((x / tileSize) + (y / tileSize)) % 2 == 0;
-                Raylib.DrawRectangle(x, y, tileSize, tileSize, isEven ? new Color(42, 34, 30, 255) : new Color(34, 27, 24, 255));
-            }
-        }
+        DrawMenuBackground(Raylib.GetFrameTime());
 
         if (ActiveRebindIndex != -1) {
             int pressed = Raylib.GetKeyPressed();
@@ -518,7 +705,7 @@ public static partial class Screens {
             }
         }
 
-        Fonts.DrawCentered("НАСТРОЙКИ УПРАВЛЕНИЯ", w / 2f, h * 0.10f, 44f, new Color(255, 220, 120, 255));
+        Fonts.DrawTitle3D("НАСТРОЙКИ УПРАВЛЕНИЯ", w / 2f, h * 0.10f, 44f);
 
         float startY = h * 0.18f;
         float rowH = 42f;
@@ -531,7 +718,7 @@ public static partial class Screens {
             float cx = (col == 0) ? (w / 2f - colW - 10f) : (w / 2f + 10f);
             float cy = startY + row * (rowH + 8f);
             
-            Fonts.Draw($"{BindLabels[i]}:", cx, cy + 10f, 20f, Color.White);
+            Fonts.DrawShadowed($"{BindLabels[i]}:", cx, cy + 10f, 20f, Color.White);
             
             string keyName = (ActiveRebindIndex == i) ? "> ??? <" : KeyBinds.GetName(GetBindKey(i));
             if (Button(cx + 160f, cy, 160f, rowH, keyName, true)) {
@@ -565,14 +752,19 @@ public static partial class Screens {
 
     public static PauseAction DrawPause(GameSession session) {
         int w = Ui.Vw, h = Ui.Vh;
-        Raylib.DrawRectangle(0, 0, w, h, new Color(0, 0, 0, 150));
-        Fonts.DrawCentered("ПАУЗА", w / 2f, h * 0.16f, 44f, Color.White);
+        Raylib.DrawRectangleGradientV(0, 0, w, h, new Color(10, 14, 22, 170), new Color(5, 7, 12, 220));
+        Fonts.DrawTitle3D("МЕНЮ ПАУЗЫ", w / 2f, h * 0.16f, 52f);
 
         var action = PauseAction.None;
-        float cy = h * 0.28f;
-        if (Button(w / 2f - 140f, cy, 280f, 46f, "Продолжить (ESC)", true)) action = PauseAction.Resume;
-        if (Button(w / 2f - 140f, cy + 58f, 280f, 46f, "Настройки...", true)) action = PauseAction.Settings;
-        if (Button(w / 2f - 140f, cy + 116f, 280f, 46f, "Сохранить и выйти в меню", true)) action = PauseAction.SaveAndExit;
+        float cy = h * 0.32f;
+        float btnW = 340f;
+        float btnH = 48f;
+        float gapY = 12f;
+
+        if (Button(w / 2f - btnW / 2f, cy, btnW, btnH, "Продолжить игру", true)) action = PauseAction.Resume;
+        if (Button(w / 2f - btnW / 2f, cy + btnH + gapY, btnW, btnH, "Открыть для сети...", true)) action = PauseAction.OpenToLan;
+        if (Button(w / 2f - btnW / 2f, cy + (btnH + gapY) * 2f, btnW, btnH, "Настройки...", true)) action = PauseAction.Settings;
+        if (Button(w / 2f - btnW / 2f, cy + (btnH + gapY) * 3f, btnW, btnH, "Сохранить и выйти", true)) action = PauseAction.SaveAndExit;
         return action;
     }
 
@@ -583,21 +775,28 @@ public static partial class Screens {
     public static DeathAction DrawDeath(GameSession session) {
         int w = Ui.Vw, h = Ui.Vh;
         // Красный градиент смерти
-        Raylib.DrawRectangleGradientV(0, 0, w, h, new Color(170, 20, 20, 170), new Color(40, 5, 5, 235));
+        Raylib.DrawRectangleGradientV(0, 0, w, h, new Color(120, 15, 15, 190), new Color(30, 4, 4, 245));
 
-        Fonts.DrawCentered("ВЫ ПОГИБЛИ!", w / 2f, h * 0.25f, 54f, new Color(255, 60, 60, 255));
+        Fonts.DrawTitle3D("ВЫ ПОГИБЛИ!", w / 2f, h * 0.18f, 56f);
+
+        Fonts.DrawCenteredShadowed($"Причина: {session.LastDeathCause}", w / 2f, h * 0.32f, 22f, new Color(255, 215, 90, 255));
+        Fonts.DrawCenteredShadowed($"Место гибели: X: {(int)session.LastDeathPos.X}, Y: {(int)session.LastDeathPos.Y}, Z: {(int)session.LastDeathPos.Z}", w / 2f, h * 0.37f, 18f, new Color(150, 225, 255, 230));
 
         int totalSec = (int)session.TotalPlaySeconds;
         int mins = totalSec / 60;
         int secs = totalSec % 60;
-        Fonts.DrawCentered($"Время выживания: {mins} мин {secs:D2} сек", w / 2f, h * 0.38f, 24f, new Color(230, 230, 230, 255));
+        Fonts.DrawCenteredShadowed($"Время выживания: {mins} мин {secs:D2} сек", w / 2f, h * 0.42f, 18f, new Color(210, 215, 225, 220));
 
         var action = DeathAction.None;
-        float cy = h * 0.52f;
-        if (Button(w / 2f - 140f, cy, 280f, 48f, "Возродиться", true)) {
+        float cy = h * 0.54f;
+        float btnW = 320f;
+        float btnH = 48f;
+        float gapY = 12f;
+
+        if (Button(w / 2f - btnW / 2f, cy, btnW, btnH, "Возродиться", true)) {
             action = DeathAction.Respawn;
         }
-        if (Button(w / 2f - 140f, cy + 64f, 280f, 48f, "Главное меню", true)) {
+        if (Button(w / 2f - btnW / 2f, cy + btnH + gapY, btnW, btnH, "Главное меню", true)) {
             action = DeathAction.MainMenu;
         }
 
@@ -635,7 +834,7 @@ public static partial class Screens {
         string[] lines = session.CreditsType == 2 ? new[] {
             "VoxelFrame: ИСТИННЫЙ ФИНАЛ",
             "",
-            "★ ВЕЛИКИЙ ТРИУМФ ★",
+            "--- ВЕЛИКИЙ ТРИУМФ ---",
             "",
             "Истинный Слизень Края повержен!",
             "Бездна очищена от древней тьмы.",
@@ -762,22 +961,79 @@ public static partial class Screens {
 
         int w = Ui.Vw, h = Ui.Vh;
         var inv = session.Player.Inventory;
+        var mouse = Ui.Mouse();
 
-        int cols = 9, hotbarRows = 1, mainRows = 3;
+        int cols = 9, mainRows = 3;
         const int slot = 52, gap = 4;
-        int gridW = cols * slot + (cols - 1) * gap;
-        int panelW = gridW + 280;
-        int panelH = (mainRows + hotbarRows) * slot + mainRows * gap + 90;
+        int gridW = cols * slot + (cols - 1) * gap; // 500px
+        int panelW = 1020;
+        int panelH = 340;
         float px = w / 2f - panelW / 2f, py = (h - panelH) / 2f;
         DrawPanel(px, py, panelW, panelH);
 
-        float gridX = px + 16f;
-        float gridY = py + 38f;
+        // 1. Слоты экипировки брони слева (Шлем, Нагрудник, Поножи, Ботинки)
+        float armorX = px + 18f;
+        float armorY = py + 34f;
+        Fonts.Draw("Броня", armorX, py + 14f, 15f, TextDark);
+
+        string[] armorLabels = { "Шлем", "Нагрудник", "Поножи", "Ботинки" };
+        for (int a = 0; a < 4; a++) {
+            float ay = armorY + a * (slot + gap);
+            var aRect = new Rectangle(armorX, ay, slot, slot);
+            bool aHov = Raylib.CheckCollisionPointRec(mouse, aRect);
+
+            Raylib.DrawRectangleRec(aRect, SlotBg);
+            Raylib.DrawRectangle((int)armorX, (int)ay, slot, 2, SlotBorder);
+            Raylib.DrawRectangle((int)armorX, (int)ay, 2, slot, SlotBorder);
+            Raylib.DrawRectangle((int)armorX, (int)ay + slot - 2, slot, 2, PanelLightBorder);
+            Raylib.DrawRectangle((int)armorX + slot - 2, (int)ay, 2, slot, PanelLightBorder);
+            if (aHov) Raylib.DrawRectangleRec(aRect, SlotHover);
+
+            if (session.Player.Armor[a] is { } ae && ae.Quantity > 0) {
+                Hud.DrawItemIcon(ae.Item.Definition, new Rectangle(armorX + 3f, ay + 3f, slot - 6f, slot - 6f), 1f);
+                int maxDur = GameData.GetMaxArmorDurability(ae.Item.Definition.Id);
+                if (maxDur > 0 && ae.Item.Durability < maxDur) {
+                    float frac = Math.Clamp((float)ae.Item.Durability / maxDur, 0f, 1f);
+                    float bw = slot - 8f;
+                    Raylib.DrawRectangle((int)(armorX + 4), (int)(ay + slot - 6), (int)bw, 3, new Color(20, 20, 25, 190));
+                    var barCol = frac > 0.5f ? new Color(90, 220, 120, 255) : frac > 0.25f ? new Color(240, 200, 70, 255) : new Color(235, 75, 60, 255);
+                    Raylib.DrawRectangle((int)(armorX + 4), (int)(ay + slot - 6), (int)(bw * frac), 3, barCol);
+                }
+            } else {
+                Fonts.DrawCentered(armorLabels[a], armorX + slot / 2f, ay + slot / 2f - 6f, 11f, new Color(130, 140, 155, 130));
+            }
+        }
+
+        // 2. Слот второй руки (справа от ботинок или под ними)
+        float offhandX = armorX;
+        float offhandY = armorY + 4 * (slot + gap) + 6f;
+        var offhandRec = new Rectangle(offhandX, offhandY, slot, slot);
+        bool offhandHover = Raylib.CheckCollisionPointRec(mouse, offhandRec);
+        
+        Raylib.DrawRectangleRec(offhandRec, SlotBg);
+        Raylib.DrawRectangle((int)offhandX, (int)offhandY, slot, 2, SlotBorder);
+        Raylib.DrawRectangle((int)offhandX, (int)offhandY, 2, slot, SlotBorder);
+        Raylib.DrawRectangle((int)offhandX, (int)offhandY + slot - 2, slot, 2, PanelLightBorder);
+        Raylib.DrawRectangle((int)offhandX + slot - 2, (int)offhandY, 2, slot, PanelLightBorder);
+        if (offhandHover) Raylib.DrawRectangleRec(offhandRec, SlotHover);
+
+        if (session.Player.OffhandEntry != null) {
+            Hud.DrawItemIcon(session.Player.OffhandEntry.Value.Item.Definition, offhandRec, 0.75f);
+            if (session.Player.OffhandEntry.Value.Quantity > 1) {
+                Fonts.DrawShadowed($"×{session.Player.OffhandEntry.Value.Quantity}", offhandX + 3f, offhandY + slot - 18f, 14f, Color.White);
+            }
+        } else {
+            Fonts.DrawCentered("2-я рука", offhandX + slot / 2f, offhandY + slot / 2f - 6f, 10f, new Color(130, 140, 155, 130));
+        }
+
+        // 3. Сетка основного инвентаря
+        float gridX = armorX + slot + 16f;
+        float gridY = py + 34f;
         float hotbarY = gridY + mainRows * (slot + gap) + 12f;
 
         // Заголовки
-        Fonts.Draw("Инвентарь", gridX, py + 14f, 16f, TextDark);
-        Fonts.Draw("Хотбар", gridX, hotbarY - 18f, 14f, TextDark);
+        Fonts.Draw("Инвентарь", gridX, py + 14f, 15f, TextDark);
+        Fonts.Draw("Панель быстрого доступа", gridX, hotbarY - 16f, 13f, TextDark);
 
         // Сетка: 3 ряда основного хранилища (записи 9..) + ряд хотбара (0..8).
         for (int row = 0; row < mainRows; row++) {
@@ -789,35 +1045,14 @@ public static partial class Screens {
         for (int col = 0; col < cols; col++)
             DrawSlot(session, inv, gridX + col * (slot + gap), hotbarY, col, col == session.Player.SelectedSlot);
 
-        // Слот второй руки (справа от хотбара в окне инвентаря)
-        float offhandX = px + gridW + 30f;
-        float offhandY = hotbarY;
-        var offhandRec = new Rectangle(offhandX, offhandY, slot, slot);
-        bool offhandHover = Raylib.CheckCollisionPointRec(Ui.Mouse(), offhandRec);
-        
-        Raylib.DrawRectangleRec(offhandRec, SlotBg);
-        Raylib.DrawRectangle((int)offhandX, (int)offhandY, slot, 2, SlotBorder);
-        Raylib.DrawRectangle((int)offhandX, (int)offhandY, 2, slot, SlotBorder);
-        Raylib.DrawRectangle((int)offhandX, (int)offhandY + slot - 2, slot, 2, PanelLightBorder);
-        Raylib.DrawRectangle((int)offhandX + slot - 2, (int)offhandY, 2, slot, PanelLightBorder);
-        if (offhandHover) Raylib.DrawRectangleRec(offhandRec, SlotHover);
+        // 4. Панель крафта и книга рецептов справа
+        float rightX = gridX + gridW + 18f;
+        float rightW = px + panelW - rightX - 16f;
+        DrawCraftPanel(session, rightX, py + 14f, rightW, panelH - 28f);
 
-        Fonts.Draw("2-я рука [F]", offhandX, offhandY - 18f, 14f, TextDark);
-
-        if (session.Player.OffhandEntry != null) {
-            Hud.DrawItemIcon(session.Player.OffhandEntry.Value.Item.Definition, offhandRec, 0.75f);
-            if (session.Player.OffhandEntry.Value.Quantity > 1) {
-                Fonts.DrawShadowed($"×{session.Player.OffhandEntry.Value.Quantity}", offhandX + 3f, offhandY + slot - 18f, 14f, Color.White);
-            }
-        }
-
-        // Панель крафта справа.
-        DrawCraftPanel(session, px + gridW + 30f, py + 14f, panelW - gridW - 46f, panelH - 90f);
-
-        // Предмет за курсором.
+        // Предмет за курсором
         if (Held.HasValue && Held.Value.Quantity > 0) {
             var held = Held.Value;
-            var mouse = Ui.Mouse();
             Hud.DrawItemIcon(held.Item.Definition, new Rectangle(mouse.X - 14f, mouse.Y - 14f, 28f, 28f), 1f);
             if (held.Quantity > 1) {
                 Fonts.Draw($"×{held.Quantity}", mouse.X - 14f, mouse.Y + 8f, 15f, Color.White);
@@ -834,17 +1069,34 @@ public static partial class Screens {
         var mouse = Ui.Mouse();
         const int slot = 52, gap = 4;
         int cols = 9, mainRows = 3;
-        int gridW = cols * slot + (cols - 1) * gap;
-        int panelH = (mainRows + 1) * slot + mainRows * gap + 90;
-        int panelW = gridW + 280;
+        int panelW = 1020;
+        int panelH = 340;
         float px = Ui.Vw / 2f - panelW / 2f;
         float py = (Ui.Vh - panelH) / 2f;
-        float gridX = px + 16f;
-        float gridY = py + 38f;
+
+        float armorX = px + 18f;
+        float armorY = py + 34f;
+        float gridX = armorX + slot + 16f;
+        float gridY = py + 34f;
         float hotbarY = gridY + mainRows * (slot + gap) + 12f;
+        float offhandX = armorX;
+        float offhandY = armorY + 4 * (slot + gap) + 6f;
 
         VoxelFrame.Core.Inventory.ItemEntry? hoveredEntry = null;
 
+        // Броня
+        for (int a = 0; a < 4; a++) {
+            if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(armorX, armorY + a * (slot + gap), slot, slot))) {
+                hoveredEntry = session.Player.Armor[a];
+            }
+        }
+
+        // Вторая рука
+        if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(offhandX, offhandY, slot, slot))) {
+            hoveredEntry = session.Player.OffhandEntry;
+        }
+
+        // Инвентарь
         for (int row = 0; row < mainRows; row++) {
             for (int col = 0; col < cols; col++) {
                 int idx = 9 + row * cols + col;
@@ -859,13 +1111,6 @@ public static partial class Screens {
             if (Raylib.CheckCollisionPointRec(mouse, rect)) {
                 hoveredEntry = inv.Slots[col];
             }
-        }
-
-        // Вторая рука (Offhand slot)
-        float offhandX = px + gridW + 30f;
-        float offhandY = hotbarY;
-        if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(offhandX, offhandY, slot, slot))) {
-            hoveredEntry = session.Player.OffhandEntry;
         }
 
         if (hoveredEntry != null) {
@@ -903,20 +1148,97 @@ public static partial class Screens {
         var mouse = Ui.Mouse();
         const int slot = 52, gap = 4;
         int cols = 9, mainRows = 3;
-        int gridW = cols * slot + (cols - 1) * gap;
-        int panelH = mainRows * slot + (mainRows - 1) * gap + slot + 120;
-        int panelW = gridW + 270;
+        int panelW = 1020;
+        int panelH = 340;
         float px = Ui.Vw / 2f - panelW / 2f;
         float py = (Ui.Vh - panelH) / 2f;
-        float gridX = px + 16f;
+
+        float armorX = px + 18f;
+        float armorY = py + 34f;
+        float gridX = armorX + slot + 16f;
+        float gridY = py + 34f;
+        float hotbarY = gridY + mainRows * (slot + gap) + 12f;
+        float offhandX = armorX;
+        float offhandY = armorY + 4 * (slot + gap) + 6f;
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Left) || Raylib.IsMouseButtonPressed(MouseButton.Right)) {
             bool right = Raylib.IsMouseButtonPressed(MouseButton.Right);
             bool slotHit = false;
+
+            // Клик по слотам брони
+            for (int a = 0; a < 4; a++) {
+                var aRect = new Rectangle(armorX, armorY + a * (slot + gap), slot, slot);
+                if (Raylib.CheckCollisionPointRec(mouse, aRect)) {
+                    slotHit = true;
+                    if (Held.HasValue && Held.Value.Quantity > 0) {
+                        var held = Held.Value;
+                        var heldArmorType = GameData.GetArmorType(held.Item.Definition.Id);
+                        if (heldArmorType.HasValue && (int)heldArmorType.Value == a) {
+                            var oldArmor = session.Player.Armor[a];
+                            session.Player.Armor[a] = held;
+                            Held = oldArmor;
+                            SoundSystem.PlayPop();
+                        }
+                    } else if (session.Player.Armor[a] != null) {
+                        Held = session.Player.Armor[a];
+                        session.Player.Armor[a] = null;
+                        SoundSystem.PlayPop();
+                    }
+                    return;
+                }
+            }
+
+            // Клик по слоту второй руки
+            var offhandRec = new Rectangle(offhandX, offhandY, slot, slot);
+            if (Raylib.CheckCollisionPointRec(mouse, offhandRec)) {
+                slotHit = true;
+                if (right) {
+                    if (Held.HasValue && Held.Value.Quantity > 0) {
+                        var held = Held.Value;
+                        if (session.Player.OffhandEntry == null) {
+                            session.Player.OffhandEntry = held with { Quantity = 1 };
+                            Held = held.Quantity > 1 ? held with { Quantity = held.Quantity - 1 } : null;
+                        } else if (session.Player.OffhandEntry.Value.Item.Definition.Id == held.Item.Definition.Id && session.Player.OffhandEntry.Value.Quantity < held.Item.Definition.MaxStack) {
+                            session.Player.OffhandEntry = session.Player.OffhandEntry.Value with { Quantity = session.Player.OffhandEntry.Value.Quantity + 1 };
+                            Held = held.Quantity > 1 ? held with { Quantity = held.Quantity - 1 } : null;
+                        }
+                    } else if (session.Player.OffhandEntry != null) {
+                        int take = (session.Player.OffhandEntry.Value.Quantity + 1) / 2;
+                        Held = session.Player.OffhandEntry.Value with { Quantity = take };
+                        session.Player.OffhandEntry = session.Player.OffhandEntry.Value with { Quantity = session.Player.OffhandEntry.Value.Quantity - take };
+                        if (session.Player.OffhandEntry.Value.Quantity <= 0) session.Player.OffhandEntry = null;
+                    }
+                } else {
+                    if (!Held.HasValue || Held.Value.Quantity <= 0) {
+                        if (session.Player.OffhandEntry != null) {
+                            Held = session.Player.OffhandEntry;
+                            session.Player.OffhandEntry = null;
+                        }
+                    } else {
+                        var held = Held.Value;
+                        if (session.Player.OffhandEntry == null) {
+                            session.Player.OffhandEntry = held;
+                            Held = null;
+                        } else if (session.Player.OffhandEntry.Value.Item.Definition.Id == held.Item.Definition.Id) {
+                            int add = Math.Min(session.Player.OffhandEntry.Value.Item.Definition.MaxStack - session.Player.OffhandEntry.Value.Quantity, held.Quantity);
+                            session.Player.OffhandEntry = session.Player.OffhandEntry.Value with { Quantity = session.Player.OffhandEntry.Value.Quantity + add };
+                            Held = held.Quantity > add ? held with { Quantity = held.Quantity - add } : null;
+                        } else {
+                            var tmp = session.Player.OffhandEntry;
+                            session.Player.OffhandEntry = held;
+                            Held = tmp;
+                        }
+                    }
+                }
+                SoundSystem.PlayPop();
+                return;
+            }
+
+            // Клик по основному инвентарю
             for (int row = 0; row < mainRows; row++) {
                 for (int col = 0; col < cols; col++) {
                     int idx = 9 + row * cols + col;
-                    if (SlotClicked(session, inv, gridX + col * (slot + gap), py + 76f + row * (slot + gap), idx, right)) {
+                    if (SlotClicked(session, inv, gridX + col * (slot + gap), gridY + row * (slot + gap), idx, right)) {
                         slotHit = true;
                         break;
                     }
@@ -924,58 +1246,11 @@ public static partial class Screens {
                 if (slotHit) break;
             }
             if (!slotHit) {
-                float hotbarY = py + 76f + mainRows * (slot + gap);
                 for (int col = 0; col < cols; col++) {
                     if (SlotClicked(session, inv, gridX + col * (slot + gap), hotbarY, col, right)) {
                         slotHit = true;
                         break;
                     }
-                }
-
-                // Клик по слоту второй руки
-                var offhandRec = new Rectangle(px + gridW + 30f, hotbarY, slot, slot);
-                if (Raylib.CheckCollisionPointRec(mouse, offhandRec)) {
-                    slotHit = true;
-                    if (right) {
-                        if (Held.HasValue && Held.Value.Quantity > 0) {
-                            var held = Held.Value;
-                            if (session.Player.OffhandEntry == null) {
-                                session.Player.OffhandEntry = held with { Quantity = 1 };
-                                Held = held.Quantity > 1 ? held with { Quantity = held.Quantity - 1 } : null;
-                            } else if (session.Player.OffhandEntry.Value.Item.Definition.Id == held.Item.Definition.Id && session.Player.OffhandEntry.Value.Quantity < held.Item.Definition.MaxStack) {
-                                session.Player.OffhandEntry = session.Player.OffhandEntry.Value with { Quantity = session.Player.OffhandEntry.Value.Quantity + 1 };
-                                Held = held.Quantity > 1 ? held with { Quantity = held.Quantity - 1 } : null;
-                            }
-                        } else if (session.Player.OffhandEntry != null) {
-                            int take = (session.Player.OffhandEntry.Value.Quantity + 1) / 2;
-                            Held = session.Player.OffhandEntry.Value with { Quantity = take };
-                            session.Player.OffhandEntry = session.Player.OffhandEntry.Value with { Quantity = session.Player.OffhandEntry.Value.Quantity - take };
-                            if (session.Player.OffhandEntry.Value.Quantity <= 0) session.Player.OffhandEntry = null;
-                        }
-                    } else {
-                        // Left click swap
-                        if (!Held.HasValue || Held.Value.Quantity <= 0) {
-                            if (session.Player.OffhandEntry != null) {
-                                Held = session.Player.OffhandEntry;
-                                session.Player.OffhandEntry = null;
-                            }
-                        } else {
-                            var held = Held.Value;
-                            if (session.Player.OffhandEntry == null) {
-                                session.Player.OffhandEntry = held;
-                                Held = null;
-                            } else if (session.Player.OffhandEntry.Value.Item.Definition.Id == held.Item.Definition.Id) {
-                                int add = Math.Min(session.Player.OffhandEntry.Value.Item.Definition.MaxStack - session.Player.OffhandEntry.Value.Quantity, held.Quantity);
-                                session.Player.OffhandEntry = session.Player.OffhandEntry.Value with { Quantity = session.Player.OffhandEntry.Value.Quantity + add };
-                                Held = held.Quantity > add ? held with { Quantity = held.Quantity - add } : null;
-                            } else {
-                                var tmp = session.Player.OffhandEntry;
-                                session.Player.OffhandEntry = held;
-                                Held = tmp;
-                            }
-                        }
-                    }
-                    SoundSystem.PlayPop();
                 }
             }
 
@@ -1005,7 +1280,7 @@ public static partial class Screens {
             for (int row = 0; row < mainRows; row++) {
                 for (int col = 0; col < cols; col++) {
                     int idx = 9 + row * cols + col;
-                    if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(gridX + col * (slot + gap), py + 76f + row * (slot + gap), 52, 52))) {
+                    if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(gridX + col * (slot + gap), gridY + row * (slot + gap), 52, 52))) {
                         var slotEntry = inv.Slots[idx];
                         if (slotEntry.HasValue && slotEntry.Value.Quantity > 0) {
                             var dropPos = session.Player.Eye + session.Player.Forward * 0.5f;
@@ -1026,7 +1301,6 @@ public static partial class Screens {
                     }
                 }
             }
-            float hotbarY = py + 76f + mainRows * (slot + gap);
             for (int col = 0; col < cols; col++) {
                 if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(gridX + col * (slot + gap), hotbarY, 52, 52))) {
                     int idx = col;
@@ -1063,7 +1337,7 @@ public static partial class Screens {
             for (int row = 0; row < mainRows; row++) {
                 for (int col = 0; col < cols; col++) {
                     int idx = 9 + row * cols + col;
-                    if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(gridX + col * (slot + gap), py + 76f + row * (slot + gap), 52, 52))) {
+                    if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(gridX + col * (slot + gap), gridY + row * (slot + gap), 52, 52))) {
                         var tmp = inv.Slots[idx];
                         inv.Slots[idx] = inv.Slots[hotbarKey];
                         inv.Slots[hotbarKey] = tmp;
@@ -1071,7 +1345,6 @@ public static partial class Screens {
                     }
                 }
             }
-            float hotbarY = py + 76f + mainRows * (slot + gap);
             for (int col = 0; col < cols; col++) {
                 if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(gridX + col * (slot + gap), hotbarY, 52, 52))) {
                     int idx = col;
@@ -1093,8 +1366,19 @@ public static partial class Screens {
         var entryInSlot = inv.Slots[idx];
         bool shift = Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift);
         if (shift && !rightClick && entryInSlot != null) {
-            // Shift-Click: быстрое перемещение между хотбаром (0..8) и основным инвентарем (9..35)
             var item = entryInSlot.Value;
+            var armorType = GameData.GetArmorType(item.Item.Definition.Id);
+            if (armorType.HasValue) {
+                int aSlot = (int)armorType.Value;
+                if (session.Player.Armor[aSlot] == null) {
+                    session.Player.Armor[aSlot] = item;
+                    inv.RemoveAt(idx);
+                    SoundSystem.PlayPop();
+                    return true;
+                }
+            }
+
+            // Shift-Click: быстрое перемещение между хотбаром (0..8) и основным инвентарем (9..35)
             int targetStart = idx < 9 ? 9 : 0;
             int targetEnd = idx < 9 ? 36 : 9;
             inv.RemoveAt(idx);
@@ -1275,198 +1559,338 @@ public static partial class Screens {
 
         // Книга рецептов в инвентаре (нижняя половина панели крафта)
         float bookY = gridY + 2 * (slotSz + gap) + 6f;
-        DrawRecipeBookSection(session, panelX + 4f, bookY, panelW - 8f, panelH - (bookY - panelY) - 4f, PersonalGrid, false);
+        DrawRecipeBookGrid(session, panelX + 4f, bookY, panelW - 8f, panelH - (bookY - panelY) - 4f, PersonalGrid, false);
     }
 
-    // ── Книга рецептов ───────────────────────────────────────────────────────
+    // ── Книга рецептов нового поколения ──────────────────────────────────────
+    public static string RecipeSearch = "";
+    public static bool RecipeSearchActive = false;
+    public static GameData.CraftCategory RecipeCategory = GameData.CraftCategory.All;
+    public static bool RecipeOnlyCraftable = false;
+    public static int RecipePage = 0;
 
-    public record struct RecipeBookEntry(
-        string Name,
-        ItemDefinition Output,
-        int Count,
-        (ItemDefinition Item, int Count)[] Ingredients,
-        ItemDefinition?[]? Shape,
-        bool Needs3x3,
-        bool IsSmelt = false);
-
-    private static int _recipeScroll = 0;
-
-    private static readonly RecipeBookEntry[] AllRecipes = new RecipeBookEntry[] {
-        // Базовые
-        new("Доски (4 шт)", GameData.PlankItem, 4, new[] { (GameData.LogItem, 1) }, new ItemDefinition?[] { GameData.LogItem, null, null, null }, false),
-        new("Палки (4 шт)", GameData.StickItem, 4, new[] { (GameData.PlankItem, 2) }, new ItemDefinition?[] { GameData.PlankItem, null, GameData.PlankItem, null }, false),
-        new("Верстак", GameData.WorkbenchItem, 1, new[] { (GameData.PlankItem, 4) }, new ItemDefinition?[] { GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, GameData.PlankItem }, false),
-        new("Факелы (4 шт)", GameData.TorchItem, 4, new[] { (GameData.CoalItem, 1), (GameData.StickItem, 1) }, new ItemDefinition?[] { GameData.CoalItem, null, GameData.StickItem, null }, false),
-        new("Сундук", GameData.ChestItem, 1, new[] { (GameData.PlankItem, 8) }, new ItemDefinition?[] { GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, null, GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, GameData.PlankItem }, true),
-        new("Печка", GameData.FurnaceItem, 1, new[] { (GameData.CobblestoneItem, 8) }, new ItemDefinition?[] { GameData.CobblestoneItem, GameData.CobblestoneItem, GameData.CobblestoneItem, GameData.CobblestoneItem, null, GameData.CobblestoneItem, GameData.CobblestoneItem, GameData.CobblestoneItem, GameData.CobblestoneItem }, true),
-        new("Кровать", GameData.BedItem, 1, new[] { (GameData.WhiteWoolItem, 3), (GameData.PlankItem, 3) }, new ItemDefinition?[] { GameData.WhiteWoolItem, GameData.WhiteWoolItem, GameData.WhiteWoolItem, GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, null, null, null }, true),
-
-        // Пища и выживание
-        new("Хлеб", GameData.BreadItem, 1, new[] { (GameData.WheatItem, 3) }, new ItemDefinition?[] { GameData.WheatItem, GameData.WheatItem, GameData.WheatItem, null, null, null, null, null, null }, true),
-        new("Костная мука (3 шт)", GameData.BoneMealItem, 3, new[] { (GameData.BoneItem, 1) }, new ItemDefinition?[] { GameData.BoneItem, null, null, null }, false),
-        new("Опилки (4 шт)", GameData.SawdustItem, 4, new[] { (GameData.LogItem, 1) }, new ItemDefinition?[] { GameData.LogItem, null, null, null }, false),
-        new("Каша из опилок", GameData.SawdustPorridgeItem, 1, new[] { (GameData.SawdustItem, 2), (GameData.PlankItem, 1), (GameData.WheatSeedsItem, 1) }, new ItemDefinition?[] { GameData.SawdustItem, GameData.SawdustItem, GameData.PlankItem, GameData.WheatSeedsItem }, false),
-        new("Тотем бессмертия", GameData.TotemItem, 1, new[] { (GameData.BoneItem, 7), (GameData.GoldIngotItem, 1) }, new ItemDefinition?[] { GameData.BoneItem, GameData.GoldIngotItem, GameData.BoneItem, GameData.BoneItem, GameData.BoneItem, GameData.BoneItem, null, GameData.BoneItem, null }, true),
-
-        // Инструменты: Кирки
-        new("Деревянная кирка", GameData.WoodPickaxeItem, 1, new[] { (GameData.PlankItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Каменная кирка", GameData.StonePickaxeItem, 1, new[] { (GameData.CobblestoneItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.CobblestoneItem, GameData.CobblestoneItem, GameData.CobblestoneItem, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Железная кирка", GameData.IronPickaxeItem, 1, new[] { (GameData.IronIngotItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.IronIngotItem, GameData.IronIngotItem, GameData.IronIngotItem, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Алмазная кирка", GameData.DiamondPickaxeItem, 1, new[] { (GameData.DiamondItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.DiamondItem, GameData.DiamondItem, GameData.DiamondItem, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Золотая кирка", GameData.GoldPickaxeItem, 1, new[] { (GameData.GoldIngotItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.GoldIngotItem, GameData.GoldIngotItem, GameData.GoldIngotItem, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-
-        // Топоры
-        new("Деревянный топор", GameData.WoodAxeItem, 1, new[] { (GameData.PlankItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.PlankItem, GameData.PlankItem, null, GameData.PlankItem, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Каменный топор", GameData.StoneAxeItem, 1, new[] { (GameData.CobblestoneItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.CobblestoneItem, GameData.CobblestoneItem, null, GameData.CobblestoneItem, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Железный топор", GameData.IronAxeItem, 1, new[] { (GameData.IronIngotItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.IronIngotItem, GameData.IronIngotItem, null, GameData.IronIngotItem, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Алмазный топор", GameData.DiamondAxeItem, 1, new[] { (GameData.DiamondItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.DiamondItem, GameData.DiamondItem, null, GameData.DiamondItem, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Золотой топор", GameData.GoldAxeItem, 1, new[] { (GameData.GoldIngotItem, 3), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.GoldIngotItem, GameData.GoldIngotItem, null, GameData.GoldIngotItem, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-
-        // Мечи
-        new("Деревянный меч", GameData.WoodSwordItem, 1, new[] { (GameData.PlankItem, 2), (GameData.StickItem, 1) }, new ItemDefinition?[] { null, GameData.PlankItem, null, null, GameData.PlankItem, null, null, GameData.StickItem, null }, true),
-        new("Каменный меч", GameData.StoneSwordItem, 1, new[] { (GameData.CobblestoneItem, 2), (GameData.StickItem, 1) }, new ItemDefinition?[] { null, GameData.CobblestoneItem, null, null, GameData.CobblestoneItem, null, null, GameData.StickItem, null }, true),
-        new("Железный меч", GameData.IronSwordItem, 1, new[] { (GameData.IronIngotItem, 2), (GameData.StickItem, 1) }, new ItemDefinition?[] { null, GameData.IronIngotItem, null, null, GameData.IronIngotItem, null, null, GameData.StickItem, null }, true),
-        new("Алмазный меч", GameData.DiamondSwordItem, 1, new[] { (GameData.DiamondItem, 2), (GameData.StickItem, 1) }, new ItemDefinition?[] { null, GameData.DiamondItem, null, null, GameData.DiamondItem, null, null, GameData.StickItem, null }, true),
-        new("Золотой меч", GameData.GoldSwordItem, 1, new[] { (GameData.GoldIngotItem, 2), (GameData.StickItem, 1) }, new ItemDefinition?[] { null, GameData.GoldIngotItem, null, null, GameData.GoldIngotItem, null, null, GameData.StickItem, null }, true),
-
-        // Лопаты
-        new("Деревянная лопата", GameData.WoodShovelItem, 1, new[] { (GameData.PlankItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.PlankItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Каменная лопата", GameData.StoneShovelItem, 1, new[] { (GameData.CobblestoneItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.CobblestoneItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Железная лопата", GameData.IronShovelItem, 1, new[] { (GameData.IronIngotItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.IronIngotItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Алмазная лопата", GameData.DiamondShovelItem, 1, new[] { (GameData.DiamondItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.DiamondItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Золотая лопата", GameData.GoldShovelItem, 1, new[] { (GameData.GoldIngotItem, 1), (GameData.StickItem, 2) }, new ItemDefinition?[] { null, GameData.GoldIngotItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-
-        // Оружие, охота и снаряжение
-        new("Кремень", GameData.FlintItem, 1, new[] { (GameData.GravelItem, 3) }, new ItemDefinition?[] { GameData.GravelItem, GameData.GravelItem, GameData.GravelItem, null, null, null, null, null, null }, true),
-        new("Огниво", GameData.FlintAndSteelItem, 1, new[] { (GameData.IronIngotItem, 1), (GameData.FlintItem, 1) }, new ItemDefinition?[] { GameData.IronIngotItem, null, null, null, GameData.FlintItem, null, null, null, null }, false),
-        new("Ведро", GameData.BucketItem, 1, new[] { (GameData.IronIngotItem, 3) }, new ItemDefinition?[] { GameData.IronIngotItem, null, GameData.IronIngotItem, null, GameData.IronIngotItem, null, null, null, null }, true),
-        new("Лук", GameData.BowItem, 1, new[] { (GameData.StickItem, 3), (GameData.StringItem, 3) }, new ItemDefinition?[] { null, GameData.StickItem, GameData.StringItem, GameData.StickItem, null, GameData.StringItem, null, GameData.StickItem, GameData.StringItem }, true),
-        new("Стрелы (4 шт)", GameData.ArrowItem, 4, new[] { (GameData.FlintItem, 1), (GameData.StickItem, 1), (GameData.FeatherItem, 1) }, new ItemDefinition?[] { GameData.FlintItem, null, null, GameData.StickItem, null, null, GameData.FeatherItem, null, null }, true),
-        new("Щит", GameData.ShieldItem, 1, new[] { (GameData.IronIngotItem, 1), (GameData.PlankItem, 6) }, new ItemDefinition?[] { GameData.PlankItem, GameData.IronIngotItem, GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, GameData.PlankItem, null, GameData.PlankItem, null }, true),
-        new("Динамит", GameData.TNTItem, 1, new[] { (GameData.GunpowderItem, 5), (GameData.SandItem, 4) }, new ItemDefinition?[] { GameData.GunpowderItem, GameData.SandItem, GameData.GunpowderItem, GameData.SandItem, GameData.GunpowderItem, GameData.SandItem, GameData.GunpowderItem, GameData.SandItem, GameData.GunpowderItem }, true),
-
-        // Мотыги
-        new("Деревянная мотыга", GameData.WoodHoeItem, 1, new[] { (GameData.PlankItem, 2), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.PlankItem, GameData.PlankItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Каменная мотыга", GameData.StoneHoeItem, 1, new[] { (GameData.CobblestoneItem, 2), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.CobblestoneItem, GameData.CobblestoneItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Железная мотыга", GameData.IronHoeItem, 1, new[] { (GameData.IronIngotItem, 2), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.IronIngotItem, GameData.IronIngotItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Алмазная мотыга", GameData.DiamondHoeItem, 1, new[] { (GameData.DiamondItem, 2), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.DiamondItem, GameData.DiamondItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-        new("Золотая мотыга", GameData.GoldHoeItem, 1, new[] { (GameData.GoldIngotItem, 2), (GameData.StickItem, 2) }, new ItemDefinition?[] { GameData.GoldIngotItem, GameData.GoldIngotItem, null, null, GameData.StickItem, null, null, GameData.StickItem, null }, true),
-
-        // Прочие блоки и предметы
-        new("Шерсть", GameData.WhiteWoolItem, 1, new[] { (GameData.StringItem, 4) }, new ItemDefinition?[] { GameData.StringItem, GameData.StringItem, GameData.StringItem, GameData.StringItem }, false),
-        new("Деревянная дверь (3 шт)", GameData.DoorItem, 3, new[] { (GameData.PlankItem, 6) }, new ItemDefinition?[] { GameData.PlankItem, GameData.PlankItem, null, GameData.PlankItem, GameData.PlankItem, null, GameData.PlankItem, GameData.PlankItem, null }, true),
-        new("Золотое яблоко", GameData.GoldenAppleItem, 1, new[] { (GameData.GoldIngotItem, 8), (GameData.AppleItem, 1) }, new ItemDefinition?[] { GameData.GoldIngotItem, GameData.GoldIngotItem, GameData.GoldIngotItem, GameData.GoldIngotItem, GameData.AppleItem, GameData.GoldIngotItem, GameData.GoldIngotItem, GameData.GoldIngotItem, GameData.GoldIngotItem }, true),
-        new("Светокамень", GameData.GlowstoneItem, 1, new[] { (GameData.GlowstoneDustItem, 4) }, new ItemDefinition?[] { GameData.GlowstoneDustItem, GameData.GlowstoneDustItem, GameData.GlowstoneDustItem, GameData.GlowstoneDustItem }, false),
-        new("Рельсы (16 шт)", GameData.RailItem, 16, new[] { (GameData.IronIngotItem, 6), (GameData.StickItem, 1) }, new ItemDefinition?[] { GameData.IronIngotItem, null, GameData.IronIngotItem, GameData.IronIngotItem, GameData.StickItem, GameData.IronIngotItem, GameData.IronIngotItem, null, GameData.IronIngotItem }, true),
-        new("Факелы (4 шт, древесный уголь)", GameData.TorchItem, 4, new[] { (GameData.CharcoalItem, 1), (GameData.StickItem, 1) }, new ItemDefinition?[] { GameData.CharcoalItem, null, GameData.StickItem, null }, false),
-        new("Порох ифрита (2 шт)", GameData.BlazePowderItem, 2, new[] { (GameData.BlazeRodItem, 1) }, new ItemDefinition?[] { GameData.BlazeRodItem, null, null, null }, false),
-        new("Око Эндера", GameData.EyeOfEnderItem, 1, new[] { (GameData.BlazePowderItem, 1), (GameData.EnderPearlItem, 1) }, new ItemDefinition?[] { GameData.BlazePowderItem, null, GameData.EnderPearlItem, null }, false),
-        new("Тотем Пламени (призыв в Аду)", GameData.NetherTotemItem, 1, new[] { (GameData.BlazeRodItem, 2), (GameData.GoldIngotItem, 1), (GameData.CoalItem, 1) }, new ItemDefinition?[] { GameData.BlazeRodItem, GameData.GoldIngotItem, null, GameData.CoalItem, GameData.BlazeRodItem, null, null, null, null }, true),
-        new("Тотем Песков (призыв в Пустыне)", GameData.DesertTotemItem, 1, new[] { (GameData.SandItem, 2), (GameData.GoldIngotItem, 1), (GameData.FlintItem, 1) }, new ItemDefinition?[] { GameData.SandItem, GameData.SandItem, null, GameData.GoldIngotItem, GameData.FlintItem, null, null, null, null }, true),
-        new("Тотем Топей (призыв в Болоте)", GameData.SwampTotemItem, 1, new[] { (GameData.StringItem, 2), (GameData.CharcoalItem, 1), (GameData.BoneItem, 1) }, new ItemDefinition?[] { GameData.StringItem, GameData.StringItem, null, GameData.CharcoalItem, GameData.BoneItem, null, null, null, null }, true),
-
-        // Плавка в печке
-        new("Железный слиток", GameData.IronIngotItem, 1, new[] { (GameData.IronOreItem, 1) }, null, false, IsSmelt: true),
-        new("Золотой слиток", GameData.GoldIngotItem, 1, new[] { (GameData.GoldOreItem, 1) }, null, false, IsSmelt: true),
-        new("Стекло", GameData.GlassItem, 1, new[] { (GameData.SandItem, 1) }, null, false, IsSmelt: true),
-        new("Уголь", GameData.CoalItem, 1, new[] { (GameData.CoalOreItem, 1) }, null, false, IsSmelt: true),
-        new("Камень", GameData.StoneItem, 1, new[] { (GameData.CobblestoneItem, 1) }, null, false, IsSmelt: true),
-        new("Древесный уголь", GameData.CharcoalItem, 1, new[] { (GameData.LogItem, 1) }, null, false, IsSmelt: true),
-        new("Жареная свинина", GameData.CookedPorkItem, 1, new[] { (GameData.RawPorkItem, 1) }, null, false, IsSmelt: true),
-        new("Жареный стейк", GameData.CookedBeefItem, 1, new[] { (GameData.RawBeefItem, 1) }, null, false, IsSmelt: true),
-        new("Жареная баранина", GameData.CookedMuttonItem, 1, new[] { (GameData.RawMuttonItem, 1) }, null, false, IsSmelt: true),
-    };
-
-    private static void DrawRecipeBookSection(GameSession session, float rx, float ry, float rw, float rh, ItemEntry?[] targetGrid, bool is3x3) {
+    private static void DrawRecipeBookGrid(GameSession session, float rx, float ry, float rw, float rh, ItemEntry?[] targetGrid, bool is3x3) {
         var mouse = Ui.Mouse();
         bool leftClick = Raylib.IsMouseButtonPressed(MouseButton.Left);
+        bool shiftHeld = Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift);
         var inv = session.Player.Inventory;
 
         var bookRect = new Rectangle(rx, ry, rw, rh);
-        Raylib.DrawRectangleRounded(bookRect, 0.08f, 6, new Color(20, 26, 32, 230));
-        Raylib.DrawRectangleRoundedLinesEx(bookRect, 0.08f, 6, 1.5f, new Color(40, 140, 60, 220));
+        Raylib.DrawRectangleRounded(bookRect, 0.04f, 6, new Color(42, 48, 60, 240));
+        Raylib.DrawRectangleRoundedLinesEx(bookRect, 0.04f, 6, 1.5f, new Color(75, 85, 105, 230));
 
-        Fonts.Draw("📖 Книга рецептов", rx + 8f, ry + 6f, 15f, new Color(100, 230, 120, 255));
+        // Заголовок
+        Fonts.Draw("Книга рецептов", rx + 8f, ry + 4f, 15f, new Color(240, 245, 255, 255));
 
-        // Скролл колесом мыши
+        // Строка поиска и переключатель "Только доступные"
+        float searchY = ry + 24f;
+        float btnW = 92f;
+        float searchW = rw - btnW - 18f;
+        var searchRect = new Rectangle(rx + 6f, searchY, searchW, 22f);
+        var craftableBtnRect = new Rectangle(rx + rw - btnW - 6f, searchY, btnW, 22f);
+
+        bool searchHov = Raylib.CheckCollisionPointRec(mouse, searchRect);
+        if (leftClick) {
+            RecipeSearchActive = searchHov;
+        }
+
+        if (RecipeSearchActive) {
+            int charCode = Raylib.GetCharPressed();
+            while (charCode > 0) {
+                if (charCode >= 32 && RecipeSearch.Length < 25) {
+                    RecipeSearch += (char)charCode;
+                    RecipePage = 0;
+                }
+                charCode = Raylib.GetCharPressed();
+            }
+            if (Raylib.IsKeyPressed(KeyboardKey.Backspace) && RecipeSearch.Length > 0) {
+                RecipeSearch = RecipeSearch[..^1];
+                RecipePage = 0;
+            }
+            if (Raylib.IsKeyPressed(KeyboardKey.Escape) || Raylib.IsKeyPressed(KeyboardKey.Enter)) {
+                RecipeSearchActive = false;
+            }
+        }
+
+        // Отрисовка поля поиска
+        Raylib.DrawRectangleRounded(searchRect, 0.15f, 4, RecipeSearchActive ? new Color(55, 65, 82, 255) : new Color(30, 35, 45, 230));
+        Raylib.DrawRectangleRoundedLinesEx(searchRect, 0.15f, 4, 1f, RecipeSearchActive ? new Color(120, 180, 255, 255) : new Color(65, 75, 95, 200));
+
+        string displayText = string.IsNullOrEmpty(RecipeSearch) ? (RecipeSearchActive ? "" : "Поиск...") : RecipeSearch;
+        Color searchTextColor = string.IsNullOrEmpty(RecipeSearch) ? new Color(140, 150, 165, 180) : Color.White;
+        Fonts.Draw(displayText, searchRect.X + 6f, searchRect.Y + 3f, 12f, searchTextColor);
+
+        // Кнопка очистки поиска если текст введен
+        if (!string.IsNullOrEmpty(RecipeSearch)) {
+            var clearRect = new Rectangle(searchRect.X + searchRect.Width - 18f, searchRect.Y + 2f, 16f, 18f);
+            if (Raylib.CheckCollisionPointRec(mouse, clearRect)) {
+                Fonts.Draw("x", clearRect.X + 4f, clearRect.Y + 1f, 12f, new Color(255, 120, 120, 255));
+                if (leftClick) {
+                    RecipeSearch = "";
+                    RecipePage = 0;
+                }
+            } else {
+                Fonts.Draw("x", clearRect.X + 4f, clearRect.Y + 1f, 12f, new Color(180, 190, 205, 200));
+            }
+        }
+
+        // Кнопка переключения "Только доступные"
+        bool btnHov = Raylib.CheckCollisionPointRec(mouse, craftableBtnRect);
+        Color btnBg = RecipeOnlyCraftable ? (btnHov ? new Color(55, 135, 75, 255) : new Color(40, 110, 55, 240))
+                                          : (btnHov ? new Color(65, 72, 88, 230) : new Color(45, 50, 62, 200));
+        Raylib.DrawRectangleRounded(craftableBtnRect, 0.15f, 4, btnBg);
+        Raylib.DrawRectangleRoundedLinesEx(craftableBtnRect, 0.15f, 4, 1f, RecipeOnlyCraftable ? new Color(100, 230, 120, 255) : new Color(80, 90, 110, 200));
+        Fonts.DrawCentered(RecipeOnlyCraftable ? "Доступно" : "Все", craftableBtnRect.X + craftableBtnRect.Width / 2f, craftableBtnRect.Y + 3f, 11f, RecipeOnlyCraftable ? Color.White : new Color(190, 200, 215, 220));
+        if (btnHov && leftClick) {
+            RecipeOnlyCraftable = !RecipeOnlyCraftable;
+            RecipePage = 0;
+        }
+
+        // Вкладки категорий (равномерное распределение по ширине без вылезания)
+        float tabY = searchY + 26f;
+        var categories = new[] {
+            (GameData.CraftCategory.All, "Все"),
+            (GameData.CraftCategory.Weapons, "Оружие"),
+            (GameData.CraftCategory.Tools, "Инстр."),
+            (GameData.CraftCategory.Armor, "Броня"),
+            (GameData.CraftCategory.Blocks, "Блоки"),
+            (GameData.CraftCategory.Food, "Еда"),
+            (GameData.CraftCategory.Materials, "Ресурсы")
+        };
+        float tabH = 19f;
+        float totalTabGap = (categories.Length - 1) * 3f;
+        float tabW = (rw - 12f - totalTabGap) / categories.Length;
+        for (int i = 0; i < categories.Length; i++) {
+            var (cat, label) = categories[i];
+            float tx = rx + 6f + i * (tabW + 3f);
+            var tabRect = new Rectangle(tx, tabY, tabW, tabH);
+            bool isSel = RecipeCategory == cat;
+            bool tabHov = Raylib.CheckCollisionPointRec(mouse, tabRect);
+
+            Color tabBg = isSel ? new Color(50, 125, 70, 255) : (tabHov ? new Color(65, 75, 95, 230) : new Color(40, 46, 58, 200));
+            Raylib.DrawRectangleRounded(tabRect, 0.2f, 4, tabBg);
+            Raylib.DrawRectangleRoundedLinesEx(tabRect, 0.2f, 4, 1f, isSel ? new Color(100, 225, 120, 255) : new Color(60, 70, 90, 180));
+            Fonts.DrawCentered(label, tx + tabW / 2f, tabY + 2f, 10.5f, isSel ? Color.White : (tabHov ? new Color(230, 235, 245, 255) : new Color(160, 170, 185, 210)));
+
+            if (tabHov && leftClick) {
+                RecipeCategory = cat;
+                RecipePage = 0;
+            }
+        }
+
+        // Фильтрация рецептов
+        var list = new List<GameData.CraftRecipe>();
+        foreach (var r in GameData.CraftRecipes) {
+            if (r.IsSmelt) continue;
+            if (r.Needs3x3 && !is3x3) continue;
+            if (RecipeCategory != GameData.CraftCategory.All && r.Category != RecipeCategory) continue;
+            if (!string.IsNullOrWhiteSpace(RecipeSearch)) {
+                if (!r.Name.Contains(RecipeSearch, StringComparison.OrdinalIgnoreCase) &&
+                    !r.Output.Name.Contains(RecipeSearch, StringComparison.OrdinalIgnoreCase))
+                    continue;
+            }
+            if (RecipeOnlyCraftable) {
+                bool canCraft = true;
+                foreach (var (reqItem, reqCount) in r.Ingredients) {
+                    if (inv.CountOf(reqItem) < reqCount) { canCraft = false; break; }
+                }
+                if (!canCraft) continue;
+            }
+            list.Add(r);
+        }
+
+        // Сетка иконок
+        float gridTopY = tabY + tabH + 6f;
+        float bottomBarH = 22f;
+        float gridAreaH = (ry + rh - bottomBarH - 4f) - gridTopY;
+        const float slotSz = 38f, gap = 4f;
+        int cols = Math.Max(1, (int)((rw - 12f + gap) / (slotSz + gap)));
+        int rows = Math.Max(1, (int)((gridAreaH + gap) / (slotSz + gap)));
+        int pageSize = cols * rows;
+        int totalPages = Math.Max(1, (list.Count + pageSize - 1) / pageSize);
+
         if (Raylib.CheckCollisionPointRec(mouse, bookRect)) {
             int wheel = (int)Raylib.GetMouseWheelMove();
             if (wheel != 0) {
-                _recipeScroll = Math.Clamp(_recipeScroll - wheel, 0, Math.Max(0, AllRecipes.Length - 3));
+                RecipePage = Math.Clamp(RecipePage - wheel, 0, totalPages - 1);
+            }
+        }
+        RecipePage = Math.Clamp(RecipePage, 0, totalPages - 1);
+
+        GameData.CraftRecipe? hoveredRecipe = null;
+        float startGridX = rx + (rw - (cols * slotSz + (cols - 1) * gap)) / 2f;
+
+        for (int i = 0; i < pageSize; i++) {
+            int rIdx = RecipePage * pageSize + i;
+            int r = i / cols;
+            int c = i % cols;
+            float sx = startGridX + c * (slotSz + gap);
+            float sy = gridTopY + r * (slotSz + gap);
+            var slotRect = new Rectangle(sx, sy, slotSz, slotSz);
+
+            if (rIdx < list.Count) {
+                var recipe = list[rIdx];
+                bool canCraft = true;
+                foreach (var (reqItem, reqCount) in recipe.Ingredients) {
+                    if (inv.CountOf(reqItem) < reqCount) { canCraft = false; break; }
+                }
+
+                bool hov = Raylib.CheckCollisionPointRec(mouse, slotRect);
+                Color bg = canCraft ? (hov ? new Color(50, 105, 60, 255) : new Color(34, 70, 42, 230))
+                                    : (hov ? new Color(60, 68, 82, 235) : new Color(34, 38, 48, 200));
+                Color border = canCraft ? new Color(90, 220, 110, 245) : new Color(60, 68, 82, 210);
+
+                Raylib.DrawRectangleRounded(slotRect, 0.15f, 4, bg);
+                Raylib.DrawRectangleRoundedLinesEx(slotRect, 0.15f, 4, 1.2f, border);
+
+                Hud.DrawItemIcon(recipe.Output, new Rectangle(sx + 3f, sy + 3f, slotSz - 6f, slotSz - 6f), 1f);
+                if (recipe.Count > 1) {
+                    Fonts.DrawShadowed($"×{recipe.Count}", sx + 16f, sy + slotSz - 14f, 11f, Color.White);
+                }
+
+                if (hov) {
+                    hoveredRecipe = recipe;
+                    if (leftClick) {
+                        if (shiftHeld) {
+                            QuickCraftStack(session, recipe, is3x3);
+                        } else {
+                            AutoFillRecipe(session, recipe, targetGrid, is3x3);
+                        }
+                    }
+                }
+            } else {
+                // Пустой слот в сетке
+                Raylib.DrawRectangleRounded(slotRect, 0.15f, 4, new Color(28, 32, 40, 140));
+                Raylib.DrawRectangleRoundedLinesEx(slotRect, 0.15f, 4, 1f, new Color(45, 52, 65, 140));
             }
         }
 
-        float itemH = 42f;
-        float itemY = ry + 28f;
-        int maxVisible = (int)((rh - 32f) / itemH);
+        // Нижняя панель навигации (Пагинация)
+        float navY = ry + rh - 22f;
+        var prevRect = new Rectangle(rx + 8f, navY, 26f, 18f);
+        var nextRect = new Rectangle(rx + rw - 34f, navY, 26f, 18f);
+        bool prevHov = Raylib.CheckCollisionPointRec(mouse, prevRect);
+        bool nextHov = Raylib.CheckCollisionPointRec(mouse, nextRect);
 
-        for (int i = _recipeScroll; i < Math.Min(AllRecipes.Length, _recipeScroll + maxVisible); i++) {
-            var r = AllRecipes[i];
-            bool canCraft = true;
-            foreach (var (reqItem, reqCount) in r.Ingredients) {
-                if (inv.CountOf(reqItem) < reqCount) {
-                    canCraft = false;
-                    break;
-                }
-            }
-            if (r.Needs3x3 && !is3x3) canCraft = false;
+        Raylib.DrawRectangleRounded(prevRect, 0.2f, 4, prevHov ? new Color(65, 75, 95, 255) : new Color(42, 48, 62, 200));
+        Fonts.DrawCentered("<", prevRect.X + 13f, prevRect.Y + 2f, 12f, RecipePage > 0 ? Color.White : new Color(130, 135, 145, 150));
+        if (prevHov && leftClick && RecipePage > 0) RecipePage--;
 
-            var itemRec = new Rectangle(rx + 5f, itemY, rw - 10f, itemH - 3f);
-            bool hov = Raylib.CheckCollisionPointRec(mouse, itemRec);
+        Raylib.DrawRectangleRounded(nextRect, 0.2f, 4, nextHov ? new Color(65, 75, 95, 255) : new Color(42, 48, 62, 200));
+        Fonts.DrawCentered(">", nextRect.X + 13f, nextRect.Y + 2f, 12f, RecipePage < totalPages - 1 ? Color.White : new Color(130, 135, 145, 150));
+        if (nextHov && leftClick && RecipePage < totalPages - 1) RecipePage++;
 
-            Color bgCol = hov ? (canCraft ? new Color(40, 80, 50, 240) : new Color(60, 40, 40, 220))
-                            : (canCraft ? new Color(30, 55, 38, 200) : new Color(30, 32, 38, 160));
-            Raylib.DrawRectangleRounded(itemRec, 0.15f, 4, bgCol);
-            Raylib.DrawRectangleRoundedLinesEx(itemRec, 0.15f, 4, 1f, canCraft ? new Color(80, 180, 90, 200) : new Color(60, 65, 75, 180));
+        string pageInfo = $"Стр. {RecipePage + 1}/{totalPages} ({list.Count} рец.)";
+        Fonts.DrawCentered(pageInfo, rx + rw / 2f, navY + 2f, 11f, new Color(180, 190, 205, 230));
 
-            // Иконка
-            Hud.DrawItemIcon(r.Output, new Rectangle(itemRec.X + 3f, itemRec.Y + 3f, 32f, 32f), 0.95f);
-            if (r.Count > 1) {
-                Fonts.DrawShadowed($"×{r.Count}", itemRec.X + 18f, itemRec.Y + 18f, 11f, Color.White);
-            }
-
-            // Название
-            Color nameCol = canCraft ? Color.White : new Color(160, 165, 175, 200);
-            Fonts.Draw(r.Name, itemRec.X + 38f, itemRec.Y + 4f, 13f, nameCol);
-
-            // Стоимость или тег верстака / печки
-            string costText = r.IsSmelt ? "[Плавка в печке]"
-                : r.Needs3x3 && !is3x3 ? "[Верстак 3×3]"
-                : string.Join(" + ", r.Ingredients.Select(ing => $"{ing.Count}×{ing.Item.Name[..Math.Min(5, ing.Item.Name.Length)]}"));
-            Color costCol = canCraft ? new Color(160, 230, 170, 220) : new Color(200, 120, 120, 200);
-            Fonts.Draw(costText, itemRec.X + 38f, itemRec.Y + 22f, 11f, costCol);
-
-            if (hov && leftClick) {
-                if (r.IsSmelt) {
-                    var fuel = r.Ingredients[0].Item;
-                    session.AddMessage($"Плавка: поместите {fuel.Name} в верхнюю ячейку печки, а топливо (уголь, бревно и т.п.) — в нижнюю.");
-                } else if (r.Needs3x3 && !is3x3) {
-                    session.AddMessage("Этот предмет можно скрафтить только на верстаке 3×3!");
-                } else if (!canCraft) {
-                    session.AddMessage($"Не хватает ингредиентов для создания: {r.Name}");
-                } else {
-                    AutoFillRecipe(session, r, targetGrid, is3x3);
-                }
-            }
-
-            itemY += itemH;
+        // Отрисовка подробного тултипа рецепта
+        if (hoveredRecipe != null && (!Held.HasValue || Held.Value.Quantity <= 0)) {
+            DrawRecipeTooltip(session, hoveredRecipe, mouse);
         }
     }
 
-    private static void AutoFillRecipe(GameSession session, RecipeBookEntry recipe, ItemEntry?[] grid, bool is3x3) {
+    private static void DrawRecipeTooltip(GameSession session, GameData.CraftRecipe recipe, Vector2 mouse) {
+        var inv = session.Player.Inventory;
+        var lines = new List<(string Text, Color Col)>();
+        lines.Add(($"{recipe.Output.Name} ×{recipe.Count}", new Color(255, 235, 120, 255)));
+
+        string catName = recipe.Category switch {
+            GameData.CraftCategory.Weapons => "Оружие",
+            GameData.CraftCategory.Tools => "Инструмент",
+            GameData.CraftCategory.Armor => "Доспехи",
+            GameData.CraftCategory.Blocks => "Блок",
+            GameData.CraftCategory.Food => "Еда",
+            GameData.CraftCategory.Materials => "Ресурс",
+            _ => "Предмет"
+        };
+        lines.Add(($"[{catName}]", new Color(140, 200, 255, 220)));
+
+        lines.Add(("Ингредиенты:", new Color(200, 200, 210, 255)));
+        foreach (var (ing, count) in recipe.Ingredients) {
+            int have = inv.CountOf(ing);
+            bool ok = have >= count;
+            Color ingCol = ok ? new Color(110, 230, 120, 255) : new Color(255, 110, 100, 255);
+            lines.Add(($" • {ing.Name}: {have}/{count}", ingCol));
+        }
+
+        lines.Add(("ЛКМ — выложить в сетку", new Color(170, 175, 185, 200)));
+        lines.Add(("Shift+ЛКМ — скрафтить стак", new Color(130, 215, 150, 220)));
+
+        float maxW = 0f;
+        foreach (var (t, _) in lines) maxW = MathF.Max(maxW, Fonts.Measure(t, 12f));
+        float boxW = maxW + 16f;
+        float boxH = lines.Count * 17f + 10f;
+        float bx = Math.Min(mouse.X + 14f, Ui.Vw - boxW - 8f);
+        float by = Math.Min(mouse.Y + 14f, Ui.Vh - boxH - 8f);
+
+        Raylib.DrawRectangleRounded(new Rectangle(bx, by, boxW, boxH), 0.12f, 4, new Color(15, 18, 24, 250));
+        Raylib.DrawRectangleRoundedLinesEx(new Rectangle(bx, by, boxW, boxH), 0.12f, 4, 1.2f, new Color(50, 140, 70, 230));
+
+        float curY = by + 5f;
+        foreach (var (t, c) in lines) {
+            Fonts.Draw(t, bx + 8f, curY, 12f, c);
+            curY += 17f;
+        }
+    }
+
+    private static void QuickCraftStack(GameSession session, GameData.CraftRecipe recipe, bool is3x3) {
+        if (recipe.Needs3x3 && !is3x3) {
+            session.AddMessage("Этот рецепт требует Верстак 3×3!");
+            return;
+        }
+        var inv = session.Player.Inventory;
+        int maxPerStack = Math.Max(1, recipe.Output.MaxStack);
+        int maxCrafts = maxPerStack == 1 ? 1 : Math.Max(1, maxPerStack / recipe.Count);
+        foreach (var (item, count) in recipe.Ingredients) {
+            int have = inv.CountOf(item);
+            if (count > 0) maxCrafts = Math.Min(maxCrafts, have / count);
+        }
+        if (maxCrafts <= 0) {
+            session.AddMessage($"Не хватает ингредиентов для «{recipe.Name}»!");
+            return;
+        }
+
+        int crafted = 0;
+        for (int c = 0; c < maxCrafts; c++) {
+            var item = GameData.NewItem(recipe.Output);
+            bool ok = true;
+            foreach (var (ing, count) in recipe.Ingredients) {
+                if (!inv.TryRemove(ing, count)) { ok = false; break; }
+            }
+            if (!ok) break;
+
+            if (!inv.TryInsert(item, recipe.Count)) {
+                // Если нет места в инвентаре, дропаем на землю
+                var p = session.Player.Position + new Vector3(0f, 0.5f, 0f);
+                session.World.Pickups.Add(new ItemPickup(item, recipe.Count, p) {
+                    PickupDelay = 0.5f,
+                    Velocity = session.Player.Forward * 2.5f + Vector3.UnitY * 2.0f
+                });
+            }
+            crafted += recipe.Count;
+        }
+
+        if (crafted > 0) {
+            SoundSystem.PlayPop();
+            session.AddMessage($"Скрафчено: {recipe.Output.Name} ×{crafted}");
+        }
+    }
+
+    private static void AutoFillRecipe(GameSession session, GameData.CraftRecipe recipe, ItemEntry?[] grid, bool is3x3) {
         var inv = session.Player.Inventory;
         int gridSize = is3x3 ? 3 : 2;
 
         var shape = recipe.Shape;
         if (shape == null) return; // рецепты плавки в сетку крафта не раскладываются
-        int shapeW = recipe.Needs3x3 ? 3 : 2;
-        int shapeH = recipe.Needs3x3 ? 3 : 2;
+        const int shapeW = 3;
+        const int shapeH = 3;
 
-        // Найдём bounding box непустых ячеек в shape
+        // Найдём bounding box непустых ячеек в shape 3×3
         int minR = shapeH, maxR = -1, minC = shapeW, maxC = -1;
         for (int r = 0; r < shapeH; r++) {
             for (int c = 0; c < shapeW; c++) {
-                if (r * shapeW + c < shape.Length && shape[r * shapeW + c] != null) {
+                int idx = r * shapeW + c;
+                if (idx < shape.Length && shape[idx] != null) {
                     if (r < minR) minR = r;
                     if (r > maxR) maxR = r;
                     if (c < minC) minC = c;
@@ -1493,10 +1917,16 @@ public static partial class Screens {
             }
         }
 
-        // Возвращаем текущие предметы из сетки в инвентарь
+        // Возвращаем текущие предметы из сетки в инвентарь или выбрасываем
         for (int i = 0; i < grid.Length; i++) {
             if (grid[i].HasValue && grid[i]!.Value.Quantity > 0) {
-                inv.TryInsert(grid[i]!.Value.Item, grid[i]!.Value.Quantity);
+                if (!inv.TryInsert(grid[i]!.Value.Item, grid[i]!.Value.Quantity)) {
+                    var p = session.Player.Position + new Vector3(0f, 0.5f, 0f);
+                    session.World.Pickups.Add(new ItemPickup(grid[i]!.Value.Item, grid[i]!.Value.Quantity, p) {
+                        PickupDelay = 0.5f,
+                        Velocity = session.Player.Forward * 1.5f + Vector3.UnitY * 1.5f
+                    });
+                }
                 grid[i] = null;
             }
         }
@@ -1535,10 +1965,8 @@ public static partial class Screens {
 
         const int slotSz = 48, gap = 4;
         int gridW3 = 3 * slotSz + 2 * gap;
-        int panelW = gridW3 + 340;
-        int invGridW = 9 * 52 + 8 * 4;
-        panelW = Math.Max(panelW, invGridW + 32);
-        int panelH = 3 * slotSz + 2 * gap + 4 * 52 + 3 * 4 + 130;
+        int panelW = 920;
+        int panelH = 3 * slotSz + 2 * gap + 4 * 52 + 3 * 4 + 140;
 
         float px = w / 2f - panelW / 2f, py = (h - panelH) / 2f;
         DrawPanel(px, py, panelW, panelH);
@@ -1546,7 +1974,7 @@ public static partial class Screens {
         Fonts.DrawCentered("ВЕРСТАК", w / 2f, py + 8f, 26f, TextDark);
         Fonts.DrawCentered("3×3 крафт · ЛКМ — взять/положить · ПКМ — положить 1", w / 2f, py + 36f, 14f, new Color(90, 90, 90, 255));
 
-        float gridX = px + 20f;
+        float gridX = px + 24f;
         float gridY = py + 62f;
 
         // 3×3 сетка
@@ -1605,10 +2033,10 @@ public static partial class Screens {
         }
 
         // Книга рецептов верстака (справа от 3×3 сетки)
-        float bookX = resultX + slotSz + 14f;
-        float bookW = px + panelW - bookX - 14f;
-        float bookH = 3 * (slotSz + gap) + 12f;
-        DrawRecipeBookSection(session, bookX, gridY - 6f, bookW, bookH, WorkbenchGrid, true);
+        float bookX = resultX + slotSz + 18f;
+        float bookW = px + panelW - bookX - 18f;
+        float bookH = 3 * (slotSz + gap) + 24f;
+        DrawRecipeBookGrid(session, bookX, gridY - 8f, bookW, bookH, WorkbenchGrid, true);
 
         // Инвентарь снизу
         float invY = gridY + 3 * (slotSz + gap) + 20f;
@@ -1878,6 +2306,31 @@ public static partial class Screens {
         Fonts.DrawCentered("СУНДУК", w / 2f, py + 8f, 24f, TextDark);
         Fonts.DrawCentered("Хранилище предметов · ЛКМ / ПКМ", w / 2f, py + 34f, 13f, new Color(90, 90, 90, 255));
 
+        // Кнопки быстрой сортировки и быстрого складывания
+        float btnSortW = 108f, btnSortH = 22f;
+        var sortBtnRect = new Rectangle(px + panelW - 16f - btnSortW, py + 28f, btnSortW, btnSortH);
+        var stackBtnRect = new Rectangle(sortBtnRect.X - 114f, py + 28f, 110f, btnSortH);
+
+        bool sortHov = Raylib.CheckCollisionPointRec(mouse, sortBtnRect);
+        bool stackHov = Raylib.CheckCollisionPointRec(mouse, stackBtnRect);
+
+        Raylib.DrawRectangleRounded(sortBtnRect, 0.2f, 4, sortHov ? new Color(60, 75, 95, 255) : new Color(40, 48, 62, 220));
+        Raylib.DrawRectangleRoundedLinesEx(sortBtnRect, 0.2f, 4, 1f, sortHov ? new Color(120, 180, 255, 255) : new Color(70, 85, 110, 200));
+        Fonts.DrawCentered("⚡ Сортировка", sortBtnRect.X + btnSortW / 2f, sortBtnRect.Y + 4f, 11f, sortHov ? Color.White : new Color(200, 215, 235, 220));
+
+        Raylib.DrawRectangleRounded(stackBtnRect, 0.2f, 4, stackHov ? new Color(50, 100, 70, 255) : new Color(32, 65, 45, 220));
+        Raylib.DrawRectangleRoundedLinesEx(stackBtnRect, 0.2f, 4, 1f, stackHov ? new Color(100, 220, 130, 255) : new Color(60, 120, 80, 200));
+        Fonts.DrawCentered("📥 Сложить всё", stackBtnRect.X + 55f, stackBtnRect.Y + 4f, 11f, stackHov ? Color.White : new Color(200, 240, 210, 220));
+
+        if (leftClick) {
+            if (sortHov) {
+                SortContainer(chestInv);
+                session.AddMessage("Сундук отсортирован!");
+            } else if (stackHov) {
+                QuickStackToChest(pInv, chestInv, session);
+            }
+        }
+
         float chestY = py + 56f;
         float chestX = px + 16f;
 
@@ -1976,6 +2429,54 @@ public static partial class Screens {
                 }
             }
             if (cDef != null) DrawItemTooltip(cDef, mouse);
+        }
+    }
+
+    private static void SortContainer(VoxelFrame.Core.Inventory.Container container) {
+        var items = new List<ItemEntry>();
+        for (int i = 0; i < container.Capacity; i++) {
+            if (container.Slots[i] is { } entry && entry.Quantity > 0) {
+                items.Add(entry);
+            }
+        }
+        container.Clear();
+        items.Sort((a, b) => a.Item.Definition.Id.CompareTo(b.Item.Definition.Id));
+        foreach (var entry in items) {
+            container.TryInsert(entry.Item, entry.Quantity);
+        }
+        SoundSystem.PlayPop();
+    }
+
+    private static void QuickStackToChest(VoxelFrame.Core.Inventory.Container pInv, VoxelFrame.Core.Inventory.Container chestInv, GameSession session) {
+        var existingIds = new HashSet<ushort>();
+        for (int i = 0; i < chestInv.Capacity; i++) {
+            if (chestInv.Slots[i] is { } ce && ce.Quantity > 0) {
+                existingIds.Add(ce.Item.Definition.Id);
+            }
+        }
+
+        int moved = 0;
+        for (int i = 9; i < pInv.Capacity; i++) {
+            if (pInv.Slots[i] is { } pe && pe.Quantity > 0 && existingIds.Contains(pe.Item.Definition.Id)) {
+                int qty = pe.Quantity;
+                if (chestInv.TryInsert(pe.Item, qty)) {
+                    moved += qty;
+                    pInv.Slots[i] = null;
+                } else {
+                    for (int q = qty - 1; q >= 1; q--) {
+                        if (chestInv.TryInsert(pe.Item, q)) {
+                            moved += q;
+                            pInv.Slots[i] = pe with { Quantity = qty - q };
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (moved > 0) {
+            SoundSystem.PlayPop();
+            session.AddMessage($"Сложено в сундук: {moved} предм.");
         }
     }
 
@@ -2157,6 +2658,11 @@ public static partial class Screens {
 
         if (GameData.FoodValue.TryGetValue(itemId, out float food)) {
             subtext1 = $"Восстанавливает: +{food} сытости";
+        } else if (GameData.GetArmorPoints(itemId) > 0) {
+            int pts = GameData.GetArmorPoints(itemId);
+            int maxDur = GameData.GetMaxArmorDurability(itemId);
+            subtext1 = $"+{pts} Очков брони";
+            subtext2 = $"Прочность: {maxDur} / {maxDur}";
         } else if (GameData.GetToolTier(itemId) > 0) {
             float dmg = GameData.GetWeaponDamage(itemId);
             float cd = GameData.GetWeaponCooldown(itemId);
@@ -2171,9 +2677,11 @@ public static partial class Screens {
         // Цвета редкости предмета
         Color titleCol = itemId switch {
             var id when id == GameData.GoldenAppleItem.Id || id == GameData.TotemItem.Id || id == GameData.GoldSwordItem.Id => new Color(255, 220, 70, 255),
-            var id when id == GameData.DiamondSwordItem.Id || id == GameData.DiamondPickaxeItem.Id || id == GameData.DiamondAxeItem.Id || id == GameData.DiamondShovelItem.Id || id == GameData.DiamondHoeItem.Id => new Color(100, 235, 255, 255),
+            var id when id == GameData.DiamondSwordItem.Id || id == GameData.DiamondPickaxeItem.Id || id == GameData.DiamondAxeItem.Id || id == GameData.DiamondShovelItem.Id || id == GameData.DiamondHoeItem.Id ||
+                        id == GameData.DiamondHelmetItem.Id || id == GameData.DiamondChestplateItem.Id || id == GameData.DiamondLeggingsItem.Id || id == GameData.DiamondBootsItem.Id => new Color(100, 235, 255, 255),
             var id when id == GameData.EnchantedBookItem.Id || id == GameData.MusicDiscItem.Id || id == GameData.DesertArtifactItem.Id || id == GameData.SwampArtifactItem.Id || id == GameData.NetherArtifactItem.Id || id == GameData.VoidKeyItem.Id || id == GameData.NetherTotemItem.Id || id == GameData.DesertTotemItem.Id || id == GameData.SwampTotemItem.Id => new Color(220, 130, 255, 255),
-            var id when id == GameData.IronSwordItem.Id || id == GameData.IronPickaxeItem.Id || id == GameData.IronAxeItem.Id || id == GameData.IronShovelItem.Id || id == GameData.IronHoeItem.Id => new Color(220, 230, 240, 255),
+            var id when id == GameData.IronSwordItem.Id || id == GameData.IronPickaxeItem.Id || id == GameData.IronAxeItem.Id || id == GameData.IronShovelItem.Id || id == GameData.IronHoeItem.Id ||
+                        id == GameData.IronHelmetItem.Id || id == GameData.IronChestplateItem.Id || id == GameData.IronLeggingsItem.Id || id == GameData.IronBootsItem.Id => new Color(220, 230, 240, 255),
             _ => new Color(255, 255, 255, 255)
         };
 
@@ -2234,31 +2742,70 @@ public static partial class Screens {
         var rect = new Rectangle(x, y, width, height);
         var mouse = Ui.Mouse();
         bool hovered = Raylib.CheckCollisionPointRec(mouse, rect);
-        
-        Color faceColor = !enabled 
-            ? new Color(74, 74, 74, 255) 
-            : (hovered ? new Color(140, 150, 190, 255) : new Color(110, 110, 110, 255));
-            
-        Color textColor = !enabled 
-            ? new Color(160, 160, 160, 255) 
-            : (hovered ? new Color(255, 250, 160, 255) : Color.White);
+        bool clicked = enabled && hovered && Raylib.IsMouseButtonPressed(MouseButton.Left);
+        if (clicked) SoundSystem.PlayPop();
 
-        Raylib.DrawRectangleRec(rect, faceColor);
-        
+        // 1. Классический светлый/средне-серый воксельный фон кнопки (#969696 / #808080)
+        Color topColor = !enabled 
+            ? new Color(95, 98, 105, 230) 
+            : (hovered ? new Color(175, 185, 205, 255) : new Color(145, 145, 145, 255));
+        Color botColor = !enabled 
+            ? new Color(75, 78, 85, 230) 
+            : (hovered ? new Color(145, 155, 175, 255) : new Color(115, 115, 115, 255));
+
+        Raylib.DrawRectangleGradientV((int)x, (int)y, (int)width, (int)height, topColor, botColor);
+
+        // 2. Внутренний легкий световой блик в верхней половине
         if (enabled) {
-            Color highlight = hovered ? new Color(200, 210, 255, 255) : new Color(160, 160, 160, 255);
-            Color shadow = hovered ? new Color(80, 90, 130, 255) : new Color(60, 60, 60, 255);
-            Raylib.DrawRectangle((int)x, (int)y, (int)width, 2, highlight);
-            Raylib.DrawRectangle((int)x, (int)y, 2, (int)height, highlight);
-            Raylib.DrawRectangle((int)x, (int)(y + height - 2), (int)width, 2, shadow);
-            Raylib.DrawRectangle((int)(x + width - 2), (int)y, 2, (int)height, shadow);
+            Raylib.DrawRectangle((int)x + 2, (int)y + 2, (int)width - 4, (int)(height * 0.45f), new Color(255, 255, 255, hovered ? 35 : 20));
         }
-        
-        Color outline = !enabled ? new Color(40, 40, 40, 255) : (hovered ? new Color(255, 220, 120, 255) : Color.Black);
-        Raylib.DrawRectangleLinesEx(rect, 2f, outline);
-        
-        Fonts.DrawCentered(label, x + width / 2f, y + height / 2f - 9f, 20f, textColor);
-        return enabled && hovered && Raylib.IsMouseButtonPressed(MouseButton.Left);
+
+        // 3. 3D-фаски (белый блик сверху/слева, глубокая тень снизу/справа)
+        if (enabled) {
+            Color highlight = hovered ? new Color(255, 255, 255, 255) : new Color(220, 220, 220, 255);
+            Color shadow = hovered ? new Color(60, 70, 90, 255) : new Color(55, 55, 55, 255);
+            
+            Raylib.DrawRectangle((int)x + 1, (int)y + 1, (int)width - 2, 2, highlight);
+            Raylib.DrawRectangle((int)x + 1, (int)y + 1, 2, (int)height - 2, highlight);
+            Raylib.DrawRectangle((int)x + 1, (int)(y + height - 3), (int)width - 2, 2, shadow);
+            Raylib.DrawRectangle((int)(x + width - 3), (int)y + 1, 2, (int)height - 2, shadow);
+        } else {
+            Raylib.DrawRectangle((int)x + 1, (int)y + 1, (int)width - 2, 2, new Color(120, 125, 135, 200));
+            Raylib.DrawRectangle((int)x + 1, (int)y + 1, 2, (int)height - 2, new Color(120, 125, 135, 200));
+            Raylib.DrawRectangle((int)x + 1, (int)(y + height - 3), (int)width - 2, 2, new Color(45, 48, 55, 255));
+            Raylib.DrawRectangle((int)(x + width - 3), (int)y + 1, 2, (int)height - 2, new Color(45, 48, 55, 255));
+        }
+
+        // 4. Внешний контур
+        Color outline = !enabled 
+            ? new Color(35, 38, 45, 255) 
+            : (hovered ? new Color(255, 220, 100, 255) : new Color(25, 25, 25, 255));
+        Raylib.DrawRectangleLinesEx(rect, hovered ? 2f : 1.5f, outline);
+
+        // 5. Текст кнопки
+        Color textColor = !enabled 
+            ? new Color(165, 170, 180, 255) 
+            : (hovered ? new Color(255, 255, 200, 255) : Color.White);
+
+        float textY = y + (height - 18f) / 2f;
+
+        // Особый бейдж для «Сетевой игры» если заблокирована
+        if (!enabled && label.Contains("Сетевая")) {
+            float badgeW = 94f, badgeH = 20f;
+            float bx = x + width - badgeW - 10f, by = y + (height - badgeH) / 2f;
+            
+            // Центрируем текст «Сетевая игра» левее бейджа, чтобы они не накладывались
+            float labelCenterX = x + (width - badgeW - 14f) / 2f;
+            Fonts.DrawCenteredShadowed(label, labelCenterX, textY, 18f, textColor, 1.5f);
+
+            Raylib.DrawRectangleRec(new Rectangle(bx, by, badgeW, badgeH), new Color(30, 35, 45, 240));
+            Raylib.DrawRectangleLinesEx(new Rectangle(bx, by, badgeW, badgeH), 1f, new Color(220, 180, 70, 240));
+            Fonts.Draw("В разработке", bx + 6f, by + 3f, 11f, new Color(255, 215, 90, 255));
+        } else {
+            Fonts.DrawCenteredShadowed(label, x + width / 2f, textY, 18f, textColor, 1.5f);
+        }
+
+        return clicked;
     }
 
     private static void DrawPanel(float x, float y, float width, float height) {

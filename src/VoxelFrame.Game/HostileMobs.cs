@@ -25,6 +25,7 @@ public sealed class HostileMob {
     public float FuseTimer;   // для Бабахера (1.5с отсчет до взрыва)
     public float TeleportCooldown; // для Эндэрмена
     public float AttackCooldown;
+    public float AttackWindup;
     public float HurtTime;
     public Vector2 WanderDir;
     private readonly Random _random = new();
@@ -247,15 +248,17 @@ public sealed class HostileMob {
                 var aheadHead = new Vec3i(aheadX, feetPos.Y + 1, aheadZ);
                 var currentHead = feetPos + new Vec3i(0, 1, 0);
 
-                // Дверь — не препятствие для мобов: идём сквозь неё (коллизия ignoreDoors).
-                bool isDoorAhead = GameData.IsDoor(world.GetVoxel(aheadFoot).TypeId) ||
-                                   GameData.IsDoor(world.GetVoxel(aheadHead).TypeId);
+                // Проверяем закрытые двери и препятствия
+                var vf = world.GetVoxel(aheadFoot);
+                var vh = world.GetVoxel(aheadHead);
+                bool isClosedDoorAhead = (GameData.IsDoor(vf.TypeId) && (vf.SubGridLayerMask & 8) == 0) ||
+                                         (GameData.IsDoor(vh.TypeId) && (vh.SubGridLayerMask & 8) == 0);
 
-                if (world.IsSolidAt(aheadFoot) && !isDoorAhead) {
-                    if (!world.IsSolidAt(aheadHead) && !world.IsSolidAt(currentHead) && MathF.Abs(Velocity.Y) < 0.1f) {
+                if (world.IsSolidAt(aheadFoot) || isClosedDoorAhead) {
+                    if (!world.IsSolidAt(aheadHead) && !world.IsSolidAt(currentHead) && !isClosedDoorAhead && MathF.Abs(Velocity.Y) < 0.1f) {
                         Velocity.Y = 8.5f; // Прыжок на 1 блок вверх
-                    } else if (world.IsSolidAt(aheadHead)) {
-                        // Стена впереди: проверяем боковые направления для обхода (+45° / -45°)
+                    } else if (world.IsSolidAt(aheadHead) || isClosedDoorAhead) {
+                        // Стена или закрытая дверь: обход
                         var leftDir = new Vector3(moveDir.Z, 0f, -moveDir.X);
                         var rightDir = new Vector3(-moveDir.Z, 0f, moveDir.X);
                         var leftCell = new Vec3i((int)MathF.Floor(Position.X + leftDir.X * 0.6f), feetPos.Y, (int)MathF.Floor(Position.Z + leftDir.Z * 0.6f));
@@ -267,24 +270,36 @@ public sealed class HostileMob {
                 }
             }
 
-            // Атака Зомби, Свинозомби и Паука в ближнем бою
-            if ((Type == HostileType.Zombie || Type == HostileType.Spider || Type == HostileType.ZombiePigman) && dist < 1.8f && AttackCooldown <= 0f) {
+            // Атака Зомби, Свинозомби и Паука в ближнем бою (с замахом 0.35с)
+            if ((Type == HostileType.Zombie || Type == HostileType.Spider || Type == HostileType.ZombiePigman) && dist < 1.9f && AttackCooldown <= 0f) {
                 var mobCenter = Position + new Vector3(0f, 0.35f, 0f);
                 var playerCenter = player.Position + new Vector3(0f, 0.60f, 0f);
                 if (HasLineOfSight(world, mobCenter, playerCenter) || HasLineOfSight(world, mobCenter, player.Eye)) {
-                    AttackCooldown = 1.0f;
-                    float dmg = Type == HostileType.ZombiePigman ? 5f : Type == HostileType.Spider ? 3f : 4f;
-                    player.ApplyDamage(dmg, session, Position);
+                    if (AttackWindup <= 0f) {
+                        AttackWindup = 0.35f;
+                    } else {
+                        AttackWindup -= dt;
+                        if (AttackWindup <= 0f) {
+                            AttackCooldown = 1.0f;
+                            float dmg = Type == HostileType.ZombiePigman ? 5f : Type == HostileType.Spider ? 3f : 4f;
+                            string mobName = Type == HostileType.ZombiePigman ? "Зомби-свиночеловек" : Type == HostileType.Spider ? "Паук" : "Зомби";
+                            player.ApplyDamage(dmg, session, Position, cause: mobName);
+                        }
+                    }
+                } else {
+                    AttackWindup = 0f;
                 }
+            } else if (dist >= 1.9f) {
+                AttackWindup = 0f;
             }
 
-            // Атака Эндэрмена: высокий разряд (7 HP)
-            if (Type == HostileType.Enderman && dist < 1.8f && AttackCooldown <= 0f) {
+            // Атака Эндэрмена: высокий разряд
+            if (Type == HostileType.Enderman && dist < 1.9f && AttackCooldown <= 0f) {
                 var mobCenter = Position + new Vector3(0f, 0.6f, 0f);
                 var playerCenter = player.Position + new Vector3(0f, 0.60f, 0f);
                 if (HasLineOfSight(world, mobCenter, playerCenter) || HasLineOfSight(world, mobCenter, player.Eye)) {
                     AttackCooldown = 1.2f;
-                    player.ApplyDamage(4.76f, session, Position); // урон эндермена −20%, затем ещё −15%
+                    player.ApplyDamage(4.76f, session, Position, cause: "Эндермен");
                 }
             }
 
@@ -427,7 +442,7 @@ public sealed class HostileMob {
             Velocity.Y -= 22f * dt;
         }
 
-        bool grounded = Collision.Move(world, ref Position, new Vector3(HalfSizeX, HalfSizeY, HalfSizeZ), ref Velocity, dt, ignoreDoors: true);
+        bool grounded = Collision.Move(world, ref Position, new Vector3(HalfSizeX, HalfSizeY, HalfSizeZ), ref Velocity, dt, ignoreDoors: false);
         if (grounded && Velocity.Y < 0f) Velocity.Y = 0f;
     }
 

@@ -146,7 +146,7 @@ public static class SoundSystem {
         float p = 0.9f + (float)Random.Shared.NextDouble() * 0.2f;
         if (blockId == GameData.BStone.Id || blockId == GameData.BCobblestone.Id || blockId == GameData.BObsidian.Id ||
             blockId == GameData.BCoalOre.Id || blockId == GameData.BIronOre.Id || blockId == GameData.BGoldOre.Id ||
-            blockId == GameData.BDiamondOre.Id || blockId == GameData.BRedstoneOre.Id || blockId == GameData.BMossyCobblestone.Id ||
+            blockId == GameData.BDiamondOre.Id || blockId == GameData.BMossyCobblestone.Id ||
             blockId == GameData.BNetherrack.Id || blockId == GameData.BNetherBrick.Id || blockId == GameData.BNetherQuartzOre.Id ||
             blockId == GameData.BChiseledSandstone.Id || blockId == GameData.BFurnace.Id) {
             Play(_stepStone, p);
@@ -167,7 +167,7 @@ public static class SoundSystem {
         float p = 0.9f + (float)Random.Shared.NextDouble() * 0.2f;
         if (blockId == GameData.BStone.Id || blockId == GameData.BCobblestone.Id || blockId == GameData.BObsidian.Id ||
             blockId == GameData.BCoalOre.Id || blockId == GameData.BIronOre.Id || blockId == GameData.BGoldOre.Id ||
-            blockId == GameData.BDiamondOre.Id || blockId == GameData.BRedstoneOre.Id || blockId == GameData.BMossyCobblestone.Id ||
+            blockId == GameData.BDiamondOre.Id || blockId == GameData.BMossyCobblestone.Id ||
             blockId == GameData.BNetherrack.Id || blockId == GameData.BNetherBrick.Id || blockId == GameData.BNetherQuartzOre.Id) {
             Play(_digStone, p);
         } else if (blockId == GameData.BLog.Id || blockId == GameData.BPlanks.Id || blockId == GameData.BWorkbench.Id || blockId == GameData.BChest.Id) {

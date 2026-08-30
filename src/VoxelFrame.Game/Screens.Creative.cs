@@ -41,7 +41,7 @@ public static partial class Screens {
             3 => GameData.Items.Values.Where(item => GameData.FoodValue.ContainsKey(item.Id) || item.Id == GameData.CoalItem.Id ||
                                                     item.Id == GameData.CharcoalItem.Id || item.Id == GameData.IronIngotItem.Id ||
                                                     item.Id == GameData.GoldIngotItem.Id || item.Id == GameData.DiamondItem.Id ||
-                                                    item.Id == GameData.RedstoneItem.Id || item.Id == GameData.NetherQuartzItem.Id ||
+                                                    item.Id == GameData.NetherQuartzItem.Id ||
                                                     item.Id == GameData.StickItem.Id || item.Id == GameData.FeatherItem.Id ||
                                                     item.Id == GameData.GunpowderItem.Id || item.Id == GameData.StringItem.Id ||
                                                     item.Id == GameData.BoneItem.Id || item.Id == GameData.FlintItem.Id ||

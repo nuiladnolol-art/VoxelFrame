@@ -8,7 +8,7 @@ namespace VoxelFrame.Game;
 /// </summary>
 public static class TextureAtlas {
     public const int TilePx = 16;
-    public const int Cols = 8, Rows = 26;
+    public const int Cols = 8, Rows = 28;
     public const int AtlasW = Cols * TilePx, AtlasH = Rows * TilePx;
 
     public const int TGrassTop = 0, TGrassSide = 1, TDirt = 2, TStone = 3,
@@ -53,7 +53,16 @@ public static class TextureAtlas {
                      TLeavesPlains = 148, TLeavesSavanna = 149, TLeavesSwamp = 150, TWaterSwamp = 151,
                      TGrassTopPlains = 152, TGrassSidePlains = 153, TTallGrassPlains = 154,
                      TGrassTopSavanna = 155, TGrassSideSavanna = 156, TTallGrassSavanna = 157,
-                     TGrassTopSwamp = 158, TGrassSideSwamp = 159, TTallGrassSwamp = 160;
+                     TGrassTopSwamp = 158, TGrassSideSwamp = 159, TTallGrassSwamp = 160,
+                     TLeatherHelmet = 161, TLeatherChestplate = 162, TLeatherLeggings = 163, TLeatherBoots = 164,
+                     TIronHelmet = 165, TIronChestplate = 166, TIronLeggings = 167, TIronBoots = 168,
+                     TDiamondHelmet = 169, TDiamondChestplate = 170, TDiamondLeggings = 171, TDiamondBoots = 172,
+                     TArmorIcon = 173, TArmorIconHalf = 174, TArmorIconEmpty = 175,
+                     TSapling = 176, TRedFlower = 177, TYellowFlower = 178,
+                     TCarrot = 179, TPotato = 180, TBakedPotato = 181,
+                     TCarrotCrop0 = 182, TCarrotCrop1 = 183, TCarrotCrop2 = 184, TCarrotCrop3 = 185,
+                     TPotatoCrop0 = 186, TPotatoCrop1 = 187, TPotatoCrop2 = 188, TPotatoCrop3 = 189,
+                     THeartParticle = 190;
 
     public record struct BlockFaceTiles(byte PosX, byte NegX, byte PosY, byte NegY, byte PosZ, byte NegZ);
 
@@ -481,6 +490,22 @@ public static class TextureAtlas {
         palette[TGrassTopSwamp] = (new Color(64, 88, 44, 255), true);
         palette[TGrassSideSwamp] = (new Color(122, 92, 58, 255), true);
         palette[TTallGrassSwamp] = (new Color(62, 86, 42, 255), false);
+        // Саженцы, Цветы, Культуры и Частицы
+        palette[TSapling] = (new Color(60, 140, 40, 255), false);
+        palette[TRedFlower] = (new Color(220, 30, 35, 255), false);
+        palette[TYellowFlower] = (new Color(245, 215, 30, 255), false);
+        palette[TCarrot] = (new Color(245, 120, 20, 255), false);
+        palette[TPotato] = (new Color(180, 140, 75, 255), false);
+        palette[TBakedPotato] = (new Color(150, 95, 45, 255), false);
+        palette[TCarrotCrop0] = (new Color(70, 160, 40, 255), false);
+        palette[TCarrotCrop1] = (new Color(80, 180, 40, 255), false);
+        palette[TCarrotCrop2] = (new Color(90, 200, 40, 255), false);
+        palette[TCarrotCrop3] = (new Color(100, 210, 40, 255), false);
+        palette[TPotatoCrop0] = (new Color(60, 150, 40, 255), false);
+        palette[TPotatoCrop1] = (new Color(70, 170, 40, 255), false);
+        palette[TPotatoCrop2] = (new Color(80, 190, 45, 255), false);
+        palette[TPotatoCrop3] = (new Color(90, 200, 50, 255), false);
+        palette[THeartParticle] = (new Color(235, 30, 60, 255), false);
 
         var rng = new Random(20260812);
         for (int tile = 0; tile < palette.Length; tile++) {
@@ -642,25 +667,26 @@ public static class TextureAtlas {
                         byte[,] foodMap = new byte[16, 16] {
                             {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
                             {0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0},
-                            {0,0,0,0,0,0,0,1,2,2,2,2,1,0,0,0},
-                            {0,0,0,0,0,0,1,2,2,2,2,2,2,1,0,0},
-                            {0,0,0,0,0,1,2,2,2,2,2,2,2,1,0,0},
+                            {0,0,0,0,0,0,0,1,4,4,2,2,1,0,0,0},
+                            {0,0,0,0,0,0,1,4,4,4,2,2,2,1,0,0},
+                            {0,0,0,0,0,1,4,4,2,2,2,2,2,1,0,0},
                             {0,0,0,0,0,1,2,2,2,2,2,2,1,0,0,0},
-                            {0,0,0,0,1,2,2,2,2,2,1,1,0,0,0,0},
-                            {0,0,0,1,2,2,2,2,1,1,0,0,0,0,0,0},
-                            {0,0,0,1,2,2,1,1,0,0,0,0,0,0,0,0},
-                            {0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0},
+                            {0,0,0,0,1,2,2,2,2,2,2,1,0,0,0,0},
+                            {0,0,0,1,2,2,2,2,2,1,1,0,0,0,0,0},
+                            {0,0,0,1,2,2,2,1,1,0,0,0,0,0,0,0},
+                            {0,0,1,1,1,1,1,0,0,0,0,0,0,0,0,0},
                             {0,1,3,3,1,0,0,0,0,0,0,0,0,0,0,0},
                             {1,3,3,1,0,0,0,0,0,0,0,0,0,0,0,0},
-                            {1,3,1,0,0,0,0,0,0,0,0,0,0,0,0,0},
-                            {0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+                            {1,3,3,1,0,0,0,0,0,0,0,0,0,0,0,0},
+                            {0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0},
                             {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
                             {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
                         };
                         byte val = foodMap[py, px];
-                        if (val == 1) { r = 40; g = 25; b = 15; a = 255; }
-                        else if (val == 2) { r = 160; g = 90; b = 40; a = 255; }
-                        else if (val == 3) { r = 240; g = 230; b = 220; a = 255; }
+                        if (val == 1) { r = 45; g = 24; b = 12; a = 255; }
+                        else if (val == 2) { r = 186; g = 98; b = 34; a = 255; }
+                        else if (val == 3) { r = 240; g = 232; b = 218; a = 255; }
+                        else if (val == 4) { r = 226; g = 142; b = 58; a = 255; }
                         else { a = 0; }
                     } else if (tile == THeartEmpty) {
                         byte[,] heartMap = new byte[16, 16] {
@@ -693,14 +719,14 @@ public static class TextureAtlas {
                             {0,0,0,0,0,0,1,2,2,2,2,2,2,1,0,0},
                             {0,0,0,0,0,1,2,2,2,2,2,2,2,1,0,0},
                             {0,0,0,0,0,1,2,2,2,2,2,2,1,0,0,0},
-                            {0,0,0,0,1,2,2,2,2,2,1,1,0,0,0,0},
-                            {0,0,0,1,2,2,2,2,1,1,0,0,0,0,0,0},
-                            {0,0,0,1,2,2,1,1,0,0,0,0,0,0,0,0},
-                            {0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0},
+                            {0,0,0,0,1,2,2,2,2,2,2,1,0,0,0,0},
+                            {0,0,0,1,2,2,2,2,2,1,1,0,0,0,0,0},
+                            {0,0,0,1,2,2,2,1,1,0,0,0,0,0,0,0},
+                            {0,0,1,1,1,1,1,0,0,0,0,0,0,0,0,0},
                             {0,1,3,3,1,0,0,0,0,0,0,0,0,0,0,0},
                             {1,3,3,1,0,0,0,0,0,0,0,0,0,0,0,0},
-                            {1,3,1,0,0,0,0,0,0,0,0,0,0,0,0,0},
-                            {0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+                            {1,3,3,1,0,0,0,0,0,0,0,0,0,0,0,0},
+                            {0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0},
                             {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
                             {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
                         };
@@ -1295,11 +1321,182 @@ public static class TextureAtlas {
                         } else {
                             a = 0;
                         }
+                    } else if (tile >= TLeatherHelmet && tile <= TDiamondBoots) {
+                        // Броня: кожаная, железная, алмазная
+                        int tier = (tile - TLeatherHelmet) / 4; // 0 = Leather, 1 = Iron, 2 = Diamond
+                        int piece = (tile - TLeatherHelmet) % 4; // 0 = Helmet, 1 = Chestplate, 2 = Leggings, 3 = Boots
+
+                        (int ar, int ag, int ab) = tier switch {
+                            0 => (160, 102, 54),  // Кожа (коричневый)
+                            1 => (220, 222, 230), // Железо (серебристо-стальной)
+                            _ => (75, 225, 235)   // Алмаз (бирюзовый)
+                        };
+
+                        bool inArmor = false;
+                        if (piece == 0) {
+                            // Шлем: куполообразный свод + боковые пластины
+                            inArmor = px >= 4 && px <= 11 && py >= 4 && py <= 11 && (py >= 6 || (px >= 5 && px <= 10)) && !(py >= 9 && px >= 6 && px <= 9);
+                        } else if (piece == 1) {
+                            // Нагрудник: плечи, шея, корпус
+                            inArmor = px >= 3 && px <= 12 && py >= 3 && py <= 13 && !(py <= 5 && px >= 6 && px <= 9) && !(py >= 12 && (px <= 3 || px >= 12));
+                        } else if (piece == 2) {
+                            // Поножи: пояс и две штанины
+                            inArmor = px >= 4 && px <= 11 && py >= 4 && py <= 13 && !(py >= 7 && px >= 7 && px <= 8);
+                        } else if (piece == 3) {
+                            // Ботинки: два отдельных ботинка с подошвой
+                            inArmor = ((px >= 3 && px <= 6) || (px >= 9 && px <= 12)) && py >= 7 && py <= 13 && (py >= 11 || (px >= 4 && px <= 6) || (px >= 9 && px <= 11));
+                        }
+
+                        if (inArmor) {
+                            bool highlight = px == 5 && py <= 7;
+                            bool shadow = px == 11 || py == 13;
+                            if (highlight) { r = Math.Min(255, ar + 35); g = Math.Min(255, ag + 35); b = Math.Min(255, ab + 35); }
+                            else if (shadow) { r = ar * 3 / 4; g = ag * 3 / 4; b = ab * 3 / 4; }
+                            else { r = ar; g = ag; b = ab; }
+                            a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile >= TArmorIcon && tile <= TArmorIconEmpty) {
+                        // Значок брони для HUD (щиток)
+                        float cx = 8f;
+                        bool inShield = px >= 3 && px <= 12 && py >= 3 && py <= 13 && (py <= 8 || MathF.Abs(px - cx) <= (14 - py));
+                        bool border = inShield && (px == 3 || px == 12 || py == 3 || MathF.Abs(px - cx) >= (13 - py));
+
+                        if (inShield) {
+                            if (tile == TArmorIconEmpty) {
+                                r = border ? 50 : 30; g = border ? 50 : 30; b = border ? 55 : 35;
+                            } else if (tile == TArmorIconHalf) {
+                                if (px < 8) {
+                                    r = border ? 240 : 200; g = border ? 240 : 200; b = border ? 250 : 210;
+                                } else {
+                                    r = border ? 60 : 35; g = border ? 60 : 35; b = border ? 65 : 40;
+                                }
+                            } else {
+                                r = border ? 245 : 210; g = border ? 245 : 210; b = border ? 255 : 220;
+                            }
+                            a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == TSapling) {
+                        // Саженец: коричневый стволик снизу, зеленая крона сверху
+                        bool stem = (px == 7 || px == 8) && py >= 8 && py <= 14;
+                        bool leaves = (px >= 4 && px <= 11 && py >= 3 && py <= 8 && !((px == 4 || px == 11) && (py == 3 || py == 8)));
+                        if (stem) {
+                            r = 120; g = 80; b = 40; a = 255;
+                        } else if (leaves) {
+                            r = 60 + ((px + py) % 3) * 15; g = 150 + ((px * 3) % 25); b = 40; a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == TRedFlower) {
+                        // Мак: зеленый стебель и красные лепестки с темным центром
+                        bool stem = (px == 7 || px == 8) && py >= 7 && py <= 14;
+                        bool flower = (px >= 5 && px <= 10 && py >= 2 && py <= 7);
+                        bool center = (px >= 7 && px <= 8 && py >= 4 && py <= 5);
+                        if (center) {
+                            r = 40; g = 20; b = 20; a = 255;
+                        } else if (flower) {
+                            r = 220 + ((px + py) % 2) * 20; g = 30; b = 35; a = 255;
+                        } else if (stem) {
+                            r = 50; g = 140; b = 35; a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == TYellowFlower) {
+                        // Одуванчик: зеленый стебель и желтые лепестки
+                        bool stem = (px == 7 || px == 8) && py >= 7 && py <= 14;
+                        bool flower = (px >= 5 && px <= 10 && py >= 3 && py <= 7);
+                        if (flower) {
+                            r = 250; g = 215 + ((px + py) % 2) * 25; b = 25; a = 255;
+                        } else if (stem) {
+                            r = 50; g = 140; b = 35; a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == TCarrot) {
+                        // Морковь: оранжевый конус вниз + зеленая ботва
+                        bool greens = (px >= 6 && px <= 9 && py >= 2 && py <= 5);
+                        bool carrotBody = (px >= 6 && px <= 9 && py >= 6 && py <= 8) ||
+                                          (px >= 7 && px <= 8 && py >= 9 && py <= 12) ||
+                                          (px == 7 && py == 13);
+                        if (greens) {
+                            r = 50; g = 160; b = 40; a = 255;
+                        } else if (carrotBody) {
+                            r = 240 + (px % 2) * 15; g = 120 + (py % 2) * 15; b = 20; a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == TPotato) {
+                        // Картофель: овальный клубень
+                        bool potato = (px >= 4 && px <= 11 && py >= 5 && py <= 11 && !(px == 4 && py == 5) && !(px == 11 && py == 11));
+                        bool spot = (px == 6 && py == 7) || (px == 9 && py == 9);
+                        if (spot) {
+                            r = 130; g = 95; b = 50; a = 255;
+                        } else if (potato) {
+                            r = 185 + (px % 3) * 10; g = 145 + (py % 3) * 8; b = 80; a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == TBakedPotato) {
+                        // Печеный картофель: поджаристая корочка + горячая сердцевина
+                        bool potato = (px >= 4 && px <= 11 && py >= 5 && py <= 11);
+                        bool center = (px >= 6 && px <= 9 && py >= 7 && py <= 9);
+                        if (center) {
+                            r = 255; g = 230; b = 90; a = 255;
+                        } else if (potato) {
+                            r = 145 + (px % 2) * 15; g = 85 + (py % 2) * 10; b = 40; a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile >= TCarrotCrop0 && tile <= TCarrotCrop3) {
+                        // Стадии роста моркови 0..3
+                        int stage = tile - TCarrotCrop0;
+                        int topY = stage switch { 0 => 11, 1 => 8, 2 => 5, _ => 2 };
+                        bool greens = (px >= 6 - stage && px <= 9 + stage && py >= topY && py <= 13);
+                        bool carrotRoot = stage == 3 && px >= 7 && px <= 8 && py >= 12 && py <= 14;
+                        if (carrotRoot) {
+                            r = 245; g = 120; b = 20; a = 255;
+                        } else if (greens && ((px * 3 + py * 7) % 2 == 0 || py == topY)) {
+                            r = 50 + stage * 10; g = 150 + stage * 20; b = 35; a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile >= TPotatoCrop0 && tile <= TPotatoCrop3) {
+                        // Стадии роста картофеля 0..3
+                        int stage = tile - TPotatoCrop0;
+                        int topY = stage switch { 0 => 11, 1 => 8, 2 => 5, _ => 2 };
+                        bool leaves = (px >= 5 - stage && px <= 10 + stage && py >= topY && py <= 14);
+                        bool flower = stage == 3 && ((px == 6 && py == 3) || (px == 9 && py == 4));
+                        if (flower) {
+                            r = 240; g = 240; b = 250; a = 255;
+                        } else if (leaves && ((px * 5 + py * 3) % 2 == 0 || py >= 12)) {
+                            r = 40 + stage * 8; g = 135 + stage * 15; b = 40; a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == THeartParticle) {
+                        // Сердечко для режима любви
+                        bool inHeart = (py >= 4 && py <= 6 && ((px >= 4 && px <= 6) || (px >= 9 && px <= 11))) ||
+                                       (py == 7 && px >= 4 && px <= 11) ||
+                                       (py == 8 && px >= 5 && px <= 10) ||
+                                       (py == 9 && px >= 6 && px <= 9) ||
+                                       (py == 10 && px >= 7 && px <= 8);
+                        if (inHeart) {
+                            r = 235; g = 30; b = 60; a = 255;
+                        } else {
+                            a = 0;
+                        }
                     } else {
                         if (tile == TPlanks && (py == 4 || py == 11)) { r -= 40; g -= 30; b -= 20; }
                         if (tile == TLogSide && py % 5 == 4) { r -= 30; g -= 24; b -= 14; }
-                        if ((tile == TLeaves || tile == TLeavesPlains || tile == TLeavesSavanna || tile == TLeavesSwamp) && (px * 3 + py * 7) % 5 == 0) {
-                            a = 0;
+                        if (tile == TLeaves || tile == TLeavesPlains || tile == TLeavesSavanna || tile == TLeavesSwamp) {
+                            // Органическая текстура листвы без перфорации и муара
+                            int leafNoise = (px * 13 + py * 29) % 7;
+                            if (leafNoise == 0) { r += 16; g += 22; b += 12; }
+                            else if (leafNoise == 1) { r -= 18; g -= 24; b -= 14; }
+                            else if (leafNoise == 2) { r -= 10; g -= 14; b -= 8; }
                         }
                         if (tile == TVoidGate) {
                             // Врата Бездны: тёмный камень со светящейся фиолетовой руной
@@ -1308,7 +1505,6 @@ public static class TextureAtlas {
                             if (rune) { r = 190; g = 150; b = 255; }
                             else if (glow) { r += 30; g += 20; b += 45; }
                         }
-                        if (px == 0 || py == 0) { r = r * 4 / 5; g = g * 4 / 5; b = b * 4 / 5; }
                     }
 
                     unsafe {

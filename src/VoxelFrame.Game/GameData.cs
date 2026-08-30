@@ -72,8 +72,8 @@ public static class GameData {
     public static readonly Material GoldM = new() {
         Id = 15, Name = "Золото", Category = MaterialCategory.Metal,
     };
-    public static readonly Material RedstoneM = new() {
-        Id = 16, Name = "Редстоун", Category = MaterialCategory.Stone,
+    public static readonly Material GlowstoneM = new() {
+        Id = 16, Name = "Светопыль", Category = MaterialCategory.Stone,
     };
     public static readonly Material SandM = new() {
         Id = 17, Name = "Песок", Category = MaterialCategory.Soil,
@@ -144,7 +144,6 @@ public static class GameData {
     public static readonly ItemDefinition GoldIngotItem = Item(34, "Золотой слиток", GoldM);
     public static readonly ItemDefinition DiamondItem = Item(35, "Алмаз", DiamondM);
     public static readonly ItemDefinition DiamondOreItem = Item(36, "Алмазная руда", Stone);
-    public static readonly ItemDefinition RedstoneItem = Item(37, "Редстоун пыль", RedstoneM);
     public static readonly ItemDefinition SandItem = Item(38, "Песок", SandM);
     public static readonly ItemDefinition GravelItem = Item(39, "Гравий", Stone);
     public static readonly ItemDefinition CobblestoneItem = Item(40, "Булыжник", Stone);
@@ -190,7 +189,7 @@ public static class GameData {
     public static readonly ItemDefinition MusicDiscItem = Item(79, "Музыкальная пластинка", DiamondM, maxStack: 1);
     public static readonly ItemDefinition NetherQuartzItem = Item(80, "Кварц", DiamondM);
     public static readonly ItemDefinition BlazeRodItem = Item(81, "Стержень ифрита", GoldM);
-    public static readonly ItemDefinition GlowstoneDustItem = Item(82, "Светопыль", RedstoneM);
+    public static readonly ItemDefinition GlowstoneDustItem = Item(82, "Светопыль", GlowstoneM);
     public static readonly ItemDefinition TNTItem = Item(83, "Динамит", SandM);
     public static readonly ItemDefinition NetherrackItem = Item(84, "Адский камень", Stone);
     public static readonly ItemDefinition SoulSandItem = Item(85, "Песок душ", SandM);
@@ -220,7 +219,7 @@ public static class GameData {
     public static readonly ItemDefinition EndPortalFrameItem = Item(107, "Рамка портала Энда", ObsidianM);
     public static readonly ItemDefinition EnderCrystalItem = Item(108, "Эндер-кристалл", GlassM);
 
-    // Артефакты мини-боссов и Ключ Бездны (собирается из всех четырёх артефактов)
+    // Артефакты мини-боссов и Ключ Бездны
     public static readonly ItemDefinition NetherArtifactItem = Item(109, "Адский артефакт", ObsidianM);
     public static readonly ItemDefinition SwampArtifactItem = Item(110, "Болотный артефакт", OrganicM);
     public static readonly ItemDefinition DesertArtifactItem = Item(111, "Пустынный артефакт", SandM);
@@ -230,6 +229,30 @@ public static class GameData {
     public static readonly ItemDefinition NetherTotemItem = Item(113, "Тотем Пламени", ObsidianM, maxStack: 16);
     public static readonly ItemDefinition DesertTotemItem = Item(114, "Тотем Песков", SandM, maxStack: 16);
     public static readonly ItemDefinition SwampTotemItem = Item(115, "Тотем Топей", OrganicM, maxStack: 16);
+
+    // Доспехи (Броня)
+    public static readonly ItemDefinition LeatherHelmetItem = Item(116, "Кожаный шлем", LeatherM, maxStack: 1);
+    public static readonly ItemDefinition LeatherChestplateItem = Item(117, "Кожаный нагрудник", LeatherM, maxStack: 1);
+    public static readonly ItemDefinition LeatherLeggingsItem = Item(118, "Кожаные поножи", LeatherM, maxStack: 1);
+    public static readonly ItemDefinition LeatherBootsItem = Item(119, "Кожаные ботинки", LeatherM, maxStack: 1);
+
+    public static readonly ItemDefinition IronHelmetItem = Item(120, "Железный шлем", IronM, maxStack: 1);
+    public static readonly ItemDefinition IronChestplateItem = Item(121, "Железный нагрудник", IronM, maxStack: 1);
+    public static readonly ItemDefinition IronLeggingsItem = Item(122, "Железные поножи", IronM, maxStack: 1);
+    public static readonly ItemDefinition IronBootsItem = Item(123, "Железные ботинки", IronM, maxStack: 1);
+
+    public static readonly ItemDefinition DiamondHelmetItem = Item(124, "Алмазный шлем", DiamondM, maxStack: 1);
+    public static readonly ItemDefinition DiamondChestplateItem = Item(125, "Алмазный нагрудник", DiamondM, maxStack: 1);
+    public static readonly ItemDefinition DiamondLeggingsItem = Item(126, "Алмазные поножи", DiamondM, maxStack: 1);
+    public static readonly ItemDefinition DiamondBootsItem = Item(127, "Алмазные ботинки", DiamondM, maxStack: 1);
+
+    // Растительность, Саженцы и Сельское хозяйство
+    public static readonly ItemDefinition OakSaplingItem = Item(128, "Саженец дуба", LeavesM);
+    public static readonly ItemDefinition RedFlowerItem = Item(129, "Мак", OrganicM);
+    public static readonly ItemDefinition YellowFlowerItem = Item(130, "Одуванчик", OrganicM);
+    public static readonly ItemDefinition CarrotItem = Item(131, "Морковь", OrganicM);
+    public static readonly ItemDefinition PotatoItem = Item(132, "Картофель", OrganicM);
+    public static readonly ItemDefinition BakedPotatoItem = Item(133, "Печеный картофель", OrganicM);
 
     // ── Блоки ─────────────────────────────────────────────────────────────────
     public static readonly BlockType BGrass = Block(1, "Трава", DirtM, drop: DirtItem);
@@ -256,7 +279,6 @@ public static class GameData {
     public static readonly BlockType BLava = Block(20, "Лава", LavaM, drop: null, light: 15).With(b => { b.IsSolid = false; b.IsOpaque = true; });
     public static readonly BlockType BGoldOre = Block(21, "Золотая руда", Stone, drop: GoldOreItem);
     public static readonly BlockType BDiamondOre = Block(22, "Алмазная руда", Stone, drop: DiamondItem);
-    public static readonly BlockType BRedstoneOre = Block(23, "Редстоун руда", Stone, drop: RedstoneItem);
     public static readonly BlockType BObsidian = Block(24, "Обсидиан", ObsidianM, drop: ObsidianItem);
     public static readonly BlockType BChest = Block(25, "Сундук", Oak, drop: ChestItem, flammable: true, burnTime: 8f)
         .With(b => { b.IsOpaque = false; });
@@ -309,12 +331,24 @@ public static class GameData {
     public static readonly BlockType BVoidGate = Block(53, "Врата Бездны", ObsidianM, drop: null, light: 12)
         .With(b => { b.IsUnbreakable = true; b.IsOpaque = false; });
 
+    public static readonly BlockType BSapling = Block(55, "Саженец дуба", LeavesM, drop: OakSaplingItem, flammable: true, burnTime: 4f)
+        .With(b => { b.IsSolid = false; b.IsOpaque = false; });
+    public static readonly BlockType BRedFlower = Block(56, "Мак", OrganicM, drop: RedFlowerItem)
+        .With(b => { b.IsSolid = false; b.IsOpaque = false; });
+    public static readonly BlockType BYellowFlower = Block(57, "Одуванчик", OrganicM, drop: YellowFlowerItem)
+        .With(b => { b.IsSolid = false; b.IsOpaque = false; });
+    public static readonly BlockType BCarrotCrop = Block(58, "Посевы моркови", OrganicM, drop: CarrotItem)
+        .With(b => { b.IsSolid = false; b.IsOpaque = false; });
+    public static readonly BlockType BPotatoCrop = Block(59, "Посевы картофеля", OrganicM, drop: PotatoItem)
+        .With(b => { b.IsSolid = false; b.IsOpaque = false; });
+
     public static readonly BlockType[] Blocks =
         { BGrass, BDirt, BStone, BLog, BLeaves, BPlanks, BCoalOre, BTorch, BBedrock, BIronOre, BWorkbench, BFurnace,
-          BCobblestone, BSand, BGravel, BGlass, BWater, BLava, BGoldOre, BDiamondOre, BRedstoneOre, BObsidian, BChest, BBed, BBedHead,
+          BCobblestone, BSand, BGravel, BGlass, BWater, BLava, BGoldOre, BDiamondOre, BObsidian, BChest, BBed, BBedHead,
           BFarmland, BWheatCrop, BTallGrass, BMossyCobblestone, BMobSpawner, BWeb, BRail, BPressurePlate, BTNT, BChiseledSandstone,
           BNetherrack, BSoulSand, BGlowstone, BNetherQuartzOre, BNetherBrick, BNetherPortal, BDoorLower, BDoorUpper,
-          BEndStone, BEndPortalFrame, BEndPortal, BObsidianPillar, BEnderCrystal, BChorusPlant, BChorusFlower, BVoidGate };
+          BEndStone, BEndPortalFrame, BEndPortal, BObsidianPillar, BEnderCrystal, BChorusPlant, BChorusFlower, BVoidGate,
+          BSapling, BRedFlower, BYellowFlower, BCarrotCrop, BPotatoCrop };
 
 
     private static readonly Dictionary<ushort, BlockType> _byId = Blocks.ToDictionary(b => b.Id);
@@ -347,6 +381,9 @@ public static class GameData {
         { NetherBrickItem.Id, BNetherBrick.Id },
         { DoorItem.Id, BDoorLower.Id },
         { RailItem.Id, BRail.Id },
+        { OakSaplingItem.Id, BSapling.Id },
+        { RedFlowerItem.Id, BRedFlower.Id },
+        { YellowFlowerItem.Id, BYellowFlower.Id },
     };
 
     /// <summary>Возвращает блок по его Id.</summary>
@@ -382,6 +419,9 @@ public static class GameData {
         { CookedMuttonItem.Id, 6f }, // Жареная баранина: +6 HP
         { GoldenAppleItem.Id, 10f }, // Золотое яблоко: +10 HP
         { ChorusFruitItem.Id, 4f },  // Плод хоруса: +4 HP (и телепорт)
+        { CarrotItem.Id, 3f },       // Морковь: +3 HP
+        { PotatoItem.Id, 1f },       // Картофель: +1 HP
+        { BakedPotatoItem.Id, 5f },  // Печеный картофель: +5 HP
     };
 
     // ── Реестр предметов ───────────────────────────────────────────────────────
@@ -389,9 +429,76 @@ public static class GameData {
     public static readonly Dictionary<ushort, ItemDefinition> Items = new();
     private static ulong _nextInstanceId;
 
+    // ── Категории и единый реестр рецептов ────────────────────────────────────
+    public enum CraftCategory { All = 0, Tools, Weapons, Armor, Blocks, Food, Materials }
+
+    public sealed record CraftRecipe(
+        string Name,
+        ItemDefinition Output,
+        int Count,
+        (ItemDefinition Item, int Count)[] Ingredients,
+        ItemDefinition?[] Shape,
+        bool Needs3x3,
+        CraftCategory Category,
+        bool IsSmelt = false
+    );
+
+    public static readonly List<CraftRecipe> CraftRecipes = new();
+
+    // ── Доспехи (Броня) ───────────────────────────────────────────────────────
+    public enum ArmorType { Helmet = 0, Chestplate = 1, Leggings = 2, Boots = 3 }
+
+    public static ArmorType? GetArmorType(ushort itemId) {
+        if (itemId == LeatherHelmetItem.Id || itemId == IronHelmetItem.Id || itemId == DiamondHelmetItem.Id) return ArmorType.Helmet;
+        if (itemId == LeatherChestplateItem.Id || itemId == IronChestplateItem.Id || itemId == DiamondChestplateItem.Id) return ArmorType.Chestplate;
+        if (itemId == LeatherLeggingsItem.Id || itemId == IronLeggingsItem.Id || itemId == DiamondLeggingsItem.Id) return ArmorType.Leggings;
+        if (itemId == LeatherBootsItem.Id || itemId == IronBootsItem.Id || itemId == DiamondBootsItem.Id) return ArmorType.Boots;
+        return null;
+    }
+
+    public static int GetArmorPoints(ushort itemId) {
+        if (itemId == LeatherHelmetItem.Id) return 1;
+        if (itemId == LeatherChestplateItem.Id) return 3;
+        if (itemId == LeatherLeggingsItem.Id) return 2;
+        if (itemId == LeatherBootsItem.Id) return 1;
+
+        if (itemId == IronHelmetItem.Id) return 2;
+        if (itemId == IronChestplateItem.Id) return 6;
+        if (itemId == IronLeggingsItem.Id) return 5;
+        if (itemId == IronBootsItem.Id) return 2;
+
+        if (itemId == DiamondHelmetItem.Id) return 3;
+        if (itemId == DiamondChestplateItem.Id) return 8;
+        if (itemId == DiamondLeggingsItem.Id) return 6;
+        if (itemId == DiamondBootsItem.Id) return 3;
+
+        return 0;
+    }
+
+    public static int GetMaxArmorDurability(ushort itemId) {
+        if (itemId == LeatherHelmetItem.Id) return 55;
+        if (itemId == LeatherChestplateItem.Id) return 80;
+        if (itemId == LeatherLeggingsItem.Id) return 75;
+        if (itemId == LeatherBootsItem.Id) return 65;
+
+        if (itemId == IronHelmetItem.Id) return 165;
+        if (itemId == IronChestplateItem.Id) return 240;
+        if (itemId == IronLeggingsItem.Id) return 225;
+        if (itemId == IronBootsItem.Id) return 195;
+
+        if (itemId == DiamondHelmetItem.Id) return 363;
+        if (itemId == DiamondChestplateItem.Id) return 528;
+        if (itemId == DiamondLeggingsItem.Id) return 495;
+        if (itemId == DiamondBootsItem.Id) return 429;
+
+        return 100;
+    }
+
     public static ItemInstance NewItem(ItemDefinition def) {
         var inst = new ItemInstance(def, _nextInstanceId++);
-        inst.Durability = GetToolTier(def.Id) > 0 ? GetMaxToolDurability(def.Id) : 0;
+        if (GetToolTier(def.Id) > 0) inst.Durability = GetMaxToolDurability(def.Id);
+        else if (GetArmorType(def.Id) != null) inst.Durability = GetMaxArmorDurability(def.Id);
+        else inst.Durability = 0;
         return inst;
     }
 
@@ -426,7 +533,7 @@ public static class GameData {
     public static bool RequiresPickaxe(ushort blockId) =>
         blockId == BStone.Id || blockId == BCobblestone.Id || blockId == BCoalOre.Id ||
         blockId == BIronOre.Id || blockId == BGoldOre.Id || blockId == BDiamondOre.Id ||
-        blockId == BRedstoneOre.Id || blockId == BFurnace.Id || blockId == BObsidian.Id ||
+        blockId == BFurnace.Id || blockId == BObsidian.Id ||
         blockId == BMossyCobblestone.Id || blockId == BNetherrack.Id ||
         blockId == BNetherQuartzOre.Id || blockId == BNetherBrick.Id ||
         blockId == BEndStone.Id || blockId == BEndPortalFrame.Id || blockId == BObsidianPillar.Id;
@@ -435,7 +542,7 @@ public static class GameData {
     public static int GetRequiredTier(ushort blockId) {
         if (blockId == BStone.Id || blockId == BCoalOre.Id || blockId == BFurnace.Id || blockId == BCobblestone.Id || blockId == BMossyCobblestone.Id || blockId == BNetherrack.Id || blockId == BNetherQuartzOre.Id || blockId == BNetherBrick.Id || blockId == BEndStone.Id || blockId == BEndPortalFrame.Id) return 1;
         if (blockId == BIronOre.Id) return 2;
-        if (blockId == BGoldOre.Id || blockId == BDiamondOre.Id || blockId == BRedstoneOre.Id) return 3;
+        if (blockId == BGoldOre.Id || blockId == BDiamondOre.Id) return 3;
         if (blockId == BObsidian.Id || blockId == BObsidianPillar.Id) return 5; // Алмазная кирка
         return 0;
     }
@@ -527,12 +634,12 @@ public static class GameData {
     public static float GetBlockHardness(BlockType b) {
         if (b.Id == BTorch.Id) return 0.2f;
         if (b.Id == BBed.Id || b.Id == BBedHead.Id) return 0.2f;
-        if (b.Id == BWheatCrop.Id) return 0.0f;
-        if (b.Id == BTallGrass.Id) return 0.0f;
+        if (b.Id == BWheatCrop.Id || b.Id == BCarrotCrop.Id || b.Id == BPotatoCrop.Id) return 0.0f;
+        if (b.Id == BTallGrass.Id || b.Id == BSapling.Id || b.Id == BRedFlower.Id || b.Id == BYellowFlower.Id) return 0.0f;
         if (b.Id == BFarmland.Id) return 0.6f;
         if (b.Id == BCoalOre.Id) return 3.0f;
         if (b.Id == BIronOre.Id || b.Id == BGoldOre.Id) return 3.0f;
-        if (b.Id == BDiamondOre.Id || b.Id == BRedstoneOre.Id) return 3.0f;
+        if (b.Id == BDiamondOre.Id) return 3.0f;
         if (b.Id == BObsidian.Id || b.Id == BObsidianPillar.Id) return 50.0f;
         if (b.Id == BEndStone.Id || b.Id == BEndPortalFrame.Id) return 3.0f;
         if (b.Id == BEnderCrystal.Id) return 0.5f;
@@ -614,7 +721,7 @@ public static class GameData {
             WoodSwordItem, StoneSwordItem, IronSwordItem,
             WoodShovelItem, StoneShovelItem, IronShovelItem,
             WorkbenchItem, FurnaceItem, BreadItem,
-            GoldOreItem, GoldIngotItem, DiamondItem, DiamondOreItem, RedstoneItem,
+            GoldOreItem, GoldIngotItem, DiamondItem, DiamondOreItem,
             SandItem, GravelItem, CobblestoneItem, GlassItem, ObsidianItem,
             DiamondPickaxeItem, DiamondAxeItem, DiamondSwordItem, DiamondShovelItem,
             FeatherItem, GunpowderItem, StringItem, ArrowItem, BoneItem,
@@ -632,7 +739,12 @@ public static class GameData {
             ChiseledSandstoneItem, RailItem, BucketItem, WaterBucketItem, LavaBucketItem, DoorItem,
             EnderPearlItem, EyeOfEnderItem, BlazePowderItem, ChorusFruitItem, EndSlimeItem,
             EndStoneItem, EndPortalFrameItem, EnderCrystalItem,
-            NetherArtifactItem, SwampArtifactItem, DesertArtifactItem, VoidKeyItem }) {
+            NetherArtifactItem, SwampArtifactItem, DesertArtifactItem, VoidKeyItem,
+            NetherTotemItem, DesertTotemItem, SwampTotemItem,
+            LeatherHelmetItem, LeatherChestplateItem, LeatherLeggingsItem, LeatherBootsItem,
+            IronHelmetItem, IronChestplateItem, IronLeggingsItem, IronBootsItem,
+            DiamondHelmetItem, DiamondChestplateItem, DiamondLeggingsItem, DiamondBootsItem,
+            OakSaplingItem, RedFlowerItem, YellowFlowerItem, CarrotItem, PotatoItem, BakedPotatoItem }) {
             Items.Add(item.Id, item);
         }
 
@@ -718,223 +830,649 @@ public static class GameData {
         return true;
     }
 
+    public static void RegisterRecipe(string name, ItemDefinition output, int count,
+                                      (ItemDefinition Item, int Count)[] ingredients,
+                                      ItemDefinition?[] shape, bool needs3x3, CraftCategory category,
+                                      bool isSmelt = false) {
+        var recipe = new CraftRecipe(name, output, count, ingredients, shape, needs3x3, category, isSmelt);
+        CraftRecipes.Add(recipe);
+        if (!isSmelt && shape != null) {
+            AddShapeRecipe(shape, output, count);
+        }
+    }
+
     private static void InitShapeRecipes() {
-        AddShapeRecipe(new ItemDefinition?[] {
-            IronIngotItem, null, IronIngotItem,
-            null, IronIngotItem, null,
-            null, null, null
-        }, BucketItem, 1);
-        // Бревно → доски (1 бревно в любой ячейке)
-        AddShapeRecipe(new ItemDefinition?[] { LogItem,null,null, null,null,null, null,null,null }, PlankItem, 4);
+        CraftRecipes.Clear();
+        ShapeRecipes.Clear();
 
-        // Доски → палки (2 доски вертикально)
-        AddShapeRecipe(new ItemDefinition?[] { null,PlankItem,null, null,PlankItem,null, null,null,null }, StickItem, 4);
-        AddShapeRecipe(new ItemDefinition?[] { PlankItem,null,null, PlankItem,null,null, null,null,null }, StickItem, 4);
-        AddShapeRecipe(new ItemDefinition?[] { null,null,PlankItem, null,null,PlankItem, null,null,null }, StickItem, 4);
+        // ── Блоки и базовые ресурсы (2×2 и 3×3) ──────────────────────────────
+        RegisterRecipe("Доски (4 шт)", PlankItem, 4,
+            new[] { (LogItem, 1) },
+            new ItemDefinition?[] { LogItem, null, null, null, null, null, null, null, null },
+            false, CraftCategory.Blocks);
 
-        // Факел: уголь над палкой
-        AddShapeRecipe(new ItemDefinition?[] { null,CoalItem,null, null,StickItem,null, null,null,null }, TorchItem, 4);
-        AddShapeRecipe(new ItemDefinition?[] { CoalItem,null,null, StickItem,null,null, null,null,null }, TorchItem, 4);
+        RegisterRecipe("Палки (4 шт)", StickItem, 4,
+            new[] { (PlankItem, 2) },
+            new ItemDefinition?[] { PlankItem, null, null, PlankItem, null, null, null, null, null },
+            false, CraftCategory.Materials);
+        AddShapeRecipe(new ItemDefinition?[] { null, PlankItem, null, null, PlankItem, null, null, null, null }, StickItem, 4);
+        AddShapeRecipe(new ItemDefinition?[] { null, null, PlankItem, null, null, PlankItem, null, null, null }, StickItem, 4);
 
-        // Верстак: 2×2 доски
-        AddShapeRecipe(new ItemDefinition?[] { PlankItem,PlankItem,null, PlankItem,PlankItem,null, null,null,null }, WorkbenchItem, 1);
+        RegisterRecipe("Факелы (4 шт)", TorchItem, 4,
+            new[] { (CoalItem, 1), (StickItem, 1) },
+            new ItemDefinition?[] { CoalItem, null, null, StickItem, null, null, null, null, null },
+            false, CraftCategory.Blocks);
+        AddShapeRecipe(new ItemDefinition?[] { null, CoalItem, null, null, StickItem, null, null, null, null }, TorchItem, 4);
 
-        // Печка: 8 булыжников вокруг пустого центра
-        AddShapeRecipe(new ItemDefinition?[] { CobblestoneItem,CobblestoneItem,CobblestoneItem, CobblestoneItem,null,CobblestoneItem, CobblestoneItem,CobblestoneItem,CobblestoneItem }, FurnaceItem, 1);
+        RegisterRecipe("Факелы (4 шт, др. уголь)", TorchItem, 4,
+            new[] { (CharcoalItem, 1), (StickItem, 1) },
+            new ItemDefinition?[] { CharcoalItem, null, null, StickItem, null, null, null, null, null },
+            false, CraftCategory.Blocks);
+        AddShapeRecipe(new ItemDefinition?[] { null, CharcoalItem, null, null, StickItem, null, null, null, null }, TorchItem, 4);
 
-        // Кирки
-        AddShapeRecipe(new ItemDefinition?[] { PlankItem,PlankItem,PlankItem, null,StickItem,null, null,StickItem,null }, WoodPickaxeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { CobblestoneItem,CobblestoneItem,CobblestoneItem, null,StickItem,null, null,StickItem,null }, StonePickaxeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { IronIngotItem,IronIngotItem,IronIngotItem, null,StickItem,null, null,StickItem,null }, IronPickaxeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { GoldIngotItem,GoldIngotItem,GoldIngotItem, null,StickItem,null, null,StickItem,null }, GoldPickaxeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { DiamondItem,DiamondItem,DiamondItem, null,StickItem,null, null,StickItem,null }, DiamondPickaxeItem, 1);
+        RegisterRecipe("Верстак", WorkbenchItem, 1,
+            new[] { (PlankItem, 4) },
+            new ItemDefinition?[] { PlankItem, PlankItem, null, PlankItem, PlankItem, null, null, null, null },
+            false, CraftCategory.Blocks);
 
-        // Топоры (левые и правые)
-        AddShapeRecipe(new ItemDefinition?[] { PlankItem,PlankItem,null, PlankItem,StickItem,null, null,StickItem,null }, WoodAxeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,PlankItem,PlankItem, null,StickItem,PlankItem, null,StickItem,null }, WoodAxeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { CobblestoneItem,CobblestoneItem,null, CobblestoneItem,StickItem,null, null,StickItem,null }, StoneAxeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,CobblestoneItem,CobblestoneItem, null,StickItem,CobblestoneItem, null,StickItem,null }, StoneAxeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { IronIngotItem,IronIngotItem,null, IronIngotItem,StickItem,null, null,StickItem,null }, IronAxeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,IronIngotItem,IronIngotItem, null,StickItem,IronIngotItem, null,StickItem,null }, IronAxeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { GoldIngotItem,GoldIngotItem,null, GoldIngotItem,StickItem,null, null,StickItem,null }, GoldAxeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,GoldIngotItem,GoldIngotItem, null,StickItem,GoldIngotItem, null,StickItem,null }, GoldAxeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { DiamondItem,DiamondItem,null, DiamondItem,StickItem,null, null,StickItem,null }, DiamondAxeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,DiamondItem,DiamondItem, null,StickItem,DiamondItem, null,StickItem,null }, DiamondAxeItem, 1);
+        RegisterRecipe("Шерсть", WhiteWoolItem, 1,
+            new[] { (StringItem, 4) },
+            new ItemDefinition?[] { StringItem, StringItem, null, StringItem, StringItem, null, null, null, null },
+            false, CraftCategory.Blocks);
 
-        // Мечи
-        AddShapeRecipe(new ItemDefinition?[] { null,PlankItem,null, null,PlankItem,null, null,StickItem,null }, WoodSwordItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,CobblestoneItem,null, null,CobblestoneItem,null, null,StickItem,null }, StoneSwordItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,IronIngotItem,null, null,IronIngotItem,null, null,StickItem,null }, IronSwordItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,GoldIngotItem,null, null,GoldIngotItem,null, null,StickItem,null }, GoldSwordItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,DiamondItem,null, null,DiamondItem,null, null,StickItem,null }, DiamondSwordItem, 1);
+        RegisterRecipe("Светокамень", GlowstoneItem, 1,
+            new[] { (GlowstoneDustItem, 4) },
+            new ItemDefinition?[] { GlowstoneDustItem, GlowstoneDustItem, null, GlowstoneDustItem, GlowstoneDustItem, null, null, null, null },
+            false, CraftCategory.Blocks);
 
-        // Лопаты
-        AddShapeRecipe(new ItemDefinition?[] { null,PlankItem,null, null,StickItem,null, null,StickItem,null }, WoodShovelItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,CobblestoneItem,null, null,StickItem,null, null,StickItem,null }, StoneShovelItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,IronIngotItem,null, null,StickItem,null, null,StickItem,null }, IronShovelItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,GoldIngotItem,null, null,StickItem,null, null,StickItem,null }, GoldShovelItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,DiamondItem,null, null,StickItem,null, null,StickItem,null }, DiamondShovelItem, 1);
+        RegisterRecipe("Костная мука (3 шт)", BoneMealItem, 3,
+            new[] { (BoneItem, 1) },
+            new ItemDefinition?[] { BoneItem, null, null, null, null, null, null, null, null },
+            false, CraftCategory.Materials);
 
-        // Факел из древесного угля
-        AddShapeRecipe(new ItemDefinition?[] { null,CharcoalItem,null, null,StickItem,null, null,null,null }, TorchItem, 4);
-        AddShapeRecipe(new ItemDefinition?[] { CharcoalItem,null,null, StickItem,null,null, null,null,null }, TorchItem, 4);
+        RegisterRecipe("Порох ифрита (2 шт)", BlazePowderItem, 2,
+            new[] { (BlazeRodItem, 1) },
+            new ItemDefinition?[] { BlazeRodItem, null, null, null, null, null, null, null, null },
+            false, CraftCategory.Materials);
 
-        // Шерсть из нитей (2×2 нити)
-        AddShapeRecipe(new ItemDefinition?[] { StringItem,StringItem,null, StringItem,StringItem,null, null,null,null }, WhiteWoolItem, 1);
+        RegisterRecipe("Око Эндера", EyeOfEnderItem, 1,
+            new[] { (BlazePowderItem, 1), (EnderPearlItem, 1) },
+            new ItemDefinition?[] { BlazePowderItem, EnderPearlItem, null, null, null, null, null, null, null },
+            false, CraftCategory.Materials);
+        AddShapeRecipe(new ItemDefinition?[] { EnderPearlItem, BlazePowderItem, null, null, null, null, null, null, null }, EyeOfEnderItem, 1);
 
-        // Мотыги
-        AddShapeRecipe(new ItemDefinition?[] { PlankItem,PlankItem,null, null,StickItem,null, null,StickItem,null }, WoodHoeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,PlankItem,PlankItem, null,StickItem,null, null,StickItem,null }, WoodHoeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { CobblestoneItem,CobblestoneItem,null, null,StickItem,null, null,StickItem,null }, StoneHoeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,CobblestoneItem,CobblestoneItem, null,StickItem,null, null,StickItem,null }, StoneHoeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { IronIngotItem,IronIngotItem,null, null,StickItem,null, null,StickItem,null }, IronHoeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,IronIngotItem,IronIngotItem, null,StickItem,null, null,StickItem,null }, IronHoeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { GoldIngotItem,GoldIngotItem,null, null,StickItem,null, null,StickItem,null }, GoldHoeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,GoldIngotItem,GoldIngotItem, null,StickItem,null, null,StickItem,null }, GoldHoeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { DiamondItem,DiamondItem,null, null,StickItem,null, null,StickItem,null }, DiamondHoeItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null,DiamondItem,DiamondItem, null,StickItem,null, null,StickItem,null }, DiamondHoeItem, 1);
+        RegisterRecipe("Опилки (4 шт)", SawdustItem, 4,
+            new[] { (PlankItem, 2) },
+            new ItemDefinition?[] { PlankItem, PlankItem, null, null, null, null, null, null, null },
+            false, CraftCategory.Materials);
 
-        // Хлеб (3 пшеницы в ряд)
-        AddShapeRecipe(new ItemDefinition?[] { WheatItem,WheatItem,WheatItem, null,null,null, null,null,null }, BreadItem, 1);
+        RegisterRecipe("Каша из опилок", SawdustPorridgeItem, 1,
+            new[] { (SawdustItem, 2), (PlankItem, 1), (WheatSeedsItem, 1) },
+            new ItemDefinition?[] { SawdustItem, SawdustItem, null, PlankItem, WheatSeedsItem, null, null, null, null },
+            false, CraftCategory.Food);
 
-        // Кровать: 3 шерсти в верхнем ряду + 3 доски во втором ряду
-        AddShapeRecipe(new ItemDefinition?[] { WhiteWoolItem,WhiteWoolItem,WhiteWoolItem, PlankItem,PlankItem,PlankItem, null,null,null }, BedItem, 1);
-
-        // Сундук: 8 досок по периметру 3×3 (центр пустой)
-        AddShapeRecipe(new ItemDefinition?[] { PlankItem,PlankItem,PlankItem, PlankItem,null,PlankItem, PlankItem,PlankItem,PlankItem }, ChestItem, 1);
-
-        // Костная мука: 1 кость -> 3 костной муки
-        AddShapeRecipe(new ItemDefinition?[] { BoneItem,null,null, null,null,null, null,null,null }, BoneMealItem, 3);
-
-        // Лук (Bow): 3 палки + 3 нити
-        AddShapeRecipe(new ItemDefinition?[] {
-            null,      StickItem, StringItem,
-            StickItem, null,      StringItem,
-            null,      StickItem, StringItem
-        }, BowItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] {
-            StringItem, StickItem, null,
-            StringItem, null,      StickItem,
-            StringItem, StickItem, null
-        }, BowItem, 1);
-
-        // Щит (Shield): 6 досок + 1 слиток железа
-        AddShapeRecipe(new ItemDefinition?[] {
-            PlankItem, IronIngotItem, PlankItem,
-            PlankItem, PlankItem,     PlankItem,
-            null,      PlankItem,     null
-        }, ShieldItem, 1);
-
-        // Огниво (Flint and Steel): 1 железо + 1 кремень (во всех комбинациях)
-        AddShapeRecipe(new ItemDefinition?[] { IronIngotItem, null, null, null, FlintItem, null, null, null, null }, FlintAndSteelItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null, IronIngotItem, null, FlintItem, null, null, null, null, null }, FlintAndSteelItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { FlintItem, null, null, null, IronIngotItem, null, null, null, null }, FlintAndSteelItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null, FlintItem, null, IronIngotItem, null, null, null, null, null }, FlintAndSteelItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { IronIngotItem, FlintItem, null, null, null, null, null, null, null }, FlintAndSteelItem, 1);
+        RegisterRecipe("Огниво", FlintAndSteelItem, 1,
+            new[] { (IronIngotItem, 1), (FlintItem, 1) },
+            new ItemDefinition?[] { IronIngotItem, FlintItem, null, null, null, null, null, null, null },
+            false, CraftCategory.Tools);
         AddShapeRecipe(new ItemDefinition?[] { FlintItem, IronIngotItem, null, null, null, null, null, null, null }, FlintAndSteelItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { IronIngotItem, null, null, FlintItem, null, null, null, null, null }, FlintAndSteelItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { FlintItem, null, null, IronIngotItem, null, null, null, null, null }, FlintAndSteelItem, 1);
+        AddShapeRecipe(new ItemDefinition?[] { IronIngotItem, null, null, null, FlintItem, null, null, null, null }, FlintAndSteelItem, 1);
 
-        // Динамит (TNT): 5 пороха + 4 песка (крест-накрест)
-        AddShapeRecipe(new ItemDefinition?[] {
-            GunpowderItem, SandItem,      GunpowderItem,
-            SandItem,      GunpowderItem, SandItem,
-            GunpowderItem, SandItem,      GunpowderItem
-        }, TNTItem, 1);
+        RegisterRecipe("Сундук", ChestItem, 1,
+            new[] { (PlankItem, 8) },
+            new ItemDefinition?[] {
+                PlankItem, PlankItem, PlankItem,
+                PlankItem, null,      PlankItem,
+                PlankItem, PlankItem, PlankItem
+            },
+            true, CraftCategory.Blocks);
 
-        // Золотое яблоко: яблоко + 8 золотых слитков
-        AddShapeRecipe(new ItemDefinition?[] {
-            GoldIngotItem, GoldIngotItem, GoldIngotItem,
-            GoldIngotItem, AppleItem,     GoldIngotItem,
-            GoldIngotItem, GoldIngotItem, GoldIngotItem
-        }, GoldenAppleItem, 1);
+        RegisterRecipe("Печка", FurnaceItem, 1,
+            new[] { (CobblestoneItem, 8) },
+            new ItemDefinition?[] {
+                CobblestoneItem, CobblestoneItem, CobblestoneItem,
+                CobblestoneItem, null,            CobblestoneItem,
+                CobblestoneItem, CobblestoneItem, CobblestoneItem
+            },
+            true, CraftCategory.Blocks);
 
-        // Блок светокамня: 4 светопыли 2×2
-        AddShapeRecipe(new ItemDefinition?[] {
-            GlowstoneDustItem, GlowstoneDustItem, null,
-            GlowstoneDustItem, GlowstoneDustItem, null,
-            null,              null,              null
-        }, GlowstoneItem, 1);
+        RegisterRecipe("Кровать", BedItem, 1,
+            new[] { (WhiteWoolItem, 3), (PlankItem, 3) },
+            new ItemDefinition?[] {
+                WhiteWoolItem, WhiteWoolItem, WhiteWoolItem,
+                PlankItem,     PlankItem,     PlankItem,
+                null,          null,          null
+            },
+            true, CraftCategory.Blocks);
 
-        // Рельсы: 6 железа + 1 палка
-        AddShapeRecipe(new ItemDefinition?[] {
-            IronIngotItem, null,      IronIngotItem,
-            IronIngotItem, StickItem, IronIngotItem,
-            IronIngotItem, null,      IronIngotItem
-        }, RailItem, 16);
+        RegisterRecipe("Хлеб", BreadItem, 1,
+            new[] { (WheatItem, 3) },
+            new ItemDefinition?[] {
+                WheatItem, WheatItem, WheatItem,
+                null,      null,      null,
+                null,      null,      null
+            },
+            true, CraftCategory.Food);
 
-        // Деревянная дверь: 6 досок (2 вертикальные колонки)
-        AddShapeRecipe(new ItemDefinition?[] {
-            PlankItem, PlankItem, null,
-            PlankItem, PlankItem, null,
-            PlankItem, PlankItem, null
-        }, DoorItem, 3);
+        RegisterRecipe("Золотое яблоко", GoldenAppleItem, 1,
+            new[] { (GoldIngotItem, 8), (AppleItem, 1) },
+            new ItemDefinition?[] {
+                GoldIngotItem, GoldIngotItem, GoldIngotItem,
+                GoldIngotItem, AppleItem,     GoldIngotItem,
+                GoldIngotItem, GoldIngotItem, GoldIngotItem
+            },
+            true, CraftCategory.Food);
+
+        RegisterRecipe("Динамит (TNT)", TNTItem, 1,
+            new[] { (GunpowderItem, 5), (SandItem, 4) },
+            new ItemDefinition?[] {
+                GunpowderItem, SandItem,      GunpowderItem,
+                SandItem,      GunpowderItem, SandItem,
+                GunpowderItem, SandItem,      GunpowderItem
+            },
+            true, CraftCategory.Blocks);
+
+        RegisterRecipe("Рельсы (16 шт)", RailItem, 16,
+            new[] { (IronIngotItem, 6), (StickItem, 1) },
+            new ItemDefinition?[] {
+                IronIngotItem, null,      IronIngotItem,
+                IronIngotItem, StickItem, IronIngotItem,
+                IronIngotItem, null,      IronIngotItem
+            },
+            true, CraftCategory.Blocks);
+
+        RegisterRecipe("Деревянная дверь (3 шт)", DoorItem, 3,
+            new[] { (PlankItem, 6) },
+            new ItemDefinition?[] {
+                PlankItem, PlankItem, null,
+                PlankItem, PlankItem, null,
+                PlankItem, PlankItem, null
+            },
+            true, CraftCategory.Blocks);
         AddShapeRecipe(new ItemDefinition?[] {
             null, PlankItem, PlankItem,
             null, PlankItem, PlankItem,
             null, PlankItem, PlankItem
         }, DoorItem, 3);
 
-        // Стержень ифрита → 2 пороха ифрита
-        AddShapeRecipe(new ItemDefinition?[] { BlazeRodItem, null, null, null, null, null, null, null, null }, BlazePowderItem, 2);
-        AddShapeRecipe(new ItemDefinition?[] { null, BlazeRodItem, null, null, null, null, null, null, null }, BlazePowderItem, 2);
-        AddShapeRecipe(new ItemDefinition?[] { null, null, null, BlazeRodItem, null, null, null, null, null }, BlazePowderItem, 2);
+        RegisterRecipe("Ведро", BucketItem, 1,
+            new[] { (IronIngotItem, 3) },
+            new ItemDefinition?[] {
+                IronIngotItem, null,          IronIngotItem,
+                null,          IronIngotItem, null,
+                null,          null,          null
+            },
+            true, CraftCategory.Tools);
 
-        // Око Эндера: порох ифрита + жемчуг Эндера
-        AddShapeRecipe(new ItemDefinition?[] { BlazePowderItem, null, null, EnderPearlItem, null, null, null, null, null }, EyeOfEnderItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null, BlazePowderItem, null, null, EnderPearlItem, null, null, null, null }, EyeOfEnderItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { EnderPearlItem, null, null, BlazePowderItem, null, null, null, null, null }, EyeOfEnderItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] { null, EnderPearlItem, null, null, BlazePowderItem, null, null, null, null }, EyeOfEnderItem, 1);
+        // ── Инструменты: Кирки ───────────────────────────────────────────────
+        RegisterRecipe("Деревянная кирка", WoodPickaxeItem, 1,
+            new[] { (PlankItem, 3), (StickItem, 2) },
+            new ItemDefinition?[] {
+                PlankItem, PlankItem, PlankItem,
+                null,      StickItem, null,
+                null,      StickItem, null
+            },
+            true, CraftCategory.Tools);
 
-        // Древесные опилки: 2 доски -> 4 опилок; 1 доска + 1 палка -> 2 опилок
-        AddShapeRecipe(new ItemDefinition?[] { PlankItem, PlankItem, null, null, null, null, null, null, null }, SawdustItem, 4);
-        AddShapeRecipe(new ItemDefinition?[] { PlankItem, null, null, StickItem, null, null, null, null, null }, SawdustItem, 2);
+        RegisterRecipe("Каменная кирка", StonePickaxeItem, 1,
+            new[] { (CobblestoneItem, 3), (StickItem, 2) },
+            new ItemDefinition?[] {
+                CobblestoneItem, CobblestoneItem, CobblestoneItem,
+                null,            StickItem,       null,
+                null,            StickItem,       null
+            },
+            true, CraftCategory.Tools);
 
-        // Каша из опилок: 2 опилки + 1 доска + 1 семена пшеницы
-        AddShapeRecipe(new ItemDefinition?[] { SawdustItem, SawdustItem, null, PlankItem, WheatSeedsItem, null, null, null, null }, SawdustPorridgeItem, 1);
+        RegisterRecipe("Железная кирка", IronPickaxeItem, 1,
+            new[] { (IronIngotItem, 3), (StickItem, 2) },
+            new ItemDefinition?[] {
+                IronIngotItem, IronIngotItem, IronIngotItem,
+                null,          StickItem,     null,
+                null,          StickItem,     null
+            },
+            true, CraftCategory.Tools);
 
-        // Тотем Пламени (призыв Владыки Незера в Аду): 2 стержня ифрита + 1 уголь + 1 золото
+        RegisterRecipe("Золотая кирка", GoldPickaxeItem, 1,
+            new[] { (GoldIngotItem, 3), (StickItem, 2) },
+            new ItemDefinition?[] {
+                GoldIngotItem, GoldIngotItem, GoldIngotItem,
+                null,          StickItem,     null,
+                null,          StickItem,     null
+            },
+            true, CraftCategory.Tools);
+
+        RegisterRecipe("Алмазная кирка", DiamondPickaxeItem, 1,
+            new[] { (DiamondItem, 3), (StickItem, 2) },
+            new ItemDefinition?[] {
+                DiamondItem, DiamondItem, DiamondItem,
+                null,        StickItem,   null,
+                null,        StickItem,   null
+            },
+            true, CraftCategory.Tools);
+
+        // ── Топоры ───────────────────────────────────────────────────────────
+        RegisterRecipe("Деревянный топор", WoodAxeItem, 1,
+            new[] { (PlankItem, 3), (StickItem, 2) },
+            new ItemDefinition?[] {
+                PlankItem, PlankItem, null,
+                PlankItem, StickItem, null,
+                null,      StickItem, null
+            },
+            true, CraftCategory.Tools);
         AddShapeRecipe(new ItemDefinition?[] {
-            BlazeRodItem, GoldIngotItem, null,
-            CoalItem, BlazeRodItem, null,
-            null, null, null
-        }, NetherTotemItem, 1);
+            null, PlankItem, PlankItem,
+            null, StickItem, PlankItem,
+            null, StickItem, null
+        }, WoodAxeItem, 1);
+
+        RegisterRecipe("Каменный топор", StoneAxeItem, 1,
+            new[] { (CobblestoneItem, 3), (StickItem, 2) },
+            new ItemDefinition?[] {
+                CobblestoneItem, CobblestoneItem, null,
+                CobblestoneItem, StickItem,       null,
+                null,            StickItem,       null
+            },
+            true, CraftCategory.Tools);
+        AddShapeRecipe(new ItemDefinition?[] {
+            null, CobblestoneItem, CobblestoneItem,
+            null, StickItem,       CobblestoneItem,
+            null, StickItem,       null
+        }, StoneAxeItem, 1);
+
+        RegisterRecipe("Железный топор", IronAxeItem, 1,
+            new[] { (IronIngotItem, 3), (StickItem, 2) },
+            new ItemDefinition?[] {
+                IronIngotItem, IronIngotItem, null,
+                IronIngotItem, StickItem,     null,
+                null,          StickItem,     null
+            },
+            true, CraftCategory.Tools);
+        AddShapeRecipe(new ItemDefinition?[] {
+            null, IronIngotItem, IronIngotItem,
+            null, StickItem,     IronIngotItem,
+            null, StickItem,     null
+        }, IronAxeItem, 1);
+
+        RegisterRecipe("Золотой топор", GoldAxeItem, 1,
+            new[] { (GoldIngotItem, 3), (StickItem, 2) },
+            new ItemDefinition?[] {
+                GoldIngotItem, GoldIngotItem, null,
+                GoldIngotItem, StickItem,     null,
+                null,          StickItem,     null
+            },
+            true, CraftCategory.Tools);
+        AddShapeRecipe(new ItemDefinition?[] {
+            null, GoldIngotItem, GoldIngotItem,
+            null, StickItem,     GoldIngotItem,
+            null, StickItem,     null
+        }, GoldAxeItem, 1);
+
+        RegisterRecipe("Алмазный топор", DiamondAxeItem, 1,
+            new[] { (DiamondItem, 3), (StickItem, 2) },
+            new ItemDefinition?[] {
+                DiamondItem, DiamondItem, null,
+                DiamondItem, StickItem,   null,
+                null,        StickItem,   null
+            },
+            true, CraftCategory.Tools);
+        AddShapeRecipe(new ItemDefinition?[] {
+            null, DiamondItem, DiamondItem,
+            null, StickItem,   DiamondItem,
+            null, StickItem,   null
+        }, DiamondAxeItem, 1);
+
+        // ── Мечи ─────────────────────────────────────────────────────────────
+        RegisterRecipe("Деревянный меч", WoodSwordItem, 1,
+            new[] { (PlankItem, 2), (StickItem, 1) },
+            new ItemDefinition?[] {
+                null, PlankItem, null,
+                null, PlankItem, null,
+                null, StickItem, null
+            },
+            true, CraftCategory.Weapons);
+
+        RegisterRecipe("Каменный меч", StoneSwordItem, 1,
+            new[] { (CobblestoneItem, 2), (StickItem, 1) },
+            new ItemDefinition?[] {
+                null, CobblestoneItem, null,
+                null, CobblestoneItem, null,
+                null, StickItem,       null
+            },
+            true, CraftCategory.Weapons);
+
+        RegisterRecipe("Железный меч", IronSwordItem, 1,
+            new[] { (IronIngotItem, 2), (StickItem, 1) },
+            new ItemDefinition?[] {
+                null, IronIngotItem, null,
+                null, IronIngotItem, null,
+                null, StickItem,     null
+            },
+            true, CraftCategory.Weapons);
+
+        RegisterRecipe("Золотой меч", GoldSwordItem, 1,
+            new[] { (GoldIngotItem, 2), (StickItem, 1) },
+            new ItemDefinition?[] {
+                null, GoldIngotItem, null,
+                null, GoldIngotItem, null,
+                null, StickItem,     null
+            },
+            true, CraftCategory.Weapons);
+
+        RegisterRecipe("Алмазный меч", DiamondSwordItem, 1,
+            new[] { (DiamondItem, 2), (StickItem, 1) },
+            new ItemDefinition?[] {
+                null, DiamondItem, null,
+                null, DiamondItem, null,
+                null, StickItem,   null
+            },
+            true, CraftCategory.Weapons);
+
+        // ── Лопаты ───────────────────────────────────────────────────────────
+        RegisterRecipe("Деревянная лопата", WoodShovelItem, 1,
+            new[] { (PlankItem, 1), (StickItem, 2) },
+            new ItemDefinition?[] {
+                null, PlankItem, null,
+                null, StickItem, null,
+                null, StickItem, null
+            },
+            true, CraftCategory.Tools);
+
+        RegisterRecipe("Каменная лопата", StoneShovelItem, 1,
+            new[] { (CobblestoneItem, 1), (StickItem, 2) },
+            new ItemDefinition?[] {
+                null, CobblestoneItem, null,
+                null, StickItem,       null,
+                null, StickItem,       null
+            },
+            true, CraftCategory.Tools);
+
+        RegisterRecipe("Железная лопата", IronShovelItem, 1,
+            new[] { (IronIngotItem, 1), (StickItem, 2) },
+            new ItemDefinition?[] {
+                null, IronIngotItem, null,
+                null, StickItem,     null,
+                null, StickItem,     null
+            },
+            true, CraftCategory.Tools);
+
+        RegisterRecipe("Золотая лопата", GoldShovelItem, 1,
+            new[] { (GoldIngotItem, 1), (StickItem, 2) },
+            new ItemDefinition?[] {
+                null, GoldIngotItem, null,
+                null, StickItem,     null,
+                null, StickItem,     null
+            },
+            true, CraftCategory.Tools);
+
+        RegisterRecipe("Алмазная лопата", DiamondShovelItem, 1,
+            new[] { (DiamondItem, 1), (StickItem, 2) },
+            new ItemDefinition?[] {
+                null, DiamondItem, null,
+                null, StickItem,   null,
+                null, StickItem,   null
+            },
+            true, CraftCategory.Tools);
+
+        // ── Мотыги ───────────────────────────────────────────────────────────
+        RegisterRecipe("Деревянная мотыга", WoodHoeItem, 1,
+            new[] { (PlankItem, 2), (StickItem, 2) },
+            new ItemDefinition?[] {
+                PlankItem, PlankItem, null,
+                null,      StickItem, null,
+                null,      StickItem, null
+            },
+            true, CraftCategory.Tools);
+        AddShapeRecipe(new ItemDefinition?[] {
+            null, PlankItem, PlankItem,
+            null, StickItem, null,
+            null, StickItem, null
+        }, WoodHoeItem, 1);
+
+        RegisterRecipe("Каменная мотыга", StoneHoeItem, 1,
+            new[] { (CobblestoneItem, 2), (StickItem, 2) },
+            new ItemDefinition?[] {
+                CobblestoneItem, CobblestoneItem, null,
+                null,            StickItem,       null,
+                null,            StickItem,       null
+            },
+            true, CraftCategory.Tools);
+
+        RegisterRecipe("Железная мотыга", IronHoeItem, 1,
+            new[] { (IronIngotItem, 2), (StickItem, 2) },
+            new ItemDefinition?[] {
+                IronIngotItem, IronIngotItem, null,
+                null,          StickItem,     null,
+                null,          StickItem,     null
+            },
+            true, CraftCategory.Tools);
+
+        RegisterRecipe("Золотая мотыга", GoldHoeItem, 1,
+            new[] { (GoldIngotItem, 2), (StickItem, 2) },
+            new ItemDefinition?[] {
+                GoldIngotItem, GoldIngotItem, null,
+                null,          StickItem,     null,
+                null,          StickItem,     null
+            },
+            true, CraftCategory.Tools);
+
+        RegisterRecipe("Алмазная мотыга", DiamondHoeItem, 1,
+            new[] { (DiamondItem, 2), (StickItem, 2) },
+            new ItemDefinition?[] {
+                DiamondItem, DiamondItem, null,
+                null,        StickItem,   null,
+                null,        StickItem,   null
+            },
+            true, CraftCategory.Tools);
+
+        // ── Оружие и защита ───────────────────────────────────────────────────
+        RegisterRecipe("Лук", BowItem, 1,
+            new[] { (StickItem, 3), (StringItem, 3) },
+            new ItemDefinition?[] {
+                null,      StickItem, StringItem,
+                StickItem, null,      StringItem,
+                null,      StickItem, StringItem
+            },
+            true, CraftCategory.Weapons);
+        AddShapeRecipe(new ItemDefinition?[] {
+            StringItem, StickItem, null,
+            StringItem, null,      StickItem,
+            StringItem, StickItem, null
+        }, BowItem, 1);
+
+        RegisterRecipe("Стрелы (4 шт)", ArrowItem, 4,
+            new[] { (FlintItem, 1), (StickItem, 1), (FeatherItem, 1) },
+            new ItemDefinition?[] {
+                null, FlintItem,   null,
+                null, StickItem,   null,
+                null, FeatherItem, null
+            },
+            true, CraftCategory.Weapons);
+        AddShapeRecipe(new ItemDefinition?[] {
+            FlintItem, null, null,
+            StickItem, null, null,
+            FeatherItem, null, null
+        }, ArrowItem, 4);
+
+        RegisterRecipe("Щит", ShieldItem, 1,
+            new[] { (PlankItem, 6), (IronIngotItem, 1) },
+            new ItemDefinition?[] {
+                PlankItem, IronIngotItem, PlankItem,
+                PlankItem, PlankItem,     PlankItem,
+                null,      PlankItem,     null
+            },
+            true, CraftCategory.Weapons);
+
+        // ── Доспехи: Кожаные ─────────────────────────────────────────────────
+        RegisterRecipe("Кожаный шлем", LeatherHelmetItem, 1,
+            new[] { (LeatherItem, 5) },
+            new ItemDefinition?[] {
+                LeatherItem, LeatherItem, LeatherItem,
+                LeatherItem, null,        LeatherItem,
+                null,        null,        null
+            },
+            true, CraftCategory.Armor);
+
+        RegisterRecipe("Кожаный нагрудник", LeatherChestplateItem, 1,
+            new[] { (LeatherItem, 8) },
+            new ItemDefinition?[] {
+                LeatherItem, null,        LeatherItem,
+                LeatherItem, LeatherItem, LeatherItem,
+                LeatherItem, LeatherItem, LeatherItem
+            },
+            true, CraftCategory.Armor);
+
+        RegisterRecipe("Кожаные поножи", LeatherLeggingsItem, 1,
+            new[] { (LeatherItem, 7) },
+            new ItemDefinition?[] {
+                LeatherItem, LeatherItem, LeatherItem,
+                LeatherItem, null,        LeatherItem,
+                LeatherItem, null,        LeatherItem
+            },
+            true, CraftCategory.Armor);
+
+        RegisterRecipe("Кожаные ботинки", LeatherBootsItem, 1,
+            new[] { (LeatherItem, 4) },
+            new ItemDefinition?[] {
+                LeatherItem, null,        LeatherItem,
+                LeatherItem, null,        LeatherItem,
+                null,        null,        null
+            },
+            true, CraftCategory.Armor);
+
+        // ── Доспехи: Железные ────────────────────────────────────────────────
+        RegisterRecipe("Железный шлем", IronHelmetItem, 1,
+            new[] { (IronIngotItem, 5) },
+            new ItemDefinition?[] {
+                IronIngotItem, IronIngotItem, IronIngotItem,
+                IronIngotItem, null,          IronIngotItem,
+                null,          null,          null
+            },
+            true, CraftCategory.Armor);
+
+        RegisterRecipe("Железный нагрудник", IronChestplateItem, 1,
+            new[] { (IronIngotItem, 8) },
+            new ItemDefinition?[] {
+                IronIngotItem, null,          IronIngotItem,
+                IronIngotItem, IronIngotItem, IronIngotItem,
+                IronIngotItem, IronIngotItem, IronIngotItem
+            },
+            true, CraftCategory.Armor);
+
+        RegisterRecipe("Железные поножи", IronLeggingsItem, 1,
+            new[] { (IronIngotItem, 7) },
+            new ItemDefinition?[] {
+                IronIngotItem, IronIngotItem, IronIngotItem,
+                IronIngotItem, null,          IronIngotItem,
+                IronIngotItem, null,          IronIngotItem
+            },
+            true, CraftCategory.Armor);
+
+        RegisterRecipe("Железные ботинки", IronBootsItem, 1,
+            new[] { (IronIngotItem, 4) },
+            new ItemDefinition?[] {
+                IronIngotItem, null,          IronIngotItem,
+                IronIngotItem, null,          IronIngotItem,
+                null,          null,          null
+            },
+            true, CraftCategory.Armor);
+
+        // ── Доспехи: Алмазные ────────────────────────────────────────────────
+        RegisterRecipe("Алмазный шлем", DiamondHelmetItem, 1,
+            new[] { (DiamondItem, 5) },
+            new ItemDefinition?[] {
+                DiamondItem, DiamondItem, DiamondItem,
+                DiamondItem, null,        DiamondItem,
+                null,        null,        null
+            },
+            true, CraftCategory.Armor);
+
+        RegisterRecipe("Алмазный нагрудник", DiamondChestplateItem, 1,
+            new[] { (DiamondItem, 8) },
+            new ItemDefinition?[] {
+                DiamondItem, null,        DiamondItem,
+                DiamondItem, DiamondItem, DiamondItem,
+                DiamondItem, DiamondItem, DiamondItem
+            },
+            true, CraftCategory.Armor);
+
+        RegisterRecipe("Алмазные поножи", DiamondLeggingsItem, 1,
+            new[] { (DiamondItem, 7) },
+            new ItemDefinition?[] {
+                DiamondItem, DiamondItem, DiamondItem,
+                DiamondItem, null,        DiamondItem,
+                DiamondItem, null,        DiamondItem
+            },
+            true, CraftCategory.Armor);
+
+        RegisterRecipe("Алмазные ботинки", DiamondBootsItem, 1,
+            new[] { (DiamondItem, 4) },
+            new ItemDefinition?[] {
+                DiamondItem, null,        DiamondItem,
+                DiamondItem, null,        DiamondItem,
+                null,        null,        null
+            },
+            true, CraftCategory.Armor);
+
+        // ── Тотемы и артефакты ───────────────────────────────────────────────
+        RegisterRecipe("Тотем бессмертия", TotemItem, 1,
+            new[] { (BoneItem, 7), (GoldIngotItem, 1) },
+            new ItemDefinition?[] {
+                BoneItem, GoldIngotItem, BoneItem,
+                BoneItem, BoneItem,      BoneItem,
+                null,     BoneItem,      null
+            },
+            true, CraftCategory.Materials);
+
+        RegisterRecipe("Тотем Пламени", NetherTotemItem, 1,
+            new[] { (BlazeRodItem, 2), (GoldIngotItem, 1), (CoalItem, 1) },
+            new ItemDefinition?[] {
+                BlazeRodItem, GoldIngotItem, null,
+                CoalItem,     BlazeRodItem,  null,
+                null,         null,          null
+            },
+            true, CraftCategory.Materials);
         AddShapeRecipe(new ItemDefinition?[] {
             BlazeRodItem, BlazeRodItem, null,
-            GoldIngotItem, CoalItem, null,
-            null, null, null
+            GoldIngotItem, CoalItem,    null,
+            null,         null,         null
         }, NetherTotemItem, 1);
 
-        // Тотем Песков (призыв Стража Пустыни в Пустыне): 2 песка + 1 золото + 1 кремень
-        AddShapeRecipe(new ItemDefinition?[] {
-            SandItem, SandItem, null,
-            GoldIngotItem, FlintItem, null,
-            null, null, null
-        }, DesertTotemItem, 1);
+        RegisterRecipe("Тотем Песков", DesertTotemItem, 1,
+            new[] { (SandItem, 2), (GoldIngotItem, 1), (FlintItem, 1) },
+            new ItemDefinition?[] {
+                SandItem, SandItem,  null,
+                GoldIngotItem, FlintItem, null,
+                null,     null,      null
+            },
+            true, CraftCategory.Materials);
         AddShapeRecipe(new ItemDefinition?[] {
             SandItem, GoldIngotItem, null,
-            SandItem, FlintItem, null,
-            null, null, null
+            SandItem, FlintItem,     null,
+            null,     null,          null
         }, DesertTotemItem, 1);
 
-        // Тотем Топей (призыв Болотного Стража в Болоте): 2 нити + 1 древесный уголь + 1 кость
+        RegisterRecipe("Тотем Топей", SwampTotemItem, 1,
+            new[] { (StringItem, 2), (CharcoalItem, 1), (BoneItem, 1) },
+            new ItemDefinition?[] {
+                StringItem,   StringItem, null,
+                CharcoalItem, BoneItem,   null,
+                null,         null,       null
+            },
+            true, CraftCategory.Materials);
         AddShapeRecipe(new ItemDefinition?[] {
             StringItem, StringItem, null,
-            CharcoalItem, BoneItem, null,
-            null, null, null
-        }, SwampTotemItem, 1);
-        AddShapeRecipe(new ItemDefinition?[] {
-            StringItem, StringItem, null,
-            CoalItem, BoneItem, null,
-            null, null, null
+            CoalItem,   BoneItem,   null,
+            null,       null,       null
         }, SwampTotemItem, 1);
 
-        // Ключ Бездны: четыре артефакта мини-боссов (Энд, Ад, Болото, Пустыня)
-        AddShapeRecipe(new ItemDefinition?[] {
-            EndSlimeItem, NetherArtifactItem, null,
-            DesertArtifactItem, SwampArtifactItem, null,
-            null, null, null
-        }, VoidKeyItem, 1);
+        RegisterRecipe("Ключ Бездны", VoidKeyItem, 1,
+            new[] { (EndSlimeItem, 1), (NetherArtifactItem, 1), (DesertArtifactItem, 1), (SwampArtifactItem, 1) },
+            new ItemDefinition?[] {
+                EndSlimeItem,       NetherArtifactItem, null,
+                DesertArtifactItem, SwampArtifactItem,  null,
+                null,               null,               null
+            },
+            false, CraftCategory.Materials);
     }
 
     private static void InitSmeltingRecipes() {
@@ -947,6 +1485,7 @@ public static class GameData {
         SmeltingRecipes[LogItem.Id] = (CharcoalItem, 1);
         SmeltingRecipes[RawBeefItem.Id] = (CookedBeefItem, 1);
         SmeltingRecipes[RawMuttonItem.Id] = (CookedMuttonItem, 1);
+        SmeltingRecipes[PotatoItem.Id] = (BakedPotatoItem, 1);
     }
 
 

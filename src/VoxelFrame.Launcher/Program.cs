@@ -86,13 +86,13 @@ public class LauncherForm : Form {
         headerPanel.Controls.Add(lblTitle);
 
         Label lblBadge = new Label {
-            Text = "ALPHA 0.9.9",
+            Text = "1.0.0-pre1",
             Font = new Font("Segoe UI", 9, FontStyle.Bold),
             ForeColor = Color.FromArgb(100, 220, 120),
             BackColor = Color.FromArgb(30, 60, 40),
             TextAlign = ContentAlignment.MiddleCenter,
             Location = new Point(245, 22),
-            Size = new Size(100, 24)
+            Size = new Size(110, 24)
         };
         headerPanel.Controls.Add(lblBadge);
 
@@ -295,7 +295,7 @@ public class LauncherForm : Form {
         if (newestExe != null) {
             _versions.Add(new GameReleaseItem {
                 DisplayName = "⚡ VoxelFrame (Актуальная версия)",
-                Tag = "v0.9.9",
+                Tag = "v1.0.0-pre1",
                 IsInstalled = true,
                 InstallPath = Path.GetDirectoryName(newestExe)!,
                 ExePath = newestExe
@@ -303,7 +303,7 @@ public class LauncherForm : Form {
         } else if (gameDir != null) {
             _versions.Add(new GameReleaseItem {
                 DisplayName = "⚡ VoxelFrame (Актуальная версия)",
-                Tag = "v0.9.9",
+                Tag = "v1.0.0-pre1",
                 IsLocalDev = true,
                 IsInstalled = true,
                 InstallPath = gameDir

@@ -35,8 +35,8 @@ public sealed partial class GameWorld : IDisposable {
     private readonly HashSet<GameChunk> _lightDirty = new();
     private readonly HashSet<GameChunk> _meshDirty = new();
     private readonly Random _random;
-    private float _animalSpawnTimer = 3f;
-    private float _hostileSpawnTimer = 5f;
+    private float _animalSpawnTimer = 10f;
+    private float _hostileSpawnTimer = 35f;
     private float _cropTimer = 1.0f;
     private float _grassSpreadTimer = 0.4f;
     private readonly List<GameChunk> _lightBatch = new();
@@ -340,10 +340,14 @@ public sealed partial class GameWorld : IDisposable {
         SetVoxelInternal(w, VoxelData.Air);
         CheckGravityBlocksAbove(w);
 
-        // Разрушение растений и факелов, росших на этом блоке (трава не висит в воздухе)
+        // Разрушение растений и факелов, росших на этом блоке (трава/растения не висят в воздухе)
         var above = w + new Vec3i(0, 1, 0);
         var aboveVox = GetVoxel(above);
-        if (aboveVox.TypeId == GameData.BTallGrass.Id || aboveVox.TypeId == GameData.BWheatCrop.Id || aboveVox.TypeId == GameData.BTorch.Id) {
+        bool isAboveFoliageOrTorch = aboveVox.TypeId == GameData.BTallGrass.Id || aboveVox.TypeId == GameData.BWheatCrop.Id ||
+                                     aboveVox.TypeId == GameData.BCarrotCrop.Id || aboveVox.TypeId == GameData.BPotatoCrop.Id ||
+                                     aboveVox.TypeId == GameData.BSapling.Id || aboveVox.TypeId == GameData.BRedFlower.Id ||
+                                     aboveVox.TypeId == GameData.BYellowFlower.Id || aboveVox.TypeId == GameData.BTorch.Id;
+        if (isAboveFoliageOrTorch) {
             if (aboveVox.TypeId == GameData.BWheatCrop.Id) {
                 if (aboveVox.SubGridLayerMask >= 3) {
                     SpawnPickup(GameData.WheatItem.Id, 1, above);
@@ -351,10 +355,23 @@ public sealed partial class GameWorld : IDisposable {
                 } else {
                     SpawnPickup(GameData.WheatSeedsItem.Id, 1, above);
                 }
+            } else if (aboveVox.TypeId == GameData.BCarrotCrop.Id) {
+                int count = aboveVox.SubGridLayerMask >= 3 ? _random.Next(2, 5) : 1;
+                SpawnPickup(GameData.CarrotItem.Id, count, above);
+            } else if (aboveVox.TypeId == GameData.BPotatoCrop.Id) {
+                int count = aboveVox.SubGridLayerMask >= 3 ? _random.Next(2, 5) : 1;
+                SpawnPickup(GameData.PotatoItem.Id, count, above);
+            } else if (aboveVox.TypeId == GameData.BSapling.Id) {
+                SpawnPickup(GameData.OakSaplingItem.Id, 1, above);
+            } else if (aboveVox.TypeId == GameData.BRedFlower.Id) {
+                SpawnPickup(GameData.RedFlowerItem.Id, 1, above);
+            } else if (aboveVox.TypeId == GameData.BYellowFlower.Id) {
+                SpawnPickup(GameData.YellowFlowerItem.Id, 1, above);
             } else if (aboveVox.TypeId == GameData.BTallGrass.Id) {
-                if (_random.NextDouble() < 0.25) {
-                    SpawnPickup(GameData.WheatSeedsItem.Id, 1, above);
-                }
+                double roll = _random.NextDouble();
+                if (roll < 0.25) SpawnPickup(GameData.WheatSeedsItem.Id, 1, above);
+                else if (roll < 0.33) SpawnPickup(GameData.CarrotItem.Id, 1, above);
+                else if (roll < 0.41) SpawnPickup(GameData.PotatoItem.Id, 1, above);
             } else if (aboveVox.TypeId == GameData.BTorch.Id) {
                 SpawnPickup(GameData.TorchItem.Id, 1, above);
             }
@@ -644,22 +661,26 @@ public sealed partial class GameWorld : IDisposable {
     /// <summary>Реестр декора (факелы, посевы, трава) для рендера без сканирования всех вокселей.</summary>
     public IEnumerable<Vec3i> DecorPositions => _decor.Values.SelectMany(v => v);
 
+    private static bool IsDecorVoxel(ushort t, byte mask) =>
+        t == GameData.BTorch.Id || t == GameData.BWheatCrop.Id || t == GameData.BCarrotCrop.Id ||
+        t == GameData.BPotatoCrop.Id || t == GameData.BSapling.Id || t == GameData.BRedFlower.Id ||
+        t == GameData.BYellowFlower.Id || t == GameData.BTallGrass.Id ||
+        (t == GameData.BEndPortalFrame.Id && (mask & 1) != 0);
+
     private void ScanDecorations(GameChunk gc) {
         var cc = gc.Coord;
         var list = new List<Vec3i>();
         for (int i = 0; i < Chunk.VoxelCount; i++) {
             var vox = gc.Chunk.Get(i);
-            ushort t = vox.TypeId;
-            bool isDecor = t == GameData.BTorch.Id || t == GameData.BWheatCrop.Id || t == GameData.BTallGrass.Id
-                || (t == GameData.BEndPortalFrame.Id && (vox.SubGridLayerMask & 1) != 0);
-            if (isDecor) list.Add(ChunkLocalToWorld(cc, i));
+            if (IsDecorVoxel(vox.TypeId, vox.SubGridLayerMask)) {
+                list.Add(ChunkLocalToWorld(cc, i));
+            }
         }
         _decor[cc] = list;
     }
 
     private void UpdateDecor(Vec3i cc, Vec3i w, in VoxelData voxel) {
-        bool isDecor = voxel.TypeId == GameData.BTorch.Id || voxel.TypeId == GameData.BWheatCrop.Id || voxel.TypeId == GameData.BTallGrass.Id
-            || (voxel.TypeId == GameData.BEndPortalFrame.Id && (voxel.SubGridLayerMask & 1) != 0);
+        bool isDecor = IsDecorVoxel(voxel.TypeId, voxel.SubGridLayerMask);
         if (!_decor.TryGetValue(cc, out var list)) {
             if (!isDecor) return;
             _decor[cc] = list = new List<Vec3i>();
@@ -789,7 +810,9 @@ public sealed partial class GameWorld : IDisposable {
             _animalSpawnTimer = 4f;
             TrySpawnAnimal();
         }
-        foreach (var a in Animals) a.Tick(dt, this, player);
+        for (int i = 0; i < Animals.Count; i++) {
+            Animals[i].Tick(dt, this, player);
+        }
         Animals.RemoveAll(a => !a.Alive);
 
         // Падающие обломки (обратный цикл защищает от исключения при падении блоков сверху)
@@ -915,6 +938,46 @@ public sealed partial class GameWorld : IDisposable {
 
     public const float CropGrowthInterval = 30f;
 
+    /// <summary>
+    /// Выращивает полноценное дерево дуба на месте саженца.
+    /// </summary>
+    public bool GrowTree(Vec3i pos) {
+        int height = 5 + _random.Next(2); // 5..6 блоков
+        // Проверяем свободное пространство над саженцем
+        for (int y = 1; y <= height + 2; y++) {
+            var checkPos = pos + new Vec3i(0, y, 0);
+            var v = GetVoxel(checkPos);
+            if (v.TypeId != 0 && v.TypeId != GameData.BLeaves.Id && v.TypeId != GameData.BSapling.Id && v.TypeId != GameData.BTallGrass.Id) {
+                return false;
+            }
+        }
+
+        // Заменяем саженец на ствол
+        SetBlock(pos, GameData.BLog.Id);
+
+        // Ствол
+        for (int y = 1; y < height; y++) {
+            SetBlock(pos + new Vec3i(0, y, 0), GameData.BLog.Id);
+        }
+
+        // Листва (шарообразная крона дуба)
+        for (int dy = height - 3; dy <= height + 1; dy++) {
+            int radius = dy >= height ? 1 : 2;
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (dx == 0 && dz == 0 && dy < height) continue;
+                    if (Math.Abs(dx) == radius && Math.Abs(dz) == radius && dy < height && _random.NextDouble() < 0.35) continue;
+                    var leafPos = pos + new Vec3i(dx, dy, dz);
+                    var cur = GetVoxel(leafPos);
+                    if (cur.TypeId == 0 || cur.TypeId == GameData.BSapling.Id || cur.TypeId == GameData.BTallGrass.Id) {
+                        SetBlock(leafPos, GameData.BLeaves.Id);
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
     public void TickCrops(float dt) {
         _cropTimer -= dt;
         if (_cropTimer > 0f) return;
@@ -928,23 +991,37 @@ public sealed partial class GameWorld : IDisposable {
         for (int i = 0; i < _tempDecorList.Count; i++) {
             var pos = _tempDecorList[i];
             var vox = GetVoxel(pos);
-            if (vox.TypeId == GameData.BWheatCrop.Id) {
-                var below = pos + new Vec3i(0, -1, 0);
-                var belowVox = GetVoxel(below);
+            var below = pos + new Vec3i(0, -1, 0);
+            var belowVox = GetVoxel(below);
+
+            if (vox.TypeId == GameData.BWheatCrop.Id || vox.TypeId == GameData.BCarrotCrop.Id || vox.TypeId == GameData.BPotatoCrop.Id) {
                 if (belowVox.TypeId != GameData.BFarmland.Id) {
-                    // Без грядки посев ломается и падает семенами
+                    // Без грядки посев ломается и падает
                     SetBlock(pos, 0);
-                    SpawnPickup(GameData.WheatSeedsItem.Id, 1, pos);
+                    if (vox.TypeId == GameData.BWheatCrop.Id) SpawnPickup(GameData.WheatSeedsItem.Id, 1, pos);
+                    else if (vox.TypeId == GameData.BCarrotCrop.Id) SpawnPickup(GameData.CarrotItem.Id, 1, pos);
+                    else if (vox.TypeId == GameData.BPotatoCrop.Id) SpawnPickup(GameData.PotatoItem.Id, 1, pos);
                     continue;
                 }
 
-                // Рост пшеницы: переход на следующую стадию каждые 30 секунд
+                // Рост посева: переход на следующую стадию (0..3)
                 int currentStage = vox.SubGridLayerMask; // 0..3
                 if (currentStage < 3) {
-                    int nextStage = currentStage + 1;
-                    var newVox = MakePlacedVoxel(GameData.BWheatCrop);
-                    newVox.SubGridLayerMask = (byte)nextStage;
+                    var blk = vox.TypeId == GameData.BWheatCrop.Id ? GameData.BWheatCrop :
+                              vox.TypeId == GameData.BCarrotCrop.Id ? GameData.BCarrotCrop : GameData.BPotatoCrop;
+                    var newVox = MakePlacedVoxel(blk);
+                    newVox.SubGridLayerMask = (byte)(currentStage + 1);
                     SetVoxelRaw(pos, in newVox);
+                }
+            } else if (vox.TypeId == GameData.BSapling.Id) {
+                if (belowVox.TypeId != GameData.BGrass.Id && belowVox.TypeId != GameData.BDirt.Id) {
+                    SetBlock(pos, 0);
+                    SpawnPickup(GameData.OakSaplingItem.Id, 1, pos);
+                    continue;
+                }
+                // Саженец имеет шанс вырасти в дерево со временем (~30% за такт)
+                if (_random.NextDouble() < 0.30) {
+                    GrowTree(pos);
                 }
             }
         }
@@ -1083,20 +1160,23 @@ public sealed partial class GameWorld : IDisposable {
         var pPos = player.Position;
         float skyFactor = session.DayNight.SkyFactor;
 
-        // Болотный страж просыпается ночью, когда игрок впервые заходит в болото
-        if (!SwampBossSpawned && Dimension == Dimension.Overworld && skyFactor < 0.4f &&
+        // Болотный страж просыпается ночью, когда игрок заходит глубоко в болото и уже экипирован/исследует
+        if (!SwampBossSpawned && Dimension == Dimension.Overworld && skyFactor < 0.25f &&
             Generator.GetBiome((int)MathF.Floor(pPos.X), 50, (int)MathF.Floor(pPos.Z)) == BiomeType.Swamp) {
-            var gPos = new Vector3(pPos.X + 5f, pPos.Y, pPos.Z + 5f);
-            var foot = new Vec3i((int)MathF.Floor(gPos.X), (int)MathF.Floor(gPos.Y), (int)MathF.Floor(gPos.Z));
-            if (!IsSolidAt(foot)) {
-                SpawnMiniBoss(HostileType.SwampGuardian, gPos);
-                session.AddMessage("Из тёмной воды поднимается Болотный страж!");
+            float distFromSpawn = Vector2.Distance(new Vector2(pPos.X, pPos.Z), Vector2.Zero);
+            if (distFromSpawn > 120f) {
+                var gPos = new Vector3(pPos.X + 16f, pPos.Y, pPos.Z + 16f);
+                var foot = new Vec3i((int)MathF.Floor(gPos.X), (int)MathF.Floor(gPos.Y), (int)MathF.Floor(gPos.Z));
+                if (!IsSolidAt(foot)) {
+                    SpawnMiniBoss(HostileType.SwampGuardian, gPos);
+                    session.AddMessage("Из тёмной воды поднимается Болотный страж!");
+                }
             }
         }
 
         for (int attempt = 0; attempt < 8; attempt++) {
             float angle = (float)_random.NextDouble() * MathF.Tau;
-            float r = 24f + (float)_random.NextDouble() * 18f; // 24..42м от игрока
+            float r = 26f + (float)_random.NextDouble() * 18f; // 26..44м от игрока
             int spawnX = (int)MathF.Floor(pPos.X + MathF.Cos(angle) * r);
             int spawnZ = (int)MathF.Floor(pPos.Z + MathF.Sin(angle) * r);
 
@@ -1116,14 +1196,20 @@ public sealed partial class GameWorld : IDisposable {
                 var feetVoxel = GetVoxel(feetCell);
                 if (feetVoxel.TypeId == GameData.BWater.Id || feetVoxel.TypeId == GameData.BLava.Id) continue;
 
-                // Проверка освещения: в Обычном мире спавн только в глубокой темноте (свет <= 6),
-                // факелы гарантированно защищают дом. В Нижнем и Энде мобы (ифрит, эндэрмен)
-                // спавнятся независимо от света — как в Minecraft.
+                // Проверка освещения:
+                // В Обычном мире днем на поверхности мобы НЕ спавнятся никогда!
                 if (Dimension == Dimension.Overworld) {
+                    int surface = GetColumnSurfaceHeight(spawnX, spawnZ);
+                    bool isSurface = (surface != int.MinValue) && (y >= surface - 2);
+
+                    if (isSurface && skyFactor >= 0.25f) {
+                        continue; // Днем на поверхности спавн мобов строго запрещен
+                    }
+
                     byte blockLight = GetBlockLight(feetCell);
                     byte sunLight = GetSunLight(feetCell);
-                    float effectiveLight = MathF.Max(blockLight, sunLight * skyFactor);
-                    if (blockLight >= 6 || effectiveLight > 6.0f) continue;
+                    float effectiveLight = isSurface ? (skyFactor * 15f) : MathF.Max(blockLight, sunLight * skyFactor);
+                    if (blockLight >= 7 || effectiveLight > 6.0f) continue;
                 }
 
                 HostileType type;
@@ -1155,7 +1241,7 @@ public sealed partial class GameWorld : IDisposable {
         }
     }
 
-    private float _spawnerTimer = 3.0f;
+    private float _spawnerTimer = 15.0f;
 
     private void TickNearbySpawners(Player player) {
         int px = (int)MathF.Floor(player.Position.X);
