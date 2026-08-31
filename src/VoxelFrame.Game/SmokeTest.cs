@@ -759,9 +759,20 @@ internal static class SmokeTest {
         s.Player.Health = 0f;
         s.Player.Update(0.1f, PlayerInput.Idle, w, s);
         Check(s.Ui == UiState.Death, "при смерти активируется экран смерти");
-        Check(inv.CountOf(GameData.DiamondItem) == 0, "вещи безоговорочно выпадают из инвентаря при смерти");
+        Check(inv.CountOf(GameData.DiamondItem) == 0, "вещи выпадают из инвентаря при смерти без keepInventory");
         s.RespawnPlayer();
         Check(s.Ui == UiState.Playing && s.Player.Health == s.Player.MaxHealth, "возрождение восстанавливает здоровье");
+
+        // 13.1. Смерть с включенным keepInventory
+        s.KeepInventory = true;
+        inv.Slots[0] = new ItemEntry(GameData.NewItem(GameData.DiamondItem), 5);
+        s.Player.Health = 0f;
+        s.Player.Update(0.1f, PlayerInput.Idle, w, s);
+        Check(s.Ui == UiState.Death, "при смерти с keepInventory активируется экран смерти");
+        Check(inv.CountOf(GameData.DiamondItem) == 5, "вещи сохраняются в инвентаре при включенном keepInventory");
+        s.RespawnPlayer();
+        Check(inv.CountOf(GameData.DiamondItem) == 5, "после возрождения инвентарь полностью сохранён");
+        s.KeepInventory = false;
 
         // 14. Сгорание предметов в лаве
         var lavaPos = new Vec3i(50, w.SpawnBlock.Y, 50);

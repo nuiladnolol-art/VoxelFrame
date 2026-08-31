@@ -76,6 +76,7 @@ public sealed class GameClient : IDisposable {
     public float ReceivedTimeOfDay { get; private set; } = 0.25f;
     public bool ReceivedCheats { get; private set; } = false;
     public int ReceivedGamemode { get; private set; } = 0;
+    public bool ReceivedKeepInventory { get; private set; } = false;
     public bool HasReceivedWelcome { get; private set; } = false;
     public bool HasReceivedPlayerData { get; private set; } = false;
     public Player? InitialPlayerData { get; private set; }
@@ -154,6 +155,10 @@ public sealed class GameClient : IDisposable {
                         ReceivedTimeOfDay = reader.ReadSingle();
                         ReceivedCheats = reader.ReadBoolean();
                         ReceivedGamemode = reader.ReadInt32();
+                        ReceivedKeepInventory = reader.ReadBoolean();
+                        if (_session != null) {
+                            _session.KeepInventory = ReceivedKeepInventory;
+                        }
                         HasReceivedWelcome = true;
                         break;
                     }
@@ -383,6 +388,18 @@ public sealed class GameClient : IDisposable {
                         if (_session != null) {
                             _session.DayNight.TimeOfDay = tod;
                             _session.Weather = (WeatherType)weather;
+                        }
+                        break;
+                    }
+                    case PacketType.GameRuleSync: {
+                        string rule = reader.ReadString();
+                        bool val = reader.ReadBoolean();
+                        if (rule.Equals("keepInventory", StringComparison.OrdinalIgnoreCase)) {
+                            ReceivedKeepInventory = val;
+                            if (_session != null) {
+                                _session.KeepInventory = val;
+                                _session.AddChatMessage($"Игровое правило keepInventory изменено сервером на {val}", Raylib_cs.Color.Yellow);
+                            }
                         }
                         break;
                     }

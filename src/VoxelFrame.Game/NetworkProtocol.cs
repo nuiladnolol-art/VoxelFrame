@@ -21,7 +21,8 @@ public enum PacketType : byte {
     PlayerDataSync = 13,
     PlayerInventoryUpdate = 14,
     Teleport = 15,
-    ChestSync = 16
+    ChestSync = 16,
+    GameRuleSync = 17
 }
 
 public enum PlayerActionType : byte {
@@ -47,7 +48,7 @@ public static class NetworkProtocol {
         return ms.ToArray();
     }
 
-    public static byte[] WriteWelcome(int clientId, int seed, float timeOfDay, bool cheatsEnabled, int gamemode) {
+    public static byte[] WriteWelcome(int clientId, int seed, float timeOfDay, bool cheatsEnabled, int gamemode, bool keepInventory) {
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms, Encoding.UTF8);
         w.Write((byte)PacketType.Welcome);
@@ -56,6 +57,16 @@ public static class NetworkProtocol {
         w.Write(timeOfDay);
         w.Write(cheatsEnabled);
         w.Write(gamemode);
+        w.Write(keepInventory);
+        return ms.ToArray();
+    }
+
+    public static byte[] WriteGameRuleSync(string rule, bool value) {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms, Encoding.UTF8);
+        w.Write((byte)PacketType.GameRuleSync);
+        w.Write(rule);
+        w.Write(value);
         return ms.ToArray();
     }
 

@@ -855,6 +855,7 @@ public sealed class GameSession {
                         KeepInventory = !KeepInventory;
                         AddChatMessage($"Игровое правило keepInventory установлено в {KeepInventory}", Color.Green);
                     }
+                    GameServer.Active?.BroadcastGameRuleSync("keepInventory", KeepInventory);
                     break;
                 }
                 if (parts.Length < 3) {
@@ -865,6 +866,7 @@ public sealed class GameSession {
                     if (bool.TryParse(parts[2], out bool val)) {
                         KeepInventory = val;
                         AddChatMessage($"Игровое правило keepInventory установлено в {val}", Color.Green);
+                        GameServer.Active?.BroadcastGameRuleSync("keepInventory", KeepInventory);
                     } else {
                         AddChatMessage("Значение должно быть true или false", Color.Red);
                     }

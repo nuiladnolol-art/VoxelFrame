@@ -412,6 +412,7 @@ public static partial class Screens {
                 var newSession = GameSession.NewGame(client.ReceivedSeed, headless: false);
                 newSession.GameMode = (GameMode)client.ReceivedGamemode;
                 newSession.CheatsEnabled = client.ReceivedCheats;
+                newSession.KeepInventory = client.ReceivedKeepInventory;
                 newSession.DayNight.TimeOfDay = client.ReceivedTimeOfDay;
                 newSession.Player.Name = PlayerNick;
                 client.BindSession(newSession);

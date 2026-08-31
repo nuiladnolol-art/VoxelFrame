@@ -167,7 +167,8 @@ public sealed class GameServer : IDisposable {
                 _session.World.Generator.Seed,
                 _session.DayNight.TimeOfDay,
                 _session.CheatsEnabled,
-                (int)_session.GameMode
+                (int)_session.GameMode,
+                _session.KeepInventory
             );
             client.Send(welcome);
 
@@ -517,6 +518,12 @@ public sealed class GameServer : IDisposable {
     public void BroadcastChestSync(Vec3i pos, VoxelFrame.Core.Inventory.Container container) {
         if (!IsRunning || ClientCount == 0) return;
         var p = NetworkProtocol.WriteChestSync(pos.X, pos.Y, pos.Z, container, (byte)_session.World.Dimension);
+        Broadcast(p);
+    }
+
+    public void BroadcastGameRuleSync(string rule, bool value) {
+        if (!IsRunning || ClientCount == 0) return;
+        var p = NetworkProtocol.WriteGameRuleSync(rule, value);
         Broadcast(p);
     }
 
