@@ -128,6 +128,7 @@ internal static class Program {
         int frames = 0;
         bool cursorCaptured = false;
         float pauseDebounce = 0f;
+        float clientInvSyncTimer = 0f;
 
         if (autoshotFile != null) {
             session = GameSession.NewGame(12345, headless: false);
@@ -340,6 +341,11 @@ internal static class Program {
             GameServer.Active?.Update(dt);
             if (GameClient.Active != null) {
                 GameClient.Active.SendMovement(session.Player.Position, session.Player.Yaw, session.Player.Pitch, session.Player.IsMoving, session.Player.IsCrouching, session.Player.IsFlying, session.Player.Health);
+                clientInvSyncTimer += dt;
+                if (clientInvSyncTimer >= 2.0f) {
+                    clientInvSyncTimer = 0f;
+                    GameClient.Active.SendInventoryUpdate(session.Player);
+                }
             }
             if (GameServer.Active != null) {
                 GameServer.Active.BroadcastHostMovement(session.Player.Position, session.Player.Yaw, session.Player.Pitch, session.Player.IsMoving, session.Player.IsCrouching, session.Player.IsFlying, session.Player.Health);
@@ -349,7 +355,10 @@ internal static class Program {
             session.AutosaveTimer -= dt;
             if (session.AutosaveTimer <= 0f) {
                 session.AutosaveTimer = GameSession.AutosaveInterval;
-                try { session.SaveTo(SaveSystem.SavePath); } catch { /* повторим на следующем тике */ }
+                try {
+                    session.SaveTo(SaveSystem.SavePath);
+                    GameServer.Active?.SaveAllPlayers();
+                } catch { /* повторим на следующем тике */ }
             }
 
             if (!PostProcessing.BeginScene(session)) {

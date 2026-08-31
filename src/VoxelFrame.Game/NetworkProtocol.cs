@@ -17,7 +17,10 @@ public enum PacketType : byte {
     TimeWeatherSync = 9,
     KeepAlive = 10,
     Disconnect = 11,
-    PlayerHit = 12
+    PlayerHit = 12,
+    PlayerDataSync = 13,
+    PlayerInventoryUpdate = 14,
+    Teleport = 15
 }
 
 public enum PlayerActionType : byte {
@@ -137,6 +140,126 @@ public static class NetworkProtocol {
         w.Write((byte)PacketType.TimeWeatherSync);
         w.Write(timeOfDay);
         w.Write(weatherState);
+        return ms.ToArray();
+    }
+
+    public static byte[] WriteTeleport(Vector3 pos) {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms, Encoding.UTF8);
+        w.Write((byte)PacketType.Teleport);
+        w.Write(pos.X);
+        w.Write(pos.Y);
+        w.Write(pos.Z);
+        return ms.ToArray();
+    }
+
+    public static byte[] WritePlayerDataSync(Player player) {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms, Encoding.UTF8);
+        w.Write((byte)PacketType.PlayerDataSync);
+        w.Write(player.Position.X);
+        w.Write(player.Position.Y);
+        w.Write(player.Position.Z);
+        w.Write(player.Yaw);
+        w.Write(player.Pitch);
+        w.Write(player.Health);
+        w.Write(player.Hunger);
+        w.Write(player.Saturation);
+        w.Write(player.SelectedSlot);
+
+        // Инвентарь
+        var nonNull = new List<(int idx, ushort id, int qty, int dur)>();
+        for (int i = 0; i < player.Inventory.Capacity; i++) {
+            var slot = player.Inventory.Slots[i];
+            if (slot != null && slot.Value.Quantity > 0) {
+                nonNull.Add((i, slot.Value.Item.Definition.Id, slot.Value.Quantity, slot.Value.Item.Durability));
+            }
+        }
+        w.Write(nonNull.Count);
+        foreach (var item in nonNull) {
+            w.Write(item.idx);
+            w.Write(item.id);
+            w.Write(item.qty);
+            w.Write(item.dur);
+        }
+
+        // Оффхэнд
+        if (player.OffhandEntry != null && player.OffhandEntry.Value.Quantity > 0) {
+            w.Write(true);
+            w.Write(player.OffhandEntry.Value.Item.Definition.Id);
+            w.Write(player.OffhandEntry.Value.Quantity);
+            w.Write(player.OffhandEntry.Value.Item.Durability);
+        } else {
+            w.Write(false);
+        }
+
+        // Броня
+        for (int a = 0; a < 4; a++) {
+            if (player.Armor[a] is { } ae && ae.Quantity > 0) {
+                w.Write(true);
+                w.Write(ae.Item.Definition.Id);
+                w.Write(ae.Quantity);
+                w.Write(ae.Item.Durability);
+            } else {
+                w.Write(false);
+            }
+        }
+
+        return ms.ToArray();
+    }
+
+    public static byte[] WritePlayerInventoryUpdate(Player player) {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms, Encoding.UTF8);
+        w.Write((byte)PacketType.PlayerInventoryUpdate);
+        w.Write(player.Position.X);
+        w.Write(player.Position.Y);
+        w.Write(player.Position.Z);
+        w.Write(player.Yaw);
+        w.Write(player.Pitch);
+        w.Write(player.Health);
+        w.Write(player.Hunger);
+        w.Write(player.Saturation);
+        w.Write(player.SelectedSlot);
+
+        // Инвентарь
+        var nonNull = new List<(int idx, ushort id, int qty, int dur)>();
+        for (int i = 0; i < player.Inventory.Capacity; i++) {
+            var slot = player.Inventory.Slots[i];
+            if (slot != null && slot.Value.Quantity > 0) {
+                nonNull.Add((i, slot.Value.Item.Definition.Id, slot.Value.Quantity, slot.Value.Item.Durability));
+            }
+        }
+        w.Write(nonNull.Count);
+        foreach (var item in nonNull) {
+            w.Write(item.idx);
+            w.Write(item.id);
+            w.Write(item.qty);
+            w.Write(item.dur);
+        }
+
+        // Оффхэнд
+        if (player.OffhandEntry != null && player.OffhandEntry.Value.Quantity > 0) {
+            w.Write(true);
+            w.Write(player.OffhandEntry.Value.Item.Definition.Id);
+            w.Write(player.OffhandEntry.Value.Quantity);
+            w.Write(player.OffhandEntry.Value.Item.Durability);
+        } else {
+            w.Write(false);
+        }
+
+        // Броня
+        for (int a = 0; a < 4; a++) {
+            if (player.Armor[a] is { } ae && ae.Quantity > 0) {
+                w.Write(true);
+                w.Write(ae.Item.Definition.Id);
+                w.Write(ae.Quantity);
+                w.Write(ae.Item.Durability);
+            } else {
+                w.Write(false);
+            }
+        }
+
         return ms.ToArray();
     }
 }

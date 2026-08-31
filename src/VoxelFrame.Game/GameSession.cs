@@ -655,7 +655,7 @@ public sealed class GameSession {
             AddChatMessage("/gamemode <survival|creative|s|c|0|1> — сменить режим", Color.White);
             AddChatMessage("/gamerule keepInventory <true|false> — сохранение инвентаря", Color.White);
             AddChatMessage("/give <предмет|id> [кол-во] — выдать предмет", Color.White);
-            AddChatMessage("/tp <x> <y> <z> — телепортация", Color.White);
+            AddChatMessage("/tp <игрок> ИЛИ <x> <y> <z> — телепортация", Color.White);
             AddChatMessage("/time set <day|night|число> — сменить время суток", Color.White);
             AddChatMessage("/weather <clear|rain|thunder> — изменить погоду", Color.White);
             AddChatMessage("/locate <biome|structure> <название> — найти биом/структуру", Color.White);
@@ -772,9 +772,100 @@ public sealed class GameSession {
 
             case "tp":
             case "teleport":
+                // Формат 1: /tp <targetPlayer> — телепортироваться к игроку
+                if (parts.Length == 2) {
+                    string targetName = parts[1];
+                    Vector3? targetPos = null;
+
+                    // Если мы хост сервера — ищем среди подключенных клиентов
+                    if (GameServer.Active != null) {
+                        foreach (var client in GameServer.Active.Clients) {
+                            if (client.Name.Equals(targetName, StringComparison.OrdinalIgnoreCase)) {
+                                targetPos = client.Position;
+                                break;
+                            }
+                        }
+                    }
+                    // Если мы клиент — ищем среди удаленных игроков
+                    if (GameClient.Active != null) {
+                        foreach (var rp in GameClient.Active.RemotePlayers) {
+                            if (rp.Name.Equals(targetName, StringComparison.OrdinalIgnoreCase)) {
+                                targetPos = rp.Position;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (targetPos.HasValue) {
+                        Player.Position = targetPos.Value;
+                        Player.Velocity = Vector3.Zero;
+                        AddChatMessage($"Телепортирован к игроку {targetName} (X:{targetPos.Value.X:F1} Y:{targetPos.Value.Y:F1} Z:{targetPos.Value.Z:F1})", Color.Green);
+                    } else {
+                        AddChatMessage($"Игрок '{targetName}' не найден в сети.", Color.Red);
+                    }
+                    return;
+                }
+
+                // Формат 2: /tp <who> <toWhom> — телепортировать одного игрока к другому (на сервере)
+                if (parts.Length == 3) {
+                    string who = parts[1];
+                    string toWhom = parts[2];
+                    Vector3? toPos = null;
+
+                    if (toWhom.Equals(Player.Name, StringComparison.OrdinalIgnoreCase) || toWhom.Equals("host", StringComparison.OrdinalIgnoreCase) || toWhom.Equals("me", StringComparison.OrdinalIgnoreCase)) {
+                        toPos = Player.Position;
+                    } else if (GameServer.Active != null) {
+                        foreach (var client in GameServer.Active.Clients) {
+                            if (client.Name.Equals(toWhom, StringComparison.OrdinalIgnoreCase)) {
+                                toPos = client.Position;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!toPos.HasValue) {
+                        AddChatMessage($"Целевой игрок '{toWhom}' не найден.", Color.Red);
+                        return;
+                    }
+
+                    if (who.Equals(Player.Name, StringComparison.OrdinalIgnoreCase) || who.Equals("me", StringComparison.OrdinalIgnoreCase)) {
+                        Player.Position = toPos.Value;
+                        Player.Velocity = Vector3.Zero;
+                        AddChatMessage($"Телепортирован к игроку {toWhom}", Color.Green);
+                    } else if (GameServer.Active != null) {
+                        if (GameServer.Active.TeleportClientByName(who, toPos.Value)) {
+                            AddChatMessage($"Игрок {who} телепортирован к {toWhom}", Color.Green);
+                        } else {
+                            AddChatMessage($"Игрок '{who}' не найден.", Color.Red);
+                        }
+                    } else {
+                        AddChatMessage("Телепортация других игроков доступна только хосту сервера.", Color.Red);
+                    }
+                    return;
+                }
+
+                // Формат 3: /tp <who> <x> <y> <z> — хост телепортирует игрока на координаты
+                if (parts.Length == 5 && float.TryParse(parts[2], out float px) && float.TryParse(parts[3], out float py) && float.TryParse(parts[4], out float pz)) {
+                    string who = parts[1];
+                    var dest = new Vector3(px, py, pz);
+                    if (who.Equals(Player.Name, StringComparison.OrdinalIgnoreCase) || who.Equals("me", StringComparison.OrdinalIgnoreCase)) {
+                        Player.Position = dest;
+                        Player.Velocity = Vector3.Zero;
+                        AddChatMessage($"Телепортирован на координаты X:{px:F1} Y:{py:F1} Z:{pz:F1}", Color.Green);
+                    } else if (GameServer.Active != null) {
+                        if (GameServer.Active.TeleportClientByName(who, dest)) {
+                            AddChatMessage($"Игрок {who} телепортирован на X:{px:F1} Y:{py:F1} Z:{pz:F1}", Color.Green);
+                        } else {
+                            AddChatMessage($"Игрок '{who}' не найден.", Color.Red);
+                        }
+                    }
+                    return;
+                }
+
+                // Формат 4: /tp <x> <y> <z> — телепортация себя по координатам
                 if (parts.Length < 4 || !float.TryParse(parts[1], out float tpx) ||
                     !float.TryParse(parts[2], out float tpy) || !float.TryParse(parts[3], out float tpz)) {
-                    AddChatMessage("Использование: /tp <x> <y> <z>", Color.Yellow);
+                    AddChatMessage("Использование: /tp <игрок> ИЛИ /tp <x> <y> <z> ИЛИ /tp <кто> <к_кому>", Color.Yellow);
                     return;
                 }
                 Player.Position = new Vector3(tpx, tpy, tpz);

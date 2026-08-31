@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using VoxelFrame.Core;
+using VoxelFrame.Core.Inventory;
 
 namespace VoxelFrame.Game;
 
@@ -30,6 +31,7 @@ public sealed class ConnectedClient {
     public float ArmSwingTimer { get; set; }
     public float HurtTimer { get; set; }
     public string SkinName { get; set; } = "steve";
+    public Player PlayerData { get; set; } = new();
 
     public ConnectedClient(int id, TcpClient socket) {
         Id = id;
@@ -165,11 +167,94 @@ public sealed class GameServer : IDisposable {
                         string name = reader.ReadString();
                         string ver = reader.ReadString();
                         client.Name = name;
+                        client.PlayerData.Name = name;
+
+                        // Если у игрока есть сохраненный файл PlayerData на сервере — загружаем и синхронизируем с клиентом
+                        if (SaveSystem.HasPlayerData(name)) {
+                            if (SaveSystem.LoadPlayerData(name, client.PlayerData)) {
+                                client.Position = client.PlayerData.Position;
+                                client.TargetPosition = client.PlayerData.Position;
+                                client.Yaw = client.PlayerData.Yaw;
+                                client.TargetYaw = client.PlayerData.Yaw;
+                                client.Pitch = client.PlayerData.Pitch;
+                                client.TargetPitch = client.PlayerData.Pitch;
+                                client.Health = client.PlayerData.Health;
+
+                                var pDataSync = NetworkProtocol.WritePlayerDataSync(client.PlayerData);
+                                stream.Write(pDataSync, 0, pDataSync.Length);
+                            }
+                        }
+
                         _session.AddChatMessage($"Игрок {name} присоединился к игре!", Raylib_cs.Color.Yellow);
                         _session.AddMessage($"Игрок {name} вошел в мир");
                         // Broadcast new player to all clients
                         var joinPacket = NetworkProtocol.WritePlayerJoin(clientId, name, client.Position, client.Yaw, client.Pitch);
                         Broadcast(joinPacket, exceptClientId: clientId);
+                        break;
+                    }
+                    case PacketType.PlayerInventoryUpdate: {
+                        float px = reader.ReadSingle();
+                        float py = reader.ReadSingle();
+                        float pz = reader.ReadSingle();
+                        float yaw = reader.ReadSingle();
+                        float pitch = reader.ReadSingle();
+                        float hp = reader.ReadSingle();
+                        float hunger = reader.ReadSingle();
+                        float sat = reader.ReadSingle();
+                        int slot = reader.ReadInt32();
+
+                        client.PlayerData.Position = new Vector3(px, py, pz);
+                        client.PlayerData.Yaw = yaw;
+                        client.PlayerData.Pitch = pitch;
+                        client.PlayerData.Health = hp;
+                        client.PlayerData.Hunger = hunger;
+                        client.PlayerData.Saturation = sat;
+                        client.PlayerData.SelectedSlot = slot;
+
+                        // Инвентарь
+                        for (int i = 0; i < client.PlayerData.Inventory.Capacity; i++) client.PlayerData.Inventory.RemoveAt(i);
+                        int invCount = reader.ReadInt32();
+                        for (int i = 0; i < invCount; i++) {
+                            int idx = reader.ReadInt32();
+                            ushort itId = reader.ReadUInt16();
+                            int itQty = reader.ReadInt32();
+                            int itDur = reader.ReadInt32();
+                            if (GameData.Items.TryGetValue(itId, out var itDef)) {
+                                var itemInst = GameData.NewItem(itDef);
+                                itemInst.Durability = itDur;
+                                client.PlayerData.Inventory.InsertAt(idx, new ItemEntry(itemInst, itQty));
+                            }
+                        }
+
+                        // Оффхэнд
+                        if (reader.ReadBoolean()) {
+                            ushort offId = reader.ReadUInt16();
+                            int offQty = reader.ReadInt32();
+                            int offDur = reader.ReadInt32();
+                            if (GameData.Items.TryGetValue(offId, out var offDef)) {
+                                var offInst = GameData.NewItem(offDef);
+                                offInst.Durability = offDur;
+                                client.PlayerData.OffhandEntry = new ItemEntry(offInst, offQty);
+                            }
+                        } else {
+                            client.PlayerData.OffhandEntry = null;
+                        }
+
+                        // Броня
+                        for (int a = 0; a < 4; a++) {
+                            if (reader.ReadBoolean()) {
+                                ushort armId = reader.ReadUInt16();
+                                int armQty = reader.ReadInt32();
+                                int armDur = reader.ReadInt32();
+                                if (GameData.Items.TryGetValue(armId, out var armDef)) {
+                                    var armInst = GameData.NewItem(armDef);
+                                    armInst.Durability = armDur;
+                                    client.PlayerData.Armor[a] = new ItemEntry(armInst, armQty);
+                                }
+                            } else {
+                                client.PlayerData.Armor[a] = null;
+                            }
+                        }
                         break;
                     }
                     case PacketType.PlayerMovement: {
@@ -268,11 +353,41 @@ public sealed class GameServer : IDisposable {
             // Disconnected
         } finally {
             _clients.TryRemove(clientId, out _);
+            SaveSystem.SavePlayerData(client.Name, client.PlayerData);
             _session.AddChatMessage($"Игрок {client.Name} покинул игру.", Raylib_cs.Color.Yellow);
             _session.AddMessage($"Игрок {client.Name} вышел");
             var leaveP = NetworkProtocol.WritePlayerLeave(clientId);
             Broadcast(leaveP);
             try { socket.Close(); } catch { }
+        }
+    }
+
+    public void TeleportClient(int clientId, Vector3 pos) {
+        if (_clients.TryGetValue(clientId, out var client)) {
+            client.Position = pos;
+            client.TargetPosition = pos;
+            client.PlayerData.Position = pos;
+            var tpPacket = NetworkProtocol.WriteTeleport(pos);
+            try {
+                var stream = client.Socket.GetStream();
+                stream.Write(tpPacket, 0, tpPacket.Length);
+            } catch { }
+        }
+    }
+
+    public bool TeleportClientByName(string name, Vector3 pos) {
+        foreach (var client in _clients.Values) {
+            if (client.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) {
+                TeleportClient(client.Id, pos);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public void SaveAllPlayers() {
+        foreach (var client in _clients.Values) {
+            SaveSystem.SavePlayerData(client.Name, client.PlayerData);
         }
     }
 
@@ -319,6 +434,7 @@ public sealed class GameServer : IDisposable {
     }
 
     public void Dispose() {
+        SaveAllPlayers();
         _cts?.Cancel();
         try { _listener?.Stop(); } catch { }
         _listener = null;

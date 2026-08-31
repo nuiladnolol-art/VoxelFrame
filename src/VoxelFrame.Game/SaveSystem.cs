@@ -869,6 +869,151 @@ public static class SaveSystem {
 
     private static Vector3 ReadVec3(BinaryReader br) => new(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
 
+    public static string GetPlayerDataDirectory() {
+        string dir = Path.Combine(SaveDirectory, "playerdata");
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    public static string GetPlayerDataPath(string playerName) {
+        string safeName = string.Join("_", playerName.Split(Path.GetInvalidFileNameChars()));
+        if (string.IsNullOrWhiteSpace(safeName)) safeName = "player";
+        return Path.Combine(GetPlayerDataDirectory(), $"{safeName.ToLowerInvariant()}.dat");
+    }
+
+    public static bool HasPlayerData(string playerName) {
+        return File.Exists(GetPlayerDataPath(playerName));
+    }
+
+    public static void SavePlayerData(string playerName, Player player) {
+        try {
+            string path = GetPlayerDataPath(playerName);
+            string tmp = path + ".tmp";
+            using (var fs = File.Create(tmp))
+            using (var gz = new GZipStream(fs, CompressionLevel.Fastest))
+            using (var bw = new BinaryWriter(gz, Encoding.UTF8, leaveOpen: false)) {
+                bw.Write(Magic);
+                bw.Write(Version);
+                bw.Write(player.Name);
+                WriteVec3(bw, player.Position);
+                bw.Write(player.Yaw);
+                bw.Write(player.Pitch);
+                bw.Write(player.Health);
+                bw.Write(player.Hunger);
+                bw.Write(player.Saturation);
+                bw.Write(player.HighestYInAir);
+                bw.Write(player.SelectedSlot);
+
+                // Инвентарь
+                var nonNullSlots = player.Inventory.Slots
+                    .Select((e, idx) => (e, idx))
+                    .Where(x => x.e != null)
+                    .ToList();
+                bw.Write(nonNullSlots.Count);
+                foreach (var (e, idx) in nonNullSlots) {
+                    bw.Write(idx);
+                    bw.Write(e!.Value.Item.Definition.Id);
+                    bw.Write(e.Value.Quantity);
+                    bw.Write(e.Value.Item.Durability);
+                }
+
+                // Оффхэнд
+                if (player.OffhandEntry != null) {
+                    bw.Write(true);
+                    bw.Write(player.OffhandEntry.Value.Item.Definition.Id);
+                    bw.Write(player.OffhandEntry.Value.Quantity);
+                    bw.Write(player.OffhandEntry.Value.Item.Durability);
+                } else {
+                    bw.Write(false);
+                }
+
+                // Броня
+                for (int a = 0; a < 4; a++) {
+                    if (player.Armor[a] is { } ae && ae.Quantity > 0) {
+                        bw.Write(true);
+                        bw.Write(ae.Item.Definition.Id);
+                        bw.Write(ae.Quantity);
+                        bw.Write(ae.Item.Durability);
+                    } else {
+                        bw.Write(false);
+                    }
+                }
+            }
+            File.Move(tmp, path, overwrite: true);
+        } catch { }
+    }
+
+    public static bool LoadPlayerData(string playerName, Player player) {
+        try {
+            string path = GetPlayerDataPath(playerName);
+            if (!File.Exists(path)) return false;
+            using var fs = File.OpenRead(path);
+            using var gz = new GZipStream(fs, CompressionMode.Decompress);
+            using var br = new BinaryReader(gz, Encoding.UTF8, leaveOpen: false);
+
+            if (br.ReadUInt32() != Magic) return false;
+            int version = br.ReadInt32();
+            string name = br.ReadString();
+            player.Name = name;
+            player.Position = ReadVec3(br);
+            player.Yaw = br.ReadSingle();
+            player.Pitch = br.ReadSingle();
+            player.Health = br.ReadSingle();
+            player.Hunger = br.ReadSingle();
+            player.Saturation = br.ReadSingle();
+            player.HighestYInAir = br.ReadSingle();
+            player.SelectedSlot = br.ReadInt32();
+
+            // Очищаем и загружаем инвентарь
+            for (int i = 0; i < player.Inventory.Capacity; i++) player.Inventory.RemoveAt(i);
+            int entryCount = br.ReadInt32();
+            for (int i = 0; i < entryCount; i++) {
+                int index = br.ReadInt32();
+                ushort defId = br.ReadUInt16();
+                int qty = br.ReadInt32();
+                int dur = br.ReadInt32();
+                if (GameData.Items.TryGetValue(defId, out var def)) {
+                    var item = GameData.NewItem(def);
+                    item.Durability = dur;
+                    player.Inventory.InsertAt(index, new ItemEntry(item, qty));
+                }
+            }
+
+            // Оффхэнд
+            if (br.ReadBoolean()) {
+                ushort defId = br.ReadUInt16();
+                int qty = br.ReadInt32();
+                int dur = br.ReadInt32();
+                if (GameData.Items.TryGetValue(defId, out var def)) {
+                    var item = GameData.NewItem(def);
+                    item.Durability = dur;
+                    player.OffhandEntry = new ItemEntry(item, qty);
+                }
+            } else {
+                player.OffhandEntry = null;
+            }
+
+            // Броня
+            for (int a = 0; a < 4; a++) {
+                if (br.ReadBoolean()) {
+                    ushort defId = br.ReadUInt16();
+                    int qty = br.ReadInt32();
+                    int dur = br.ReadInt32();
+                    if (GameData.Items.TryGetValue(defId, out var def)) {
+                        var item = GameData.NewItem(def);
+                        item.Durability = dur;
+                        player.Armor[a] = new ItemEntry(item, qty);
+                    }
+                } else {
+                    player.Armor[a] = null;
+                }
+            }
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
     // ── Настройки (JSON) ───────────────────────────────────────────────────
 
     public enum GraphicsPreset {

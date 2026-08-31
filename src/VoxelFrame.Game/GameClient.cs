@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using VoxelFrame.Core;
+using VoxelFrame.Core.Inventory;
 
 namespace VoxelFrame.Game;
 
@@ -74,6 +75,8 @@ public sealed class GameClient : IDisposable {
     public bool ReceivedCheats { get; private set; } = false;
     public int ReceivedGamemode { get; private set; } = 0;
     public bool HasReceivedWelcome { get; private set; } = false;
+    public bool HasReceivedPlayerData { get; private set; } = false;
+    public Player? InitialPlayerData { get; private set; }
 
     private readonly ConcurrentDictionary<int, RemotePlayer> _remotePlayers = new();
     public IReadOnlyCollection<RemotePlayer> RemotePlayers => _remotePlayers.Values.ToArray();
@@ -94,6 +97,9 @@ public sealed class GameClient : IDisposable {
 
     public void BindSession(GameSession session) {
         _session = session;
+        if (InitialPlayerData != null) {
+            ApplyPlayerDataToSession(session, InitialPlayerData);
+        }
     }
 
     public static void Disconnect() {
@@ -244,6 +250,83 @@ public sealed class GameClient : IDisposable {
                         _session?.AddChatMessage($"<{sender}> {msg}", new Raylib_cs.Color(r, g, b, (byte)255));
                         break;
                     }
+                    case PacketType.PlayerDataSync: {
+                        float px = reader.ReadSingle();
+                        float py = reader.ReadSingle();
+                        float pz = reader.ReadSingle();
+                        float yaw = reader.ReadSingle();
+                        float pitch = reader.ReadSingle();
+                        float hp = reader.ReadSingle();
+                        float hunger = reader.ReadSingle();
+                        float sat = reader.ReadSingle();
+                        int slot = reader.ReadInt32();
+
+                        var pData = new Player {
+                            Position = new Vector3(px, py, pz),
+                            Yaw = yaw,
+                            Pitch = pitch,
+                            Health = hp,
+                            Hunger = hunger,
+                            Saturation = sat,
+                            SelectedSlot = slot
+                        };
+
+                        int invCount = reader.ReadInt32();
+                        for (int i = 0; i < invCount; i++) {
+                            int idx = reader.ReadInt32();
+                            ushort itId = reader.ReadUInt16();
+                            int itQty = reader.ReadInt32();
+                            int itDur = reader.ReadInt32();
+                            if (GameData.Items.TryGetValue(itId, out var itDef)) {
+                                var itemInst = GameData.NewItem(itDef);
+                                itemInst.Durability = itDur;
+                                pData.Inventory.InsertAt(idx, new ItemEntry(itemInst, itQty));
+                            }
+                        }
+
+                        if (reader.ReadBoolean()) {
+                            ushort offId = reader.ReadUInt16();
+                            int offQty = reader.ReadInt32();
+                            int offDur = reader.ReadInt32();
+                            if (GameData.Items.TryGetValue(offId, out var offDef)) {
+                                var offInst = GameData.NewItem(offDef);
+                                offInst.Durability = offDur;
+                                pData.OffhandEntry = new ItemEntry(offInst, offQty);
+                            }
+                        }
+
+                        for (int a = 0; a < 4; a++) {
+                            if (reader.ReadBoolean()) {
+                                ushort armId = reader.ReadUInt16();
+                                int armQty = reader.ReadInt32();
+                                int armDur = reader.ReadInt32();
+                                if (GameData.Items.TryGetValue(armId, out var armDef)) {
+                                    var armInst = GameData.NewItem(armDef);
+                                    armInst.Durability = armDur;
+                                    pData.Armor[a] = new ItemEntry(armInst, armQty);
+                                }
+                            }
+                        }
+
+                        InitialPlayerData = pData;
+                        HasReceivedPlayerData = true;
+
+                        if (_session != null) {
+                            ApplyPlayerDataToSession(_session, pData);
+                        }
+                        break;
+                    }
+                    case PacketType.Teleport: {
+                        float tpx = reader.ReadSingle();
+                        float tpy = reader.ReadSingle();
+                        float tpz = reader.ReadSingle();
+                        if (_session != null) {
+                            _session.Player.Position = new Vector3(tpx, tpy, tpz);
+                            _session.Player.Velocity = Vector3.Zero;
+                            _session.AddChatMessage($"Вы были телепортированы на X:{tpx:F1} Y:{tpy:F1} Z:{tpz:F1}", Raylib_cs.Color.Green);
+                        }
+                        break;
+                    }
                     case PacketType.TimeWeatherSync: {
                         float tod = reader.ReadSingle();
                         int weather = reader.ReadInt32();
@@ -309,7 +392,39 @@ public sealed class GameClient : IDisposable {
         } catch { }
     }
 
+    public void SendInventoryUpdate(Player player) {
+        if (!IsConnected || _stream == null) return;
+        try {
+            var data = NetworkProtocol.WritePlayerInventoryUpdate(player);
+            _stream.Write(data, 0, data.Length);
+        } catch { }
+    }
+
+    public static void ApplyPlayerDataToSession(GameSession session, Player data) {
+        session.Player.Position = data.Position;
+        session.Player.Yaw = data.Yaw;
+        session.Player.Pitch = data.Pitch;
+        session.Player.Health = data.Health;
+        session.Player.Hunger = data.Hunger;
+        session.Player.Saturation = data.Saturation;
+        session.Player.SelectedSlot = data.SelectedSlot;
+
+        for (int i = 0; i < session.Player.Inventory.Capacity; i++) session.Player.Inventory.RemoveAt(i);
+        for (int i = 0; i < data.Inventory.Capacity; i++) {
+            if (data.Inventory.Slots[i] is { } e) {
+                session.Player.Inventory.InsertAt(i, e);
+            }
+        }
+        session.Player.OffhandEntry = data.OffhandEntry;
+        for (int a = 0; a < 4; a++) {
+            session.Player.Armor[a] = data.Armor[a];
+        }
+    }
+
     public void Dispose() {
+        if (_session != null) {
+            SendInventoryUpdate(_session.Player);
+        }
         _cts?.Cancel();
         try { _socket?.Close(); } catch { }
         _socket = null;
