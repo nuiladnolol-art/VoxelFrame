@@ -95,7 +95,23 @@ public sealed class GameServer : IDisposable {
         Active = null;
     }
 
+    private readonly ConcurrentQueue<Action> _mainThreadActions = new();
+
+    public void EnqueueMainThreadAction(Action action) {
+        _mainThreadActions.Enqueue(action);
+    }
+
+    public void ProcessMainThreadActions() {
+        while (_mainThreadActions.TryDequeue(out var action)) {
+            try {
+                action();
+            } catch { }
+        }
+    }
+
     public void Update(float dt) {
+        ProcessMainThreadActions();
+
         foreach (var c in _clients.Values) {
             c.Update(dt);
         }
@@ -325,9 +341,11 @@ public sealed class GameServer : IDisposable {
                         if (targetId == 1) {
                             // Hit the host player!
                             var attackerPos = client.Position;
-                            _session.Player.ApplyDamage(dmg, _session, attackerPos, cause: "pvp");
-                            _session.Player.HurtTimer = 1.0f;
-                            BroadcastHostAction(PlayerActionType.Hurt, 0);
+                            EnqueueMainThreadAction(() => {
+                                _session.Player.ApplyDamage(dmg, _session, attackerPos, cause: "pvp");
+                                _session.Player.HurtTimer = 1.0f;
+                                BroadcastHostAction(PlayerActionType.Hurt, 0);
+                            });
                         } else {
                             // Forward to target client
                             var hitPacket = NetworkProtocol.WritePlayerHit(attackerId, targetId, dmg);
@@ -343,16 +361,53 @@ public sealed class GameServer : IDisposable {
                         byte mask = reader.ReadByte();
                         bool isBreak = reader.ReadBoolean();
 
-                        var cell = new Vec3i(bx, by, bz);
-                        if (isBreak) {
-                            _session.World.RemoveBlock(cell);
-                        } else {
-                            _session.World.PlacePlacedBlock(cell, GameData.GetBlock(typeId), mask);
-                        }
+                        EnqueueMainThreadAction(() => {
+                            var cell = new Vec3i(bx, by, bz);
+                            if (isBreak) {
+                                _session.World.RemoveBlock(cell);
+                            } else {
+                                _session.World.PlacePlacedBlock(cell, GameData.GetBlock(typeId), mask);
+                            }
+                        });
 
                         // Broadcast to other clients
                         var blockP = NetworkProtocol.WriteBlockChange(bx, by, bz, typeId, mask, isBreak);
                         Broadcast(blockP, exceptClientId: clientId);
+                        break;
+                    }
+                    case PacketType.ChestSync: {
+                        int cx = reader.ReadInt32();
+                        int cy = reader.ReadInt32();
+                        int cz = reader.ReadInt32();
+                        int cCount = reader.ReadInt32();
+                        var items = new List<(int idx, ushort id, int qty, int dur)>();
+                        for (int i = 0; i < cCount; i++) {
+                            items.Add((reader.ReadInt32(), reader.ReadUInt16(), reader.ReadInt32(), reader.ReadInt32()));
+                        }
+
+                        EnqueueMainThreadAction(() => {
+                            var cPos = new Vec3i(cx, cy, cz);
+                            var chest = _session.World.GetOrCreateChest(cPos);
+                            for (int i = 0; i < chest.Capacity; i++) chest.RemoveAt(i);
+                            foreach (var item in items) {
+                                if (GameData.Items.TryGetValue(item.id, out var def)) {
+                                    var inst = GameData.NewItem(def);
+                                    inst.Durability = item.dur;
+                                    chest.InsertAt(item.idx, new ItemEntry(inst, item.qty));
+                                }
+                            }
+                        });
+
+                        // Broadcast to other clients
+                        using var ms = new MemoryStream();
+                        using var w = new BinaryWriter(ms, Encoding.UTF8);
+                        w.Write((byte)PacketType.ChestSync);
+                        w.Write(cx); w.Write(cy); w.Write(cz);
+                        w.Write(items.Count);
+                        foreach (var item in items) {
+                            w.Write(item.idx); w.Write(item.id); w.Write(item.qty); w.Write(item.dur);
+                        }
+                        Broadcast(ms.ToArray(), exceptClientId: clientId);
                         break;
                     }
                     case PacketType.ChatMessage: {
@@ -361,7 +416,9 @@ public sealed class GameServer : IDisposable {
                         byte r = reader.ReadByte();
                         byte g = reader.ReadByte();
                         byte b = reader.ReadByte();
-                        _session.AddChatMessage($"<{sender}> {msg}", new Raylib_cs.Color(r, g, b, (byte)255));
+                        EnqueueMainThreadAction(() => {
+                            _session.AddChatMessage($"<{sender}> {msg}", new Raylib_cs.Color(r, g, b, (byte)255));
+                        });
                         var chatP = NetworkProtocol.WriteChatMessage(sender, msg, r, g, b);
                         Broadcast(chatP, exceptClientId: clientId);
                         break;
@@ -441,6 +498,12 @@ public sealed class GameServer : IDisposable {
     public void BroadcastHostChat(string name, string message) {
         if (!IsRunning || ClientCount == 0) return;
         var p = NetworkProtocol.WriteChatMessage(name, message);
+        Broadcast(p);
+    }
+
+    public void BroadcastChestSync(Vec3i pos, VoxelFrame.Core.Inventory.Container container) {
+        if (!IsRunning || ClientCount == 0) return;
+        var p = NetworkProtocol.WriteChestSync(pos.X, pos.Y, pos.Z, container);
         Broadcast(p);
     }
 

@@ -77,6 +77,7 @@ public sealed class GameClient : IDisposable {
     public bool HasReceivedWelcome { get; private set; } = false;
     public bool HasReceivedPlayerData { get; private set; } = false;
     public Player? InitialPlayerData { get; private set; }
+    public bool WasDisconnected { get; set; } = false;
 
     private readonly ConcurrentDictionary<int, RemotePlayer> _remotePlayers = new();
     public IReadOnlyCollection<RemotePlayer> RemotePlayers => _remotePlayers.Values.ToArray();
@@ -341,6 +342,30 @@ public sealed class GameClient : IDisposable {
                         }
                         break;
                     }
+                    case PacketType.ChestSync: {
+                        int cx = reader.ReadInt32();
+                        int cy = reader.ReadInt32();
+                        int cz = reader.ReadInt32();
+                        int cCount = reader.ReadInt32();
+                        var items = new List<(int idx, ushort id, int qty, int dur)>();
+                        for (int i = 0; i < cCount; i++) {
+                            items.Add((reader.ReadInt32(), reader.ReadUInt16(), reader.ReadInt32(), reader.ReadInt32()));
+                        }
+
+                        if (_session != null) {
+                            var cPos = new Vec3i(cx, cy, cz);
+                            var chest = _session.World.GetOrCreateChest(cPos);
+                            for (int i = 0; i < chest.Capacity; i++) chest.RemoveAt(i);
+                            foreach (var item in items) {
+                                if (GameData.Items.TryGetValue(item.id, out var def)) {
+                                    var inst = GameData.NewItem(def);
+                                    inst.Durability = item.dur;
+                                    chest.InsertAt(item.idx, new ItemEntry(inst, item.qty));
+                                }
+                            }
+                        }
+                        break;
+                    }
                     case PacketType.TimeWeatherSync: {
                         float tod = reader.ReadSingle();
                         int weather = reader.ReadInt32();
@@ -355,6 +380,7 @@ public sealed class GameClient : IDisposable {
         } catch {
             // Disconnected
         } finally {
+            WasDisconnected = true;
             _session?.AddChatMessage("Соединение с сервером разорвано.", Raylib_cs.Color.Red);
             _session?.AddMessage("Соединение с сервером разорвано");
         }
@@ -405,6 +431,11 @@ public sealed class GameClient : IDisposable {
 
     public void SendInventoryUpdate(Player player) {
         var data = NetworkProtocol.WritePlayerInventoryUpdate(player);
+        SendPacket(data);
+    }
+
+    public void SendChestSync(Vec3i pos, VoxelFrame.Core.Inventory.Container container) {
+        var data = NetworkProtocol.WriteChestSync(pos.X, pos.Y, pos.Z, container);
         SendPacket(data);
     }
 

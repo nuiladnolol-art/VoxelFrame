@@ -20,7 +20,8 @@ public enum PacketType : byte {
     PlayerHit = 12,
     PlayerDataSync = 13,
     PlayerInventoryUpdate = 14,
-    Teleport = 15
+    Teleport = 15,
+    ChestSync = 16
 }
 
 public enum PlayerActionType : byte {
@@ -268,6 +269,31 @@ public static class NetworkProtocol {
         using var w = new BinaryWriter(ms, Encoding.UTF8);
         w.Write((byte)PacketType.Disconnect);
         w.Write(reason);
+        return ms.ToArray();
+    }
+
+    public static byte[] WriteChestSync(int x, int y, int z, VoxelFrame.Core.Inventory.Container container) {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms, Encoding.UTF8);
+        w.Write((byte)PacketType.ChestSync);
+        w.Write(x);
+        w.Write(y);
+        w.Write(z);
+
+        var nonNull = new List<(int idx, ushort id, int qty, int dur)>();
+        for (int i = 0; i < container.Capacity; i++) {
+            var slot = container.Slots[i];
+            if (slot != null && slot.Value.Quantity > 0) {
+                nonNull.Add((i, slot.Value.Item.Definition.Id, slot.Value.Quantity, slot.Value.Item.Durability));
+            }
+        }
+        w.Write(nonNull.Count);
+        foreach (var item in nonNull) {
+            w.Write(item.idx);
+            w.Write(item.id);
+            w.Write(item.qty);
+            w.Write(item.dur);
+        }
         return ms.ToArray();
     }
 }

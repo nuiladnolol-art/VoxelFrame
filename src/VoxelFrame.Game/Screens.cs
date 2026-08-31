@@ -2353,6 +2353,11 @@ public static partial class Screens {
         }
     }
 
+    private static void NotifyChestChanged(GameSession session, Container chest) {
+        if (GameClient.Active != null) GameClient.Active.SendChestSync(session.ActiveChestPos, chest);
+        if (GameServer.Active != null) GameServer.Active.BroadcastChestSync(session.ActiveChestPos, chest);
+    }
+
     // ── Экран сундука (27 слотов сундука + 36 слотов игрока) ─────────────────
 
     public static void DrawChestUI(GameSession session) {
@@ -2394,8 +2399,10 @@ public static partial class Screens {
             if (sortHov) {
                 SortContainer(chestInv);
                 session.AddMessage("Сундук отсортирован!");
+                NotifyChestChanged(session, chestInv);
             } else if (stackHov) {
                 QuickStackToChest(pInv, chestInv, session);
+                NotifyChestChanged(session, chestInv);
             }
         }
 
@@ -2424,6 +2431,7 @@ public static partial class Screens {
 
                 if ((leftClick || rightClick) && hov) {
                     HandleContainerSlotClick(chestInv, idx, leftClick, rightClick, pInv);
+                    NotifyChestChanged(session, chestInv);
                 }
             }
         }
@@ -2452,6 +2460,7 @@ public static partial class Screens {
                     float sy = invY + row * (slotSz + gap);
                     if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(sx, sy, slotSz, slotSz))) {
                         HandleContainerSlotClick(pInv, 9 + row * 9 + col, leftClick, rightClick, chestInv);
+                        NotifyChestChanged(session, chestInv);
                         return;
                     }
                 }
@@ -2461,6 +2470,7 @@ public static partial class Screens {
                 float sy = hotY;
                 if (Raylib.CheckCollisionPointRec(mouse, new Rectangle(sx, sy, slotSz, slotSz))) {
                     HandleContainerSlotClick(pInv, col, leftClick, rightClick, chestInv);
+                    NotifyChestChanged(session, chestInv);
                     return;
                 }
             }

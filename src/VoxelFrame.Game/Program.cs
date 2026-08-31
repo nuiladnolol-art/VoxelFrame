@@ -208,6 +208,35 @@ internal static class Program {
                 continue;
             }
 
+            // Если соединение клиента с сервером было разорвано (хост закрыл сервер или упал)
+            if (GameClient.Active is { WasDisconnected: true }) {
+                if (cursorCaptured) {
+                    Raylib.EnableCursor();
+                    cursorCaptured = false;
+                }
+                Raylib.BeginDrawing();
+                Raylib.ClearBackground(new Color(18, 20, 28, 255));
+                Ui.Begin();
+                int dw = Ui.Vw, dh = Ui.Vh;
+                Fonts.DrawCentered("СОЕДИНЕНИЕ С СЕРВЕРОМ ПОТЕРЯНО", dw / 2f, dh * 0.35f, 26f, new Color(240, 80, 80, 255));
+                Fonts.DrawCentered("Хост закрыл сервер или произошел сбой сети", dw / 2f, dh * 0.43f, 15f, new Color(180, 185, 200, 255));
+                var btnRec = new Rectangle(dw / 2f - 130f, dh * 0.55f, 260f, 44f);
+                var mouse = Ui.Mouse();
+                bool hov = Raylib.CheckCollisionPointRec(mouse, btnRec);
+                Raylib.DrawRectangleRounded(btnRec, 0.15f, 6, hov ? new Color(60, 75, 100, 255) : new Color(40, 48, 62, 220));
+                Raylib.DrawRectangleRoundedLinesEx(btnRec, 0.15f, 6, 1.5f, hov ? new Color(120, 180, 255, 255) : new Color(70, 85, 110, 200));
+                Fonts.DrawCentered("Главное меню", btnRec.X + btnRec.Width / 2f, btnRec.Y + 12f, 16f, Color.White);
+
+                if (hov && Raylib.IsMouseButtonPressed(MouseButton.Left)) {
+                    GameClient.Disconnect();
+                    session = null;
+                    renderer = null;
+                }
+                Ui.End();
+                Raylib.EndDrawing();
+                continue;
+            }
+
             // Экран загрузки: рисуем + строим первые меши видимых чанков
             if (session.Ui == UiState.Loading) {
                 renderer!.ProcessMeshQueue();
