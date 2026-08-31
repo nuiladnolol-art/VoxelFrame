@@ -33,9 +33,23 @@ public sealed class ConnectedClient {
     public string SkinName { get; set; } = "steve";
     public Player PlayerData { get; set; } = new();
 
+    private readonly object _sendLock = new();
+
     public ConnectedClient(int id, TcpClient socket) {
         Id = id;
         Socket = socket;
+    }
+
+    public void Send(byte[] data) {
+        lock (_sendLock) {
+            try {
+                if (Socket.Connected) {
+                    var stream = Socket.GetStream();
+                    stream.Write(data, 0, data.Length);
+                    stream.Flush();
+                }
+            } catch { }
+        }
     }
 
     public void Update(float dt) {
@@ -138,7 +152,7 @@ public sealed class GameServer : IDisposable {
                 _session.CheatsEnabled,
                 (int)_session.GameMode
             );
-            stream.Write(welcome, 0, welcome.Length);
+            client.Send(welcome);
 
             // Inform the new client about the host player
             var hostJoin = NetworkProtocol.WritePlayerJoin(
@@ -148,13 +162,13 @@ public sealed class GameServer : IDisposable {
                 _session.Player.Yaw,
                 _session.Player.Pitch
             );
-            stream.Write(hostJoin, 0, hostJoin.Length);
+            client.Send(hostJoin);
 
             // Inform about other connected clients
             foreach (var other in _clients.Values) {
                 if (other.Id != clientId) {
                     var otherJoin = NetworkProtocol.WritePlayerJoin(other.Id, other.Name, other.Position, other.Yaw, other.Pitch);
-                    stream.Write(otherJoin, 0, otherJoin.Length);
+                    client.Send(otherJoin);
                 }
             }
 
@@ -181,7 +195,7 @@ public sealed class GameServer : IDisposable {
                                 client.Health = client.PlayerData.Health;
 
                                 var pDataSync = NetworkProtocol.WritePlayerDataSync(client.PlayerData);
-                                stream.Write(pDataSync, 0, pDataSync.Length);
+                                client.Send(pDataSync);
                             }
                         }
 
@@ -191,6 +205,11 @@ public sealed class GameServer : IDisposable {
                         var joinPacket = NetworkProtocol.WritePlayerJoin(clientId, name, client.Position, client.Yaw, client.Pitch);
                         Broadcast(joinPacket, exceptClientId: clientId);
                         break;
+                    }
+                    case PacketType.Disconnect: {
+                        string reason = reader.ReadString();
+                        SaveSystem.SavePlayerData(client.Name, client.PlayerData);
+                        return;
                     }
                     case PacketType.PlayerInventoryUpdate: {
                         float px = reader.ReadSingle();
@@ -368,10 +387,7 @@ public sealed class GameServer : IDisposable {
             client.TargetPosition = pos;
             client.PlayerData.Position = pos;
             var tpPacket = NetworkProtocol.WriteTeleport(pos);
-            try {
-                var stream = client.Socket.GetStream();
-                stream.Write(tpPacket, 0, tpPacket.Length);
-            } catch { }
+            client.Send(tpPacket);
         }
     }
 
@@ -394,12 +410,7 @@ public sealed class GameServer : IDisposable {
     public void Broadcast(byte[] data, int exceptClientId = -1) {
         foreach (var client in _clients.Values) {
             if (client.Id == exceptClientId) continue;
-            try {
-                var stream = client.Socket.GetStream();
-                stream.Write(data, 0, data.Length);
-            } catch {
-                // Ignore transient write errors
-            }
+            client.Send(data);
         }
     }
 

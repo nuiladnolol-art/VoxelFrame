@@ -81,6 +81,8 @@ public sealed class GameClient : IDisposable {
     private readonly ConcurrentDictionary<int, RemotePlayer> _remotePlayers = new();
     public IReadOnlyCollection<RemotePlayer> RemotePlayers => _remotePlayers.Values.ToArray();
 
+    private readonly object _sendLock = new();
+
     public GameClient(string host, int port, string playerName) {
         Host = host;
         Port = port;
@@ -102,9 +104,21 @@ public sealed class GameClient : IDisposable {
         }
     }
 
-    public static void Disconnect() {
-        Active?.Dispose();
+    public static void Disconnect(Player? player = null) {
+        Active?.DisconnectAndNotify(player);
         Active = null;
+    }
+
+    public void DisconnectAndNotify(Player? player = null) {
+        try {
+            if (player != null) {
+                SendInventoryUpdate(player);
+            }
+            var disc = NetworkProtocol.WriteDisconnect("User disconnected");
+            SendPacket(disc);
+            Thread.Sleep(100);
+        } catch { }
+        Dispose();
     }
 
     private async Task StartAsync() {
@@ -352,52 +366,46 @@ public sealed class GameClient : IDisposable {
         }
     }
 
-    public void SendMovement(Vector3 pos, float yaw, float pitch, bool isMoving, bool isSneaking, bool isFlying, float health) {
+    public void SendPacket(byte[] data) {
         if (!IsConnected || _stream == null) return;
-        try {
-            var data = NetworkProtocol.WritePlayerMovement(LocalClientId, pos, yaw, pitch, isMoving, isSneaking, isFlying, health);
-            _stream.Write(data, 0, data.Length);
-        } catch { }
+        lock (_sendLock) {
+            try {
+                if (_socket is { Connected: true }) {
+                    _stream.Write(data, 0, data.Length);
+                    _stream.Flush();
+                }
+            } catch { }
+        }
+    }
+
+    public void SendMovement(Vector3 pos, float yaw, float pitch, bool isMoving, bool isSneaking, bool isFlying, float health) {
+        var data = NetworkProtocol.WritePlayerMovement(LocalClientId, pos, yaw, pitch, isMoving, isSneaking, isFlying, health);
+        SendPacket(data);
     }
 
     public void SendAction(PlayerActionType action, int itemId) {
-        if (!IsConnected || _stream == null) return;
-        try {
-            var data = NetworkProtocol.WritePlayerAction(LocalClientId, action, itemId);
-            _stream.Write(data, 0, data.Length);
-        } catch { }
+        var data = NetworkProtocol.WritePlayerAction(LocalClientId, action, itemId);
+        SendPacket(data);
     }
 
     public void SendHit(int targetId, float damage) {
-        if (!IsConnected || _stream == null) return;
-        try {
-            var data = NetworkProtocol.WritePlayerHit(LocalClientId, targetId, damage);
-            _stream.Write(data, 0, data.Length);
-        } catch { }
+        var data = NetworkProtocol.WritePlayerHit(LocalClientId, targetId, damage);
+        SendPacket(data);
     }
 
     public void SendBlockChange(int x, int y, int z, ushort blockTypeId, byte mask, bool isBreak) {
-        if (!IsConnected || _stream == null) return;
-        try {
-            var data = NetworkProtocol.WriteBlockChange(x, y, z, blockTypeId, mask, isBreak);
-            _stream.Write(data, 0, data.Length);
-        } catch { }
+        var data = NetworkProtocol.WriteBlockChange(x, y, z, blockTypeId, mask, isBreak);
+        SendPacket(data);
     }
 
     public void SendChatMessage(string message) {
-        if (!IsConnected || _stream == null) return;
-        try {
-            var data = NetworkProtocol.WriteChatMessage(PlayerName, message);
-            _stream.Write(data, 0, data.Length);
-        } catch { }
+        var data = NetworkProtocol.WriteChatMessage(PlayerName, message);
+        SendPacket(data);
     }
 
     public void SendInventoryUpdate(Player player) {
-        if (!IsConnected || _stream == null) return;
-        try {
-            var data = NetworkProtocol.WritePlayerInventoryUpdate(player);
-            _stream.Write(data, 0, data.Length);
-        } catch { }
+        var data = NetworkProtocol.WritePlayerInventoryUpdate(player);
+        SendPacket(data);
     }
 
     public static void ApplyPlayerDataToSession(GameSession session, Player data) {
@@ -419,6 +427,9 @@ public sealed class GameClient : IDisposable {
         for (int a = 0; a < 4; a++) {
             session.Player.Armor[a] = data.Armor[a];
         }
+        try {
+            session.World.EnsureLoadedAroundSync(session.Player.Position, 1);
+        } catch { }
     }
 
     public void Dispose() {

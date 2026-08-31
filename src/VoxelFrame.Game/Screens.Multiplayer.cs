@@ -397,6 +397,17 @@ public static partial class Screens {
                     return;
                 }
 
+                // Ждём PlayerDataSync пакет от сервера (если есть сохраненный прогресс)
+                int pdWait = 0;
+                while (!client.HasReceivedPlayerData && pdWait < 350) {
+                    if (token.IsCancellationRequested) {
+                        GameClient.Disconnect();
+                        return;
+                    }
+                    await Task.Delay(25, token);
+                    pdWait += 25;
+                }
+
                 // Инициализируем локальный игровой мир с полученным сидом
                 var newSession = GameSession.NewGame(client.ReceivedSeed, headless: false);
                 newSession.GameMode = (GameMode)client.ReceivedGamemode;

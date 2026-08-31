@@ -262,4 +262,12 @@ public static class NetworkProtocol {
 
         return ms.ToArray();
     }
+
+    public static byte[] WriteDisconnect(string reason = "Left game") {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms, Encoding.UTF8);
+        w.Write((byte)PacketType.Disconnect);
+        w.Write(reason);
+        return ms.ToArray();
+    }
 }

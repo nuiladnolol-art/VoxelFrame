@@ -314,7 +314,7 @@ internal static class Program {
                     SoundSystem.StopTotem();
                     SoundSystem.StopDisc();
                     bool wasClient = GameClient.Active != null;
-                    GameClient.Disconnect();
+                    GameClient.Disconnect(session.Player);
                     GameServer.Stop();
                     if (!wasClient) {
                         session.SaveTo(SaveSystem.SavePath);
