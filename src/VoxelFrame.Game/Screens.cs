@@ -383,7 +383,7 @@ public static partial class Screens {
             var verRec = new Rectangle(14f, h - 34f, 190f, 24f);
             Raylib.DrawRectangleRec(verRec, new Color(20, 24, 34, 180));
             Raylib.DrawRectangleLinesEx(verRec, 1f, new Color(50, 60, 80, 180));
-            Fonts.Draw("VoxelFrame 1.0.0-pre2", 22f, h - 30f, 14f, new Color(190, 205, 230, 220));
+            Fonts.Draw("VoxelFrame 1.0.0-pre3", 22f, h - 30f, 14f, new Color(190, 205, 230, 220));
 
             // Правый копирайт
             var copyRec = new Rectangle(w - 200f, h - 34f, 186f, 24f);

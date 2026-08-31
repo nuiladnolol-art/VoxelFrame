@@ -86,7 +86,7 @@ public class LauncherForm : Form {
         headerPanel.Controls.Add(lblTitle);
 
         Label lblBadge = new Label {
-            Text = "1.0.0-pre2",
+            Text = "1.0.0-pre3",
             Font = new Font("Segoe UI", 9, FontStyle.Bold),
             ForeColor = Color.FromArgb(100, 220, 120),
             BackColor = Color.FromArgb(30, 60, 40),
@@ -351,7 +351,7 @@ public class LauncherForm : Form {
         if (newestExe != null) {
             _versions.Add(new GameReleaseItem {
                 DisplayName = "⚡ VoxelFrame (Актуальная версия)",
-                Tag = "v1.0.0-pre2",
+                Tag = "v1.0.0-pre3",
                 IsInstalled = true,
                 InstallPath = Path.GetDirectoryName(newestExe)!,
                 ExePath = newestExe
@@ -359,7 +359,7 @@ public class LauncherForm : Form {
         } else if (gameDir != null) {
             _versions.Add(new GameReleaseItem {
                 DisplayName = "⚡ VoxelFrame (Актуальная версия)",
-                Tag = "v1.0.0-pre2",
+                Tag = "v1.0.0-pre3",
                 IsLocalDev = true,
                 IsInstalled = true,
                 InstallPath = gameDir
