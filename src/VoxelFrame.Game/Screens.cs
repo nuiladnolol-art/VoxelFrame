@@ -2247,7 +2247,7 @@ public static partial class Screens {
 
         // Взаимодействие со слотом топлива
         if ((leftClick || rightClick) && fuelHov) {
-            HandleFurnaceSlotClick(ref furnace.Fuel, leftClick, rightClick, id => id == GameData.CoalItem.Id || id == GameData.CharcoalItem.Id || id == GameData.LogItem.Id || id == GameData.PlankItem.Id || id == GameData.StickItem.Id);
+            HandleFurnaceSlotClick(ref furnace.Fuel, leftClick, rightClick, id => GameData.IsFuel(id));
         }
 
         // Взаимодействие со слотом результата (только забирать)

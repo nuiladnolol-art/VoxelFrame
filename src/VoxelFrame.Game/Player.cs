@@ -538,7 +538,8 @@ public sealed partial class Player {
             }
 
             Velocity.Y -= Gravity * dt;
-            OnGround = Collision.Move(world, ref Position, HalfExtents, ref Velocity, dt, inCrouch && OnGround);
+            bool canSneak = inCrouch && (OnGround || Collision.HasGroundBelow(world, Position, HalfExtents, false));
+            OnGround = Collision.Move(world, ref Position, HalfExtents, ref Velocity, dt, canSneak);
         }
 
         if (OnGround && Velocity.Y < 0f) Velocity.Y = 0f;

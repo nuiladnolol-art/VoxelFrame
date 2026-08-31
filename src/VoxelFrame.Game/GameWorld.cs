@@ -437,7 +437,17 @@ public sealed partial class GameWorld : IDisposable {
         int s = 0;
         void Add(ItemDefinition def, int qty) { if (qty > 0 && s < slots.Length) newInv.InsertAt(slots[s++], new ItemEntry(GameData.NewItem(def), qty)); }
 
-        if (Dimension == Dimension.Nether || pos.Y >= 50 && (pos.X * 37 + pos.Z * 19) % 29 == 0) {
+        if (Generator.GetBiome(pos.X, pos.Y, pos.Z) == BiomeType.Desert) {
+            Add(GameData.GoldIngotItem, rng.Next(2, 6));
+            Add(GameData.IronIngotItem, rng.Next(1, 5));
+            Add(GameData.BoneItem, rng.Next(3, 8));
+            Add(GameData.GunpowderItem, rng.Next(2, 6));
+            Add(GameData.SandItem, rng.Next(4, 12));
+            if (rng.NextDouble() < 0.40) Add(GameData.DiamondItem, rng.Next(1, 3));
+            if (rng.NextDouble() < 0.25) Add(GameData.GoldenAppleItem, 1);
+            if (rng.NextDouble() < 0.15) Add(GameData.MusicDiscItem, 1);
+            if (rng.NextDouble() < 0.15) Add(GameData.TotemItem, 1);
+        } else if (Dimension == Dimension.Nether || pos.Y >= 50 && (pos.X * 37 + pos.Z * 19) % 29 == 0) {
             Add(GameData.GoldIngotItem, rng.Next(1, 4));
             Add(GameData.FlintAndSteelItem, 1);
             Add(GameData.ObsidianItem, rng.Next(1, 3));
@@ -1437,8 +1447,8 @@ public sealed class FurnaceData {
 
         if (canSmelt) {
             if (FuelTimer <= 0f && Fuel != null && Fuel.Value.Quantity > 0) {
-                float dur = (Fuel.Value.Item.Definition.Id == GameData.CoalItem.Id || Fuel.Value.Item.Definition.Id == GameData.CharcoalItem.Id) ? 80f :
-                            (Fuel.Value.Item.Definition.Id == GameData.LogItem.Id || Fuel.Value.Item.Definition.Id == GameData.PlankItem.Id) ? 15f : 5f;
+                float dur = GameData.GetFuelDuration(Fuel.Value.Item.Definition.Id);
+                if (dur <= 0f) dur = 5f;
                 FuelTimer = dur;
                 MaxFuelTimer = dur;
                 int remainingFuel = Fuel.Value.Quantity - 1;

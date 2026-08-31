@@ -332,6 +332,8 @@ public sealed class WorldGenerator {
             case "portal": case "ruinedportal": return FindNearestRuinedPortal(px, pz);
             case "dungeon": return FindNearestDungeon(px, pz);
             case "pyramid": case "desertpyramid": return FindNearestPyramid(px, pz);
+            case "chapel": return FindNearestChapel(px, pz);
+            case "vault": case "desertvault": return FindNearestDesertVault(px, pz);
             case "mineshaft": return FindNearestMineshaft(px, pz);
             case "stronghold": return FindNearestEndStronghold(from);
             default: return null;
@@ -394,19 +396,43 @@ public sealed class WorldGenerator {
     }
 
     private Vector3? FindNearestPyramid(int px, int pz) {
-        const int sector = 512;
+        const int sector = 384;
+        int psx = (int)MathF.Floor((float)px / sector), psz = (int)MathF.Floor((float)pz / sector);
+        Vector3? best = null; float bestDist = float.MaxValue;
+        for (int dx = -10; dx <= 10; dx++) for (int dz = -10; dz <= 10; dz++) {
+            int sx = psx + dx, sz = psz + dz;
+            if (TryGetDesertPyramidPos(sx, sz, out int cx, out int cz)) {
+                float d = (cx - px) * (cx - px) + (cz - pz) * (cz - pz);
+                if (d < bestDist) { bestDist = d; best = new Vector3(cx + 0.5f, SurfaceHeight(cx, cz), cz + 0.5f); }
+            }
+        }
+        return best;
+    }
+
+    private Vector3? FindNearestChapel(int px, int pz) {
+        const int sector = 384;
+        int psx = (int)MathF.Floor((float)px / sector), psz = (int)MathF.Floor((float)pz / sector);
+        Vector3? best = null; float bestDist = float.MaxValue;
+        for (int dx = -10; dx <= 10; dx++) for (int dz = -10; dz <= 10; dz++) {
+            int sx = psx + dx, sz = psz + dz;
+            if (TryGetAbandonedChapelPos(sx, sz, out int cx, out int cz)) {
+                float d = (cx - px) * (cx - px) + (cz - pz) * (cz - pz);
+                if (d < bestDist) { bestDist = d; best = new Vector3(cx + 0.5f, SurfaceHeight(cx, cz), cz + 0.5f); }
+            }
+        }
+        return best;
+    }
+
+    private Vector3? FindNearestDesertVault(int px, int pz) {
+        const int sector = 448;
         int psx = (int)MathF.Floor((float)px / sector), psz = (int)MathF.Floor((float)pz / sector);
         Vector3? best = null; float bestDist = float.MaxValue;
         for (int dx = -8; dx <= 8; dx++) for (int dz = -8; dz <= 8; dz++) {
             int sx = psx + dx, sz = psz + dz;
-            float seed = _mineshaftNoise.Get(sx * 42.1f + 123f, sz * 42.1f + 321f);
-            if (seed < 0.85f) continue;
-            var rng = new Random(_seed ^ (sx * 49281) ^ (sz * 89123));
-            int cx = sx * sector + rng.Next(64, sector - 64), cz = sz * sector + rng.Next(64, sector - 64);
-            if (GetBiome(cx, 40, cz) != BiomeType.Desert) continue;
-            if (SurfaceHeight(cx, cz) <= SeaLevel + 2) continue;
-            float d = (cx - px) * (cx - px) + (cz - pz) * (cz - pz);
-            if (d < bestDist) { bestDist = d; best = new Vector3(cx + 0.5f, SurfaceHeight(cx, cz), cz + 0.5f); }
+            if (TryGetDesertVaultPos(sx, sz, out int cx, out int cz)) {
+                float d = (cx - px) * (cx - px) + (cz - pz) * (cz - pz);
+                if (d < bestDist) { bestDist = d; best = new Vector3(cx + 0.5f, SurfaceHeight(cx, cz), cz + 0.5f); }
+            }
         }
         return best;
     }
@@ -678,8 +704,8 @@ public sealed class WorldGenerator {
                     bool surfaceBreach = surface > SeaLevel + 1 && wy >= surface - 3 && (isSpaghetti || isNoodle || inRavine) && cheese > 0.42f;
 
                     if (isCheese || isSpaghetti || isNoodle || inRavine || surfaceBreach) {
-                        // Естественные лавовые озера на самом дне мира (Y <= 8) с единой ровной гладью
-                        ushort replaceWith = (wy <= 8) ? GameData.BLava.Id : (ushort)0;
+                        // Естественные лавовые озера на дне мира (Y <= 11) с единой ровной гладью
+                        ushort replaceWith = (wy <= 11) ? GameData.BLava.Id : (ushort)0;
 
                         var v = MakeVoxel(replaceWith);
                         chunk.SetVoxel(idx, in v);
@@ -814,10 +840,10 @@ public sealed class WorldGenerator {
                         }
                     }
 
-                    // Алмазы (Diamond) — РЕДКИЕ драгоценные жилы на глубине Y=5..20 (значительно реже золота)
-                    if (wy <= 20) {
-                        float diaN = _diamondNoise.Fractal(wx * 0.26f + 5000f, wy * 0.26f, wz * 0.26f, 2, 0.5f);
-                        if (diaN > 0.85f) {
+                    // Алмазы (Diamond) — драгоценные жилы на глубине Y=5..22 (реже золота и железа)
+                    if (wy <= 22) {
+                        float diaN = _diamondNoise.Fractal(wx * 0.25f + 5000f, wy * 0.25f, wz * 0.25f, 2, 0.5f);
+                        if (diaN > 0.818f) {
                             var v = MakeVoxel(GameData.BDiamondOre.Id);
                             chunk.SetVoxel(idx, in v);
                             continue;
@@ -924,19 +950,86 @@ public sealed class WorldGenerator {
         return (dx * dx + dz * dz) <= (8 * 8);
     }
 
-    public bool IsInDesertPyramid(int wx, int wz) {
-        const int pyramidSector = 512;
-        int sectorX = (int)MathF.Floor((float)wx / pyramidSector);
-        int sectorZ = (int)MathF.Floor((float)wz / pyramidSector);
+    public bool TryGetDesertPyramidPos(int sectorX, int sectorZ, out int cx, out int cz) {
+        cx = 0; cz = 0;
+        const int pyramidSector = 384;
         float pSeed = _mineshaftNoise.Get(sectorX * 42.1f + 123f, sectorZ * 42.1f + 321f);
-        if (pSeed < 0.85f) return false;
+        if (pSeed < 0.45f) return false;
 
         var rng = new Random(_seed ^ (sectorX * 49281) ^ (sectorZ * 89123));
-        int cx = sectorX * pyramidSector + rng.Next(64, pyramidSector - 64);
-        int cz = sectorZ * pyramidSector + rng.Next(64, pyramidSector - 64);
+        for (int attempt = 0; attempt < 8; attempt++) {
+            int testX = sectorX * pyramidSector + rng.Next(48, pyramidSector - 48);
+            int testZ = sectorZ * pyramidSector + rng.Next(48, pyramidSector - 48);
+            if (GetBiome(testX, 40, testZ) == BiomeType.Desert) {
+                int surf = SurfaceHeight(testX, testZ);
+                if (surf > SeaLevel + 2 && surf < 60) {
+                    cx = testX;
+                    cz = testZ;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 
-        int dx = wx - cx, dz = wz - cz;
-        return (dx * dx + dz * dz) <= (14 * 14);
+    public bool TryGetAbandonedChapelPos(int sectorX, int sectorZ, out int cx, out int cz) {
+        cx = 0; cz = 0;
+        const int chapelSector = 384;
+        float cSeed = _mineshaftNoise.Get(sectorX * 17.71f + 919f, sectorZ * 17.71f + 131f);
+        if (cSeed < 0.50f) return false;
+
+        var rng = new Random(_seed ^ (sectorX * 557003) ^ (sectorZ * 411193));
+        for (int attempt = 0; attempt < 6; attempt++) {
+            int testX = sectorX * chapelSector + rng.Next(64, chapelSector - 64);
+            int testZ = sectorZ * chapelSector + rng.Next(64, chapelSector - 64);
+            var biome = GetBiome(testX, BaseHeight, testZ);
+            if (biome is (BiomeType.Plains or BiomeType.Forest or BiomeType.Savanna)) {
+                int surf = SurfaceHeight(testX, testZ);
+                if (surf > SeaLevel + 1 && surf < 56 && !IsInVillage(testX, testZ) && !IsInRuinedPortal(testX, testZ)) {
+                    cx = testX;
+                    cz = testZ;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public bool TryGetDesertVaultPos(int sectorX, int sectorZ, out int cx, out int cz) {
+        cx = 0; cz = 0;
+        const int vaultSector = 448;
+        float vSeed = _mineshaftNoise.Get(sectorX * 29.37f + 616f, sectorZ * 29.37f + 828f);
+        if (vSeed < 0.50f) return false;
+
+        var rng = new Random(_seed ^ (sectorX * 771273) ^ (sectorZ * 951341));
+        for (int attempt = 0; attempt < 6; attempt++) {
+            int testX = sectorX * vaultSector + rng.Next(64, vaultSector - 64);
+            int testZ = sectorZ * vaultSector + rng.Next(64, vaultSector - 64);
+            if (GetBiome(testX, 40, testZ) == BiomeType.Desert) {
+                int surf = SurfaceHeight(testX, testZ);
+                if (surf > SeaLevel + 1) {
+                    cx = testX;
+                    cz = testZ;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public bool IsInDesertPyramid(int wx, int wz) {
+        const int pyramidSector = 384;
+        int sectorX = (int)MathF.Floor((float)wx / pyramidSector);
+        int sectorZ = (int)MathF.Floor((float)wz / pyramidSector);
+        for (int sx = sectorX - 1; sx <= sectorX + 1; sx++) {
+            for (int sz = sectorZ - 1; sz <= sectorZ + 1; sz++) {
+                if (TryGetDesertPyramidPos(sx, sz, out int cx, out int cz)) {
+                    int dx = wx - cx, dz = wz - cz;
+                    if ((dx * dx + dz * dz) <= (14 * 14)) return true;
+                }
+            }
+        }
+        return false;
     }
 
     /// <summary>
@@ -1493,207 +1586,197 @@ public sealed class WorldGenerator {
     /// <summary>Заброшенная часовня: надземный данж на поверхности (лес/равнины/саванна),
     /// небольшая постройка из булыжника с колокольным ярусом, спавнером и двумя сундуками.</summary>
     private void PlaceAbandonedChapel(Chunk chunk, int ox, int oy, int oz) {
-        const int chapelSector = 640;
+        const int chapelSector = 384;
         int sectorX = (int)MathF.Floor((float)ox / chapelSector);
         int sectorZ = (int)MathF.Floor((float)oz / chapelSector);
 
-        // ~33% секторов имеют часовню
-        float cSeed = _mineshaftNoise.Get(sectorX * 17.71f + 919f, sectorZ * 17.71f + 131f);
-        if (cSeed < 0.67f) return;
+        for (int sx = sectorX - 1; sx <= sectorX + 1; sx++) {
+            for (int sz = sectorZ - 1; sz <= sectorZ + 1; sz++) {
+                if (!TryGetAbandonedChapelPos(sx, sz, out int cx, out int cz)) continue;
 
-        var rng = new Random(_seed ^ (sectorX * 557003) ^ (sectorZ * 411193));
-        int cx = sectorX * chapelSector + rng.Next(96, chapelSector - 96);
-        int cz = sectorZ * chapelSector + rng.Next(96, chapelSector - 96);
+                if (ox > cx + 8 || ox + Chunk.SizeX <= cx - 8 || oz > cz + 8 || oz + Chunk.SizeZ <= cz - 8) continue;
 
-        // Только на открытой суше, не в деревне/пирамиде/портале и не в горах
-        var biome = GetBiome(cx, BaseHeight, cz);
-        if (biome is not (BiomeType.Plains or BiomeType.Forest or BiomeType.Savanna)) return;
-        if (IsInVillage(cx, cz) || IsInDesertPyramid(cx, cz) || IsInRuinedPortal(cx, cz)) return;
-        int surface = SurfaceHeight(cx, cz);
-        if (surface <= SeaLevel + 1 || surface >= 54) return;
+                int surface = SurfaceHeight(cx, cz);
 
-        if (Math.Abs(ox + Chunk.SizeX / 2 - cx) > 24 || Math.Abs(oz + Chunk.SizeZ / 2 - cz) > 24) return;
-        // Часовня требует, чтобы весь её footprint был в этом чанке — иначе сосед пропустит
-        if (ox + Chunk.SizeX - 1 < cx + 4 || oz + Chunk.SizeZ - 1 < cz + 4) return;
-
-        int baseY = surface + 1;
-
-        // Фундамент 7×7 из булыжника/мшистого
-        for (int dx = -3; dx <= 3; dx++) {
-            for (int dz = -3; dz <= 3; dz++) {
-                ushort wall = ((cx + dx) * 5 + (cz + dz) * 11) % 4 == 0 ? GameData.BMossyCobblestone.Id : GameData.BCobblestone.Id;
-                SetWorldBlock(chunk, ox, oy, oz, cx + dx, surface, cz + dz, wall);
-            }
-        }
-
-        // Стены высотой 4 с дверным проёмом на юге
-        for (int dy = 1; dy <= 4; dy++) {
-            for (int dx = -3; dx <= 3; dx++) {
-                for (int dz = -3; dz <= 3; dz++) {
-                    bool isWall = dx == -3 || dx == 3 || dz == -3 || dz == 3;
-                    if (!isWall) continue;
-                    bool isDoor = dz == 3 && dx == 0 && dy <= 2;
-                    if (isDoor) continue;
-                    // Колокольный ярус: угловые столбы выше
-                    bool isCorner = Math.Abs(dx) == 3 && Math.Abs(dz) == 3;
-                    if (isCorner && dy <= 5) continue;
-                    ushort wall = ((cx + dx) * 7 + (cz + dz) * 13 + dy * 3) % 4 == 0 ? GameData.BMossyCobblestone.Id : GameData.BCobblestone.Id;
-                    SetWorldBlock(chunk, ox, oy, oz, cx + dx, surface + dy, cz + dz, wall);
+                // Фундамент 7×7 из булыжника/мшистого
+                for (int dx = -3; dx <= 3; dx++) {
+                    for (int dz = -3; dz <= 3; dz++) {
+                        ushort wall = ((cx + dx) * 5 + (cz + dz) * 11) % 4 == 0 ? GameData.BMossyCobblestone.Id : GameData.BCobblestone.Id;
+                        SetWorldBlock(chunk, ox, oy, oz, cx + dx, surface, cz + dz, wall);
+                    }
                 }
+
+                // Стены высотой 4 с дверным проёмом на юге
+                for (int dy = 1; dy <= 4; dy++) {
+                    for (int dx = -3; dx <= 3; dx++) {
+                        for (int dz = -3; dz <= 3; dz++) {
+                            bool isWall = dx == -3 || dx == 3 || dz == -3 || dz == 3;
+                            if (!isWall) continue;
+                            bool isDoor = dz == 3 && dx == 0 && dy <= 2;
+                            if (isDoor) continue;
+                            bool isCorner = Math.Abs(dx) == 3 && Math.Abs(dz) == 3;
+                            if (isCorner && dy <= 5) continue;
+                            ushort wall = ((cx + dx) * 7 + (cz + dz) * 13 + dy * 3) % 4 == 0 ? GameData.BMossyCobblestone.Id : GameData.BCobblestone.Id;
+                            SetWorldBlock(chunk, ox, oy, oz, cx + dx, surface + dy, cz + dz, wall);
+                        }
+                    }
+                }
+
+                // Крыша
+                for (int dx = -4; dx <= 4; dx++) {
+                    for (int dz = -4; dz <= 4; dz++) {
+                        SetWorldBlock(chunk, ox, oy, oz, cx + dx, surface + 5, cz + dz,
+                            ((cx + dx) * 3 + (cz + dz)) % 3 == 0 ? GameData.BMossyCobblestone.Id : GameData.BCobblestone.Id);
+                    }
+                }
+
+                // Спавнер в центре, факелы у стен, 2 сундука
+                SetWorldBlock(chunk, ox, oy, oz, cx, surface + 1, cz, GameData.BMobSpawner.Id);
+                SetWorldBlock(chunk, ox, oy, oz, cx - 2, surface + 1, cz - 2, GameData.BChest.Id, 2);
+                SetWorldBlock(chunk, ox, oy, oz, cx + 2, surface + 1, cz + 2, GameData.BChest.Id, 1);
+                SetWorldBlock(chunk, ox, oy, oz, cx - 2, surface + 3, cz, GameData.BTorch.Id);
+                SetWorldBlock(chunk, ox, oy, oz, cx + 2, surface + 3, cz, GameData.BTorch.Id);
             }
         }
-
-        // Крыша
-        for (int dx = -4; dx <= 4; dx++) {
-            for (int dz = -4; dz <= 4; dz++) {
-                SetWorldBlock(chunk, ox, oy, oz, cx + dx, surface + 5, cz + dz,
-                    ((cx + dx) * 3 + (cz + dz)) % 3 == 0 ? GameData.BMossyCobblestone.Id : GameData.BCobblestone.Id);
-            }
-        }
-
-        // Спавнер в центре, факелы у стен, 2 сундука
-        SetWorldBlock(chunk, ox, oy, oz, cx, surface + 1, cz, GameData.BMobSpawner.Id);
-        SetWorldBlock(chunk, ox, oy, oz, cx - 2, surface + 1, cz - 2, GameData.BChest.Id, 2);
-        SetWorldBlock(chunk, ox, oy, oz, cx + 2, surface + 1, cz + 2, GameData.BChest.Id, 1);
-        SetWorldBlock(chunk, ox, oy, oz, cx - 2, surface + 3, cz, GameData.BTorch.Id);
-        SetWorldBlock(chunk, ox, oy, oz, cx + 2, surface + 3, cz, GameData.BTorch.Id);
     }
 
     /// <summary>Сокровищница пустыни: подземный данж из резного песчаника под пустынными секторами,
     /// крестообразная схема с ловушкой из TNT и богатым лутом.</summary>
     private void PlaceDesertVault(Chunk chunk, int ox, int oy, int oz) {
-        const int vaultSector = 768;
+        const int vaultSector = 448;
         int sectorX = (int)MathF.Floor((float)ox / vaultSector);
         int sectorZ = (int)MathF.Floor((float)oz / vaultSector);
 
-        // ~40% пустынных секторов имеют сокровищницу
-        float vSeed = _mineshaftNoise.Get(sectorX * 29.37f + 616f, sectorZ * 29.37f + 828f);
-        if (vSeed < 0.60f) return;
+        for (int sx = sectorX - 1; sx <= sectorX + 1; sx++) {
+            for (int sz = sectorZ - 1; sz <= sectorZ + 1; sz++) {
+                if (!TryGetDesertVaultPos(sx, sz, out int cx, out int cz)) continue;
 
-        var rng = new Random(_seed ^ (sectorX * 771273) ^ (sectorZ * 951341));
-        int cx = sectorX * vaultSector + rng.Next(96, vaultSector - 96);
-        int cz = sectorZ * vaultSector + rng.Next(96, vaultSector - 96);
+                if (ox > cx + 8 || ox + Chunk.SizeX <= cx - 8 || oz > cz + 8 || oz + Chunk.SizeZ <= cz - 8) continue;
 
-        if (GetBiome(cx, 40, cz) != BiomeType.Desert) return;
-        int surface = SurfaceHeight(cx, cz);
-        if (surface <= SeaLevel) return;
-        int cy = Math.Max(12, surface - 12); // под поверхностью
+                int surface = SurfaceHeight(cx, cz);
+                int cy = Math.Max(12, surface - 12);
 
-        if (Math.Abs(ox + Chunk.SizeX / 2 - cx) > 24 || Math.Abs(oz + Chunk.SizeZ / 2 - cz) > 24) return;
-        if (ox + Chunk.SizeX - 1 < cx + 4 || oz + Chunk.SizeZ - 1 < cz + 4) return;
-
-        // Главная комната 9×9×5 из резного песчаника с проходами
-        for (int dx = -4; dx <= 4; dx++) {
-            for (int dz = -4; dz <= 4; dz++) {
-                for (int dy = 0; dy <= 4; dy++) {
-                    int wx = cx + dx, wy = cy + dy, wz = cz + dz;
-                    bool isWall = dx == -4 || dx == 4 || dz == -4 || dz == 4 || dy == 0 || dy == 4;
-                    if (isWall) {
-                        SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, GameData.BChiseledSandstone.Id);
-                    } else {
-                        ushort inside = 0;
-                        if (dx == 0 && dz == 0 && dy == 1) {
-                            inside = GameData.BMobSpawner.Id;
-                        } else if (Math.Abs(dx) == 2 && Math.Abs(dz) == 2 && dy == 1) {
-                            inside = GameData.BChest.Id; // 4 сундука по углам
-                        } else if (dx == 0 && dz == 0 && dy == 3) {
-                            inside = GameData.BTNT.Id; // ловушка над спавнером
+                // Главная комната 9×9×5 из резного песчаника
+                for (int dx = -4; dx <= 4; dx++) {
+                    for (int dz = -4; dz <= 4; dz++) {
+                        for (int dy = 0; dy <= 4; dy++) {
+                            int wx = cx + dx, wy = cy + dy, wz = cz + dz;
+                            bool isWall = dx == -4 || dx == 4 || dz == -4 || dz == 4 || dy == 0 || dy == 4;
+                            if (isWall) {
+                                SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, GameData.BChiseledSandstone.Id);
+                            } else {
+                                ushort inside = 0;
+                                if (dx == 0 && dz == 0 && dy == 1) {
+                                    inside = GameData.BMobSpawner.Id;
+                                } else if (Math.Abs(dx) == 2 && Math.Abs(dz) == 2 && dy == 1) {
+                                    inside = GameData.BChest.Id;
+                                } else if (dx == 0 && dz == 0 && dy == 3) {
+                                    inside = GameData.BTNT.Id;
+                                }
+                                SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, inside);
+                            }
                         }
-                        SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, inside);
                     }
                 }
-            }
-        }
 
-        // Вход-колодец с поверхности (3×3, вниз до крыши данжа)
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                for (int wy = surface; wy >= cy + 5; wy--) {
-                    SetWorldBlock(chunk, ox, oy, oz, cx + dx, wy, cz + dz, 0);
+                // Вход-колодец с поверхности
+                for (int dx = -1; dx <= 1; dx++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        for (int wy = surface; wy >= cy + 5; wy--) {
+                            SetWorldBlock(chunk, ox, oy, oz, cx + dx, wy, cz + dz, 0);
+                        }
+                        SetWorldBlock(chunk, ox, oy, oz, cx + dx, surface, cz + dz, 0);
+                    }
                 }
-                SetWorldBlock(chunk, ox, oy, oz, cx + dx, surface, cz + dz, 0);
             }
         }
     }
 
     private void PlaceDesertPyramids(Chunk chunk, int ox, int oy, int oz) {
-        const int pyramidSector = 512;
+        const int pyramidSector = 384;
         int sectorX = (int)MathF.Floor((float)ox / pyramidSector);
         int sectorZ = (int)MathF.Floor((float)oz / pyramidSector);
-        
-        float pSeed = _mineshaftNoise.Get(sectorX * 42.1f + 123f, sectorZ * 42.1f + 321f);
-        if (pSeed < 0.85f) return;
 
-        var rng = new Random(_seed ^ (sectorX * 49281) ^ (sectorZ * 89123));
-        int cx = sectorX * pyramidSector + rng.Next(64, pyramidSector - 64);
-        int cz = sectorZ * pyramidSector + rng.Next(64, pyramidSector - 64);
+        for (int sx = sectorX - 1; sx <= sectorX + 1; sx++) {
+            for (int sz = sectorZ - 1; sz <= sectorZ + 1; sz++) {
+                if (!TryGetDesertPyramidPos(sx, sz, out int cx, out int cz)) continue;
 
-        if (GetBiome(cx, 40, cz) != BiomeType.Desert) return;
-        int surface = SurfaceHeight(cx, cz);
-        if (surface <= SeaLevel + 2) return;
+                if (ox > cx + 14 || ox + Chunk.SizeX <= cx - 14 || oz > cz + 14 || oz + Chunk.SizeZ <= cz - 14) continue;
 
-        if (Math.Abs(ox + Chunk.SizeX / 2 - cx) > 30 || Math.Abs(oz + Chunk.SizeZ / 2 - cz) > 30) return;
+                int surface = SurfaceHeight(cx, cz);
 
-        // Ступенчатая пирамида (7 ярусов)
-        for (int tier = 0; tier < 7; tier++) {
-            int r = 8 - tier;
-            int wy = surface + tier;
-            for (int dx = -r; dx <= r; dx++) {
-                for (int dz = -r; dz <= r; dz++) {
-                    int wx = cx + dx, wz = cz + dz;
-                    bool edge = Math.Abs(dx) == r || Math.Abs(dz) == r;
-                    ushort b = edge ? GameData.BChiseledSandstone.Id : GameData.BSand.Id;
-                    // Центральный проход
-                    if (tier > 0 && Math.Abs(dx) <= 1 && Math.Abs(dz) <= 1) b = 0;
-                    SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, b);
-                }
-            }
-        }
-
-        // Центральная вертикальная шахта вниз к секретной сокровищнице
-        int vaultY = surface - 10;
-        for (int y = surface; y >= vaultY; y--) {
-            for (int dx = -1; dx <= 1; dx++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    SetWorldBlock(chunk, ox, oy, oz, cx + dx, y, cz + dz, 0);
-                }
-            }
-        }
-
-        // Сокровищница 7x7x4
-        for (int dx = -3; dx <= 3; dx++) {
-            for (int dz = -3; dz <= 3; dz++) {
-                for (int dy = 0; dy <= 4; dy++) {
-                    int wx = cx + dx, wy = vaultY + dy, wz = cz + dz;
-                    bool wall = dx == -3 || dx == 3 || dz == -3 || dz == 3 || dy == 0 || dy == 4;
-                    if (wall) {
-                        SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, GameData.BChiseledSandstone.Id);
-                    } else {
-                        SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, 0);
+                // Заполняем фундамент под основанием пирамиды вниз до твердой земли
+                for (int dx = -8; dx <= 8; dx++) {
+                    for (int dz = -8; dz <= 8; dz++) {
+                        int wx = cx + dx, wz = cz + dz;
+                        for (int fy = surface - 1; fy >= surface - 8; fy--) {
+                            SetWorldBlock(chunk, ox, oy, oz, wx, fy, wz, GameData.BChiseledSandstone.Id);
+                        }
                     }
                 }
+
+                // Ступенчатая пирамида (7 ярусов)
+                for (int tier = 0; tier < 7; tier++) {
+                    int r = 8 - tier;
+                    int wy = surface + tier;
+                    for (int dx = -r; dx <= r; dx++) {
+                        for (int dz = -r; dz <= r; dz++) {
+                            int wx = cx + dx, wz = cz + dz;
+                            bool edge = Math.Abs(dx) == r || Math.Abs(dz) == r;
+                            ushort b = edge ? GameData.BChiseledSandstone.Id : GameData.BSand.Id;
+                            // Центральный проход
+                            if (tier > 0 && Math.Abs(dx) <= 1 && Math.Abs(dz) <= 1) b = 0;
+                            SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, b);
+                        }
+                    }
+                }
+
+                // Центральная вертикальная шахта вниз к секретной сокровищнице
+                int vaultY = surface - 10;
+                for (int y = surface; y >= vaultY; y--) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        for (int dz = -1; dz <= 1; dz++) {
+                            SetWorldBlock(chunk, ox, oy, oz, cx + dx, y, cz + dz, 0);
+                        }
+                    }
+                }
+
+                // Сокровищница 7x7x4
+                for (int dx = -3; dx <= 3; dx++) {
+                    for (int dz = -3; dz <= 3; dz++) {
+                        for (int dy = 0; dy <= 4; dy++) {
+                            int wx = cx + dx, wy = vaultY + dy, wz = cz + dz;
+                            bool wall = dx == -3 || dx == 3 || dz == -3 || dz == 3 || dy == 0 || dy == 4;
+                            if (wall) {
+                                SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, GameData.BChiseledSandstone.Id);
+                            } else {
+                                SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, 0);
+                            }
+                        }
+                    }
+                }
+
+                // Факелы на стенах сокровищницы
+                SetWorldBlock(chunk, ox, oy, oz, cx - 2, vaultY + 2, cz - 2, GameData.BTorch.Id, 2);
+                SetWorldBlock(chunk, ox, oy, oz, cx + 2, vaultY + 2, cz - 2, GameData.BTorch.Id, 1);
+                SetWorldBlock(chunk, ox, oy, oz, cx - 2, vaultY + 2, cz + 2, GameData.BTorch.Id, 2);
+                SetWorldBlock(chunk, ox, oy, oz, cx + 2, vaultY + 2, cz + 2, GameData.BTorch.Id, 1);
+
+                // Подземная ловушка: 3x3 TNT под полом и нажимная плита в центре
+                for (int dx = -1; dx <= 1; dx++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        SetWorldBlock(chunk, ox, oy, oz, cx + dx, vaultY - 1, cz + dz, GameData.BTNT.Id);
+                    }
+                }
+                SetWorldBlock(chunk, ox, oy, oz, cx, vaultY, cz, GameData.BPressurePlate.Id);
+
+                // 4 сундука у стен комнаты
+                SetWorldBlock(chunk, ox, oy, oz, cx + 2, vaultY + 1, cz, GameData.BChest.Id);
+                SetWorldBlock(chunk, ox, oy, oz, cx - 2, vaultY + 1, cz, GameData.BChest.Id);
+                SetWorldBlock(chunk, ox, oy, oz, cx, vaultY + 1, cz + 2, GameData.BChest.Id);
+                SetWorldBlock(chunk, ox, oy, oz, cx, vaultY + 1, cz - 2, GameData.BChest.Id);
             }
         }
-
-        // Факелы на стенах сокровищницы для защиты от случайного спавна монстров на нажимную плиту
-        SetWorldBlock(chunk, ox, oy, oz, cx - 2, vaultY + 2, cz - 2, GameData.BTorch.Id, 2);
-        SetWorldBlock(chunk, ox, oy, oz, cx + 2, vaultY + 2, cz - 2, GameData.BTorch.Id, 1);
-        SetWorldBlock(chunk, ox, oy, oz, cx - 2, vaultY + 2, cz + 2, GameData.BTorch.Id, 2);
-        SetWorldBlock(chunk, ox, oy, oz, cx + 2, vaultY + 2, cz + 2, GameData.BTorch.Id, 1);
-
-        // Подземная ловушка: 3x3 TNT под полом и нажимная плита в центре
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                SetWorldBlock(chunk, ox, oy, oz, cx + dx, vaultY - 1, cz + dz, GameData.BTNT.Id);
-            }
-        }
-        SetWorldBlock(chunk, ox, oy, oz, cx, vaultY, cz, GameData.BPressurePlate.Id);
-
-        // 4 сундука у стен комнаты (на полу, но не загораживают нажимную плиту)
-        SetWorldBlock(chunk, ox, oy, oz, cx + 2, vaultY + 1, cz, GameData.BChest.Id);
-        SetWorldBlock(chunk, ox, oy, oz, cx - 2, vaultY + 1, cz, GameData.BChest.Id);
-        SetWorldBlock(chunk, ox, oy, oz, cx, vaultY + 1, cz + 2, GameData.BChest.Id);
-        SetWorldBlock(chunk, ox, oy, oz, cx, vaultY + 1, cz - 2, GameData.BChest.Id);
     }
 
     public void GenerateNetherChunk(Chunk chunk, int ox, int oy, int oz) {

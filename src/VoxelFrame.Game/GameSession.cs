@@ -1073,7 +1073,7 @@ public sealed class GameSession {
             case "locate":
                 if (parts.Length < 3) {
                     AddChatMessage("Использование: /locate biome <savanna|swamp|desert|forest|plains|ocean|river|beach>", Color.Yellow);
-                    AddChatMessage("Или: /locate structure <village|stronghold|portal|dungeon|pyramid|mineshaft>", Color.Yellow);
+                    AddChatMessage("Или: /locate structure <village|stronghold|portal|dungeon|pyramid|chapel|vault|mineshaft>", Color.Yellow);
                     break;
                 }
                 if (parts[1].Equals("biome", StringComparison.OrdinalIgnoreCase)) {

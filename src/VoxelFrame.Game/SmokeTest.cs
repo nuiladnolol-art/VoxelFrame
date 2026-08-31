@@ -825,6 +825,18 @@ internal static class SmokeTest {
             null, null, null
         };
         Check(GameData.TryCraftShape(porridgeGrid, inv, out var porRes) && porRes.Item.Id == GameData.SawdustPorridgeItem.Id, "крафт каши из опилок");
+
+        // Проверка горючести опилок и саженцев
+        Check(GameData.IsFuel(GameData.SawdustItem.Id) && GameData.GetFuelDuration(GameData.SawdustItem.Id) > 0f, "опилки используются как топливо для печи");
+        Check(GameData.IsFuel(GameData.OakSaplingItem.Id) && GameData.GetFuelDuration(GameData.OakSaplingItem.Id) > 0f, "саженцы используются как топливо для печи");
+
+        // Проверка Sneak на краю блока
+        var singleBlockPos = new Vec3i(200, 50, 200);
+        w.PlacePlacedBlock(singleBlockPos, GameData.BStone);
+        var testSneakPos = new Vector3(200.5f, 51.0f, 200.5f);
+        var sneakVel = new Vector3(5.0f, 0f, 0f);
+        Collision.Move(w, ref testSneakPos, new Vector3(0.3f, 0.9f, 0.3f), ref sneakVel, 0.1f, sneaking: true);
+        Check(testSneakPos.X <= 201.2f, "удержание на краю блока при строительстве на шифте");
     }
 
     // ── Распространение солнечного света ─────────────────────────────────────

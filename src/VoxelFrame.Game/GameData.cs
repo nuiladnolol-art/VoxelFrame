@@ -435,6 +435,36 @@ public static class GameData {
         { CookedChickenItem.Id, 6f },// Жареная курятина: +6 HP
     };
 
+    // ── Горючее для печи ───────────────────────────────────────────────────────
+    public static bool IsFuel(ushort itemId) {
+        return itemId == CoalItem.Id ||
+               itemId == CharcoalItem.Id ||
+               itemId == LogItem.Id ||
+               itemId == PlankItem.Id ||
+               itemId == StickItem.Id ||
+               itemId == SawdustItem.Id ||
+               itemId == OakSaplingItem.Id ||
+               itemId == WoodPickaxeItem.Id ||
+               itemId == WoodAxeItem.Id ||
+               itemId == WoodSwordItem.Id ||
+               itemId == WoodShovelItem.Id ||
+               itemId == WoodHoeItem.Id ||
+               itemId == DoorItem.Id ||
+               itemId == BedItem.Id ||
+               itemId == ChestItem.Id ||
+               itemId == WorkbenchItem.Id;
+    }
+
+    public static float GetFuelDuration(ushort itemId) {
+        if (itemId == CoalItem.Id || itemId == CharcoalItem.Id) return 80f;
+        if (itemId == LogItem.Id || itemId == PlankItem.Id || itemId == WorkbenchItem.Id || itemId == ChestItem.Id || itemId == BedItem.Id || itemId == DoorItem.Id) return 15f;
+        if (itemId == WoodPickaxeItem.Id || itemId == WoodAxeItem.Id || itemId == WoodSwordItem.Id || itemId == WoodShovelItem.Id || itemId == WoodHoeItem.Id) return 10f;
+        if (itemId == SawdustItem.Id) return 6f;
+        if (itemId == OakSaplingItem.Id) return 5f;
+        if (itemId == StickItem.Id) return 5f;
+        return 0f;
+    }
+
     // ── Реестр предметов ───────────────────────────────────────────────────────
 
     public static readonly Dictionary<ushort, ItemDefinition> Items = new();

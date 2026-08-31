@@ -68,18 +68,69 @@ public static class Collision {
         }
     }
 
+    public static bool HasGroundBelow(GameWorld world, Vector3 pos, Vector3 half, bool ignoreDoors = false) {
+        var min = new Vector3(pos.X - half.X, pos.Y - 0.5f, pos.Z - half.Z);
+        var max = new Vector3(pos.X + half.X, pos.Y - 0.01f, pos.Z + half.Z);
+        return IntersectsSolid(world, min, max, ignoreDoors);
+    }
+
     /// <summary>Сдвигает тело с учётом коллизий; возвращает признак «стоит на земле».</summary>
     public static bool Move(GameWorld world, ref Vector3 pos, Vector3 half, ref Vector3 vel, float dt, bool sneaking = false, float stepHeight = 0.56f, bool ignoreDoors = false) {
         bool onGround = false;
 
-        // 1. Если крадемся (Shift) на краю блока
-        if (sneaking && vel.Y <= 0.01f) {
-            float testX = pos.X + vel.X * dt;
-            float testZ = pos.Z + vel.Z * dt;
-            bool groundX = IntersectsSolid(world, new Vector3(testX, pos.Y - 0.1f, pos.Z) - half, new Vector3(testX, pos.Y - 0.1f, pos.Z) + half, ignoreDoors);
-            if (!groundX) vel.X = 0f;
-            bool groundZ = IntersectsSolid(world, new Vector3(pos.X, pos.Y - 0.1f, testZ) - half, new Vector3(pos.X, pos.Y - 0.1f, testZ) + half, ignoreDoors);
-            if (!groundZ) vel.Z = 0f;
+        // 1. Если крадемся (Shift) — предотвращаем сход с края любого блока
+        if (sneaking && vel.Y <= 0.05f) {
+            bool hasGroundCurrent = HasGroundBelow(world, pos, half, ignoreDoors);
+            if (hasGroundCurrent) {
+                // Ограничение по X
+                if (vel.X != 0f) {
+                    float stepX = vel.X * dt;
+                    if (!HasGroundBelow(world, new Vector3(pos.X + stepX, pos.Y, pos.Z), half, ignoreDoors)) {
+                        float safeStepX = 0f;
+                        float signX = MathF.Sign(stepX);
+                        float absX = MathF.Abs(stepX);
+                        for (float s = 0.01f; s < absX; s += 0.01f) {
+                            if (HasGroundBelow(world, new Vector3(pos.X + signX * s, pos.Y, pos.Z), half, ignoreDoors)) {
+                                safeStepX = signX * s;
+                            } else {
+                                break;
+                            }
+                        }
+                        vel.X = dt > 0f ? safeStepX / dt : 0f;
+                    }
+                }
+
+                // Ограничение по Z
+                if (vel.Z != 0f) {
+                    float stepZ = vel.Z * dt;
+                    if (!HasGroundBelow(world, new Vector3(pos.X, pos.Y, pos.Z + stepZ), half, ignoreDoors)) {
+                        float safeStepZ = 0f;
+                        float signZ = MathF.Sign(stepZ);
+                        float absZ = MathF.Abs(stepZ);
+                        for (float s = 0.01f; s < absZ; s += 0.01f) {
+                            if (HasGroundBelow(world, new Vector3(pos.X, pos.Y, pos.Z + signZ * s), half, ignoreDoors)) {
+                                safeStepZ = signZ * s;
+                            } else {
+                                break;
+                            }
+                        }
+                        vel.Z = dt > 0f ? safeStepZ / dt : 0f;
+                    }
+                }
+
+                // Ограничение диагонального движения
+                if (vel.X != 0f && vel.Z != 0f) {
+                    float stepX = vel.X * dt;
+                    float stepZ = vel.Z * dt;
+                    if (!HasGroundBelow(world, new Vector3(pos.X + stepX, pos.Y, pos.Z + stepZ), half, ignoreDoors)) {
+                        if (MathF.Abs(stepX) > MathF.Abs(stepZ)) {
+                            vel.Z = 0f;
+                        } else {
+                            vel.X = 0f;
+                        }
+                    }
+                }
+            }
         }
 
         // 2. Движение по X (с аккуратным подъемом на полублоки)
