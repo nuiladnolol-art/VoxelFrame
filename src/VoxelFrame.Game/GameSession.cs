@@ -261,25 +261,32 @@ public sealed class GameSession {
 
         if (targetDim == Dimension.Nether) {
             if (NetherWorld == null) {
-                NetherWorld = new GameWorld(World.Seed ^ 0x1337BEEF) { Dimension = Dimension.Nether };
+                NetherWorld = new GameWorld(MasterSeed ^ 0x1337BEEF) { Dimension = Dimension.Nether };
             }
             World = NetherWorld;
             int targetX = (int)MathF.Floor(Player.Position.X / 8f);
             int targetZ = (int)MathF.Floor(Player.Position.Z / 8f);
-            int targetY = 56;
+            int targetY = (int)MathF.Floor(Player.Position.Y);
 
-            World.EnsureLoadedAroundSync(new Vector3(targetX, targetY, targetZ), 2);
-            EnsureSafePortalPlatform(World, targetX, targetY, targetZ, GameData.BNetherPortal);
+            // Поиск существующего портала в радиусе 32 блоков
+            var existingPortal = FindNearestPortal(World, targetX, targetY, targetZ, 32, GameData.BNetherPortal.Id);
+            if (existingPortal.HasValue) {
+                var p = existingPortal.Value;
+                Player.Position = new Vector3(p.X + 0.5f, p.Y + 0.1f, p.Z + 0.5f);
+            } else {
+                var spawnPos = FindSafeNetherPortalSpawn(World, targetX, targetY, targetZ);
+                EnsureSafePortalPlatform(World, spawnPos.X, spawnPos.Y, spawnPos.Z, GameData.BNetherPortal);
+                Player.Position = new Vector3(spawnPos.X + 0.5f, spawnPos.Y + 1.0f, spawnPos.Z + 0.5f);
+                World.SpawnMiniBoss(HostileType.NetherLord, new Vector3(spawnPos.X + 6.5f, spawnPos.Y + 1.0f, spawnPos.Z + 0.5f));
+            }
 
-            Player.Position = new Vector3(targetX + 0.5f, targetY + 1.0f, targetZ + 0.5f);
             Player.Velocity = Vector3.Zero;
             Player.PortalTimer = -2.5f;
+            Player.PortalLocked = true;
             AddMessage("Вы вошли в Нижний мир!");
-            // Повелитель Ада встречает игрока при первом входе (роняет Адский артефакт)
-            World.SpawnMiniBoss(HostileType.NetherLord, new Vector3(targetX + 6.5f, targetY + 1.0f, targetZ + 0.5f));
         } else if (targetDim == Dimension.End) {
             if (EndWorld == null) {
-                EndWorld = new GameWorld(World.Seed ^ 0x2E1D0FF) { Dimension = Dimension.End };
+                EndWorld = new GameWorld(MasterSeed ^ 0x2E1D0FF) { Dimension = Dimension.End };
             }
             World = EndWorld;
             // Парящая платформа у края главного острова (воздушная часть),
@@ -296,12 +303,13 @@ public sealed class GameSession {
             Player.Position = new Vector3(padX + 0.5f, targetY + 1.0f, padZ + 0.5f);
             Player.Velocity = Vector3.Zero;
             Player.PortalTimer = -2.5f;
+            Player.PortalLocked = true;
             AddMessage("Вы вошли в Энд!");
         } else {
             bool endBossDefeated = fromDim == Dimension.End && World.EndBossDefeated;
             // Истинный финал: выход из Бездны после победы над Истинным Слизнем — титры и главное меню.
             bool trueVictory = fromDim == Dimension.Void && World.TrueVoidBossDefeated;
-            World = OverworldWorld ?? new GameWorld(World.Seed) { Dimension = Dimension.Overworld };
+            World = OverworldWorld ?? new GameWorld(MasterSeed) { Dimension = Dimension.Overworld };
 
             if (trueVictory) {
                 // Портал Триумфа уводит домой: финальные титры, затем главное меню.
@@ -309,6 +317,7 @@ public sealed class GameSession {
                 Player.Position = World.GetSafeRespawnPosition(World.SpawnBlock);
                 Player.Velocity = Vector3.Zero;
                 Player.PortalTimer = -2.5f;
+                Player.PortalLocked = true;
                 AddMessage("Портал Триумфа переносит вас домой...");
                 Ui = UiState.Credits;
                 CreditsType = 2;
@@ -320,6 +329,7 @@ public sealed class GameSession {
                 Player.Position = World.GetSafeRespawnPosition(World.SpawnBlock);
                 Player.Velocity = Vector3.Zero;
                 Player.PortalTimer = -2.5f;
+                Player.PortalLocked = true;
                 AddMessage("Вы вернулись в Обычный мир!");
                 // После победы над Слизнем Края — показываем титры
                 if (endBossDefeated) {
@@ -327,20 +337,29 @@ public sealed class GameSession {
                     CreditsTimer = 32f;
                 }
             } else {
-                // Возврат из Нижнего мира: координаты портала (как в Minecraft)
+                // Возврат из Нижнего мира: координаты портала (как в Minecraft X*8, Z*8)
                 int targetX = (int)MathF.Floor(Player.Position.X * 8f);
                 int targetZ = (int)MathF.Floor(Player.Position.Z * 8f);
+                int targetY = (int)MathF.Floor(Player.Position.Y);
 
-                World.EnsureLoadedAroundSync(new Vector3(targetX, 64f, targetZ), 2);
-                int surfaceY = World.Generator.SurfaceHeight(targetX, targetZ);
-                if (surfaceY <= 0) surfaceY = 64;
-                int targetY = surfaceY + 1;
+                // Поиск существующего портала в радиусе 128 блоков
+                var existingPortal = FindNearestPortal(World, targetX, targetY, targetZ, 128, GameData.BNetherPortal.Id);
+                if (existingPortal.HasValue) {
+                    var p = existingPortal.Value;
+                    Player.Position = new Vector3(p.X + 0.5f, p.Y + 0.1f, p.Z + 0.5f);
+                } else {
+                    World.EnsureLoadedAroundSync(new Vector3(targetX, 64f, targetZ), 2);
+                    int surfaceY = World.Generator.SurfaceHeight(targetX, targetZ);
+                    if (surfaceY <= 0) surfaceY = 64;
+                    int createY = surfaceY + 1;
 
-                EnsureSafePortalPlatform(World, targetX, targetY, targetZ, GameData.BNetherPortal);
+                    EnsureSafePortalPlatform(World, targetX, createY, targetZ, GameData.BNetherPortal);
+                    Player.Position = new Vector3(targetX + 0.5f, createY + 1.0f, targetZ + 0.5f);
+                }
 
-                Player.Position = new Vector3(targetX + 0.5f, targetY + 1.0f, targetZ + 0.5f);
                 Player.Velocity = Vector3.Zero;
                 Player.PortalTimer = -2.5f;
+                Player.PortalLocked = true;
                 AddMessage("Вы вернулись в Обычный мир!");
             }
         }
@@ -417,36 +436,141 @@ public sealed class GameSession {
         AddMessage("§5[Истинный Слизень]: Ха-ха-ха... Ты правда думал, что победил меня наверху, смертный?.. ");
     }
 
+    public static Vec3i? FindNearestPortal(GameWorld world, int targetX, int targetY, int targetZ, int horizontalRadius, ushort portalBlockId) {
+        int chunkRadius = (horizontalRadius / Chunk.SizeX) + 1;
+        world.EnsureLoadedAroundSync(new Vector3(targetX, targetY, targetZ), chunkRadius);
+
+        Vec3i? bestPos = null;
+        float bestDistSq = float.MaxValue;
+
+        int minChunkX = (targetX - horizontalRadius) >> 5;
+        int maxChunkX = (targetX + horizontalRadius) >> 5;
+        int minChunkZ = (targetZ - horizontalRadius) >> 5;
+        int maxChunkZ = (targetZ + horizontalRadius) >> 5;
+
+        for (int cx = minChunkX; cx <= maxChunkX; cx++) {
+            for (int cz = minChunkZ; cz <= maxChunkZ; cz++) {
+                for (int cy = 0; cy < 4; cy++) {
+                    var cc = new Vec3i(cx, cy, cz);
+                    var gc = world.TryGetChunk(cc);
+                    if (gc == null) continue;
+
+                    for (int lx = 0; lx < Chunk.SizeX; lx++) {
+                        int wx = (cx << 5) + lx;
+                        int dx = wx - targetX;
+                        for (int lz = 0; lz < Chunk.SizeZ; lz++) {
+                            int wz = (cz << 5) + lz;
+                            int dz = wz - targetZ;
+                            int distH2 = dx * dx + dz * dz;
+                            if (distH2 > horizontalRadius * horizontalRadius) continue;
+
+                            for (int ly = 0; ly < Chunk.SizeY; ly++) {
+                                if (gc.Chunk.Get(lx, ly, lz).TypeId == portalBlockId) {
+                                    int wy = (cy << 5) + ly;
+                                    int dy = wy - targetY;
+                                    float totalDistSq = distH2 + dy * dy;
+                                    if (totalDistSq < bestDistSq) {
+                                        bestDistSq = totalDistSq;
+                                        bestPos = new Vec3i(wx, wy, wz);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (bestPos.HasValue) {
+            var p = bestPos.Value;
+            while (p.Y > 1 && world.GetVoxel(new Vec3i(p.X, p.Y - 1, p.Z)).TypeId == portalBlockId) {
+                p = new Vec3i(p.X, p.Y - 1, p.Z);
+            }
+            return p;
+        }
+
+        return null;
+    }
+
+    private static Vec3i FindSafeNetherPortalSpawn(GameWorld world, int targetX, int targetY, int targetZ) {
+        int chunkRadius = 2;
+        world.EnsureLoadedAroundSync(new Vector3(targetX, targetY, targetZ), chunkRadius);
+
+        for (int r = 0; r <= 24; r += 4) {
+            for (int dx = -r; dx <= r; dx += 4) {
+                for (int dz = -r; dz <= r; dz += 4) {
+                    int cx = targetX + dx;
+                    int cz = targetZ + dz;
+                    for (int y = 35; y <= 85; y++) {
+                        if (world.IsSolidAt(new Vec3i(cx, y - 1, cz)) &&
+                            !world.IsSolidAt(new Vec3i(cx, y, cz)) &&
+                            !world.IsSolidAt(new Vec3i(cx, y + 1, cz)) &&
+                            !world.IsSolidAt(new Vec3i(cx, y + 2, cz)) &&
+                            world.GetVoxel(new Vec3i(cx, y, cz)).TypeId != GameData.BLava.Id) {
+                            return new Vec3i(cx, y, cz);
+                        }
+                    }
+                }
+            }
+        }
+        return new Vec3i(targetX, 56, targetZ);
+    }
+
     private static void EnsureSafePortalPlatform(GameWorld world, int px, int py, int pz, BlockType portalBlock) {
         // Создаём надежную платформу 5х5 под ногами игрока
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
-                world.PlacePlacedBlock(new Vec3i(px + dx, py - 1, pz + dz), GameData.BObsidian);
+                var floorPos = new Vec3i(px + dx, py - 1, pz + dz);
+                world.PlacePlacedBlock(floorPos, GameData.BObsidian);
+                SyncBlockChange(floorPos, GameData.BObsidian.Id, 0, false, (byte)world.Dimension);
                 for (int dy = 0; dy <= 4; dy++) {
-                    world.RemoveBlock(new Vec3i(px + dx, py + dy, pz + dz));
+                    var airPos = new Vec3i(px + dx, py + dy, pz + dz);
+                    world.RemoveBlock(airPos);
+                    SyncBlockChange(airPos, 0, 0, true, (byte)world.Dimension);
                 }
             }
         }
         // Строим 4x5 рамку портала из обсидиана с портальными блоками внутри
         for (int dx = -1; dx <= 2; dx++) {
-            world.PlacePlacedBlock(new Vec3i(px + dx, py - 1, pz), GameData.BObsidian);
-            world.PlacePlacedBlock(new Vec3i(px + dx, py + 3, pz), GameData.BObsidian);
+            var b1 = new Vec3i(px + dx, py - 1, pz);
+            var b2 = new Vec3i(px + dx, py + 3, pz);
+            world.PlacePlacedBlock(b1, GameData.BObsidian);
+            world.PlacePlacedBlock(b2, GameData.BObsidian);
+            SyncBlockChange(b1, GameData.BObsidian.Id, 0, false, (byte)world.Dimension);
+            SyncBlockChange(b2, GameData.BObsidian.Id, 0, false, (byte)world.Dimension);
         }
         for (int dy = 0; dy <= 2; dy++) {
-            world.PlacePlacedBlock(new Vec3i(px - 1, py + dy, pz), GameData.BObsidian);
-            world.PlacePlacedBlock(new Vec3i(px + 2, py + dy, pz), GameData.BObsidian);
-            world.PlacePlacedBlock(new Vec3i(px, py + dy, pz), portalBlock);
-            world.PlacePlacedBlock(new Vec3i(px + 1, py + dy, pz), portalBlock);
+            var side1 = new Vec3i(px - 1, py + dy, pz);
+            var side2 = new Vec3i(px + 2, py + dy, pz);
+            var port1 = new Vec3i(px, py + dy, pz);
+            var port2 = new Vec3i(px + 1, py + dy, pz);
+            world.PlacePlacedBlock(side1, GameData.BObsidian);
+            world.PlacePlacedBlock(side2, GameData.BObsidian);
+            world.PlacePlacedBlock(port1, portalBlock);
+            world.PlacePlacedBlock(port2, portalBlock);
+            SyncBlockChange(side1, GameData.BObsidian.Id, 0, false, (byte)world.Dimension);
+            SyncBlockChange(side2, GameData.BObsidian.Id, 0, false, (byte)world.Dimension);
+            SyncBlockChange(port1, portalBlock.Id, 0, false, (byte)world.Dimension);
+            SyncBlockChange(port2, portalBlock.Id, 0, false, (byte)world.Dimension);
         }
+    }
+
+    private static void SyncBlockChange(Vec3i pos, ushort typeId, byte mask, bool isBreak, byte dimension) {
+        GameServer.Active?.BroadcastHostBlockChange(pos.X, pos.Y, pos.Z, typeId, mask, isBreak);
+        GameClient.Active?.SendBlockChange(pos.X, pos.Y, pos.Z, typeId, mask, isBreak, dimension);
     }
 
     /// <summary>Надёжная площадка для точки входа в Энд: обсидиановый пол без портала.</summary>
     private static void EnsureSafeEndSpawnPad(GameWorld world, int px, int py, int pz) {
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
-                world.PlacePlacedBlock(new Vec3i(px + dx, py - 1, pz + dz), GameData.BObsidian);
+                var floorPos = new Vec3i(px + dx, py - 1, pz + dz);
+                world.PlacePlacedBlock(floorPos, GameData.BObsidian);
+                SyncBlockChange(floorPos, GameData.BObsidian.Id, 0, false, (byte)world.Dimension);
                 for (int dy = 0; dy <= 4; dy++) {
-                    world.RemoveBlock(new Vec3i(px + dx, py + dy, pz + dz));
+                    var airPos = new Vec3i(px + dx, py + dy, pz + dz);
+                    world.RemoveBlock(airPos);
+                    SyncBlockChange(airPos, 0, 0, true, (byte)world.Dimension);
                 }
             }
         }

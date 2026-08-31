@@ -1433,20 +1433,20 @@ public sealed partial class Player {
         IsBlocking = hasShieldEquipped && input.UseHeld && !hasBowInHand;
 
         // Логика нахождения внутри Портала (в Нижний мир / Энд)
-        bool inNetherPortal = IsInAnyPortal(world, feetCell, GameData.BNetherPortal.Id);
-        bool inEndPortal = IsInAnyPortal(world, feetCell, GameData.BEndPortal.Id);
+        bool inNetherPortal = IsInAnyPortal(world, Position, GameData.BNetherPortal.Id);
+        bool inEndPortal = IsInAnyPortal(world, Position, GameData.BEndPortal.Id);
 
         if (inNetherPortal || inEndPortal) {
             if (PortalLocked) {
                 // Мы в портале назначения: не телепортируем обратно, пока игрок стоит в нём.
             } else if (PortalTimer >= 0f) {
                 PortalTimer += dt;
-                if (PortalTimer >= 0.5f) {
+                if (PortalTimer >= 1.2f) {
                     Dimension target = inEndPortal
                         ? (session.World.Dimension == Dimension.Overworld ? Dimension.End : Dimension.Overworld)
                         : (session.World.Dimension == Dimension.Overworld ? Dimension.Nether : Dimension.Overworld);
                     session.SwitchDimension(target);
-                    PortalTimer = -2.0f; // Задержка перед повторным входом
+                    PortalTimer = -2.5f; // Задержка перед повторным входом
                     PortalLocked = true; // Пока игрок не покинет порталы — не пускаем обратно
                 }
             } else {
@@ -1461,15 +1461,20 @@ public sealed partial class Player {
     }
 
     /// <summary>
-    /// Проверяет, стоит ли игрок внутри портала: сканируем 3×3 по X/Z на уровне ног и глаз.
-    /// Так вход срабатывает даже без идеальной центровки относительно проёма.
+    /// Проверяет, пересекает ли хитбокс игрока блок портала.
     /// </summary>
-    private static bool IsInAnyPortal(GameWorld world, Vec3i feetCell, ushort portalId) {
-        for (int dy = 0; dy <= 1; dy++) {
-            int y = feetCell.Y + dy;
-            for (int dx = -1; dx <= 1; dx++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    if (world.GetVoxel(new Vec3i(feetCell.X + dx, y, feetCell.Z + dz)).TypeId == portalId) {
+    private static bool IsInAnyPortal(GameWorld world, Vector3 playerPos, ushort portalId) {
+        int minX = (int)MathF.Floor(playerPos.X - 0.3f);
+        int maxX = (int)MathF.Floor(playerPos.X + 0.3f);
+        int minY = (int)MathF.Floor(playerPos.Y);
+        int maxY = (int)MathF.Floor(playerPos.Y + 1.7f);
+        int minZ = (int)MathF.Floor(playerPos.Z - 0.3f);
+        int maxZ = (int)MathF.Floor(playerPos.Z + 0.3f);
+
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    if (world.GetVoxel(new Vec3i(x, y, z)).TypeId == portalId) {
                         return true;
                     }
                 }
@@ -1513,7 +1518,10 @@ public sealed partial class Player {
                         for (int y = 1; y <= 3; y++) {
                             int ix = axis == 0 ? minX + innerStep : minX;
                             int iz = axis == 1 ? minZ + innerStep : minZ;
-                            world.PlacePlacedBlock(new Vec3i(ix, minY + y, iz), GameData.BNetherPortal);
+                            var p = new Vec3i(ix, minY + y, iz);
+                            world.PlacePlacedBlock(p, GameData.BNetherPortal);
+                            GameClient.Active?.SendBlockChange(p.X, p.Y, p.Z, GameData.BNetherPortal.Id, 0, false, (byte)world.Dimension);
+                            GameServer.Active?.BroadcastHostBlockChange(p.X, p.Y, p.Z, GameData.BNetherPortal.Id, 0, false);
                         }
                     }
                     return true;
