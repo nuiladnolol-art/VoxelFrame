@@ -60,17 +60,30 @@ public sealed partial class Player {
     public float Saturation = 5f;
     public float Exhaustion = 0f;
     public float StarveTimer = 0f;
-    public ItemDefinition? OffhandItem;
-    public int OffhandCount;
+    private ItemEntry? _offhandEntry;
     public ItemEntry? OffhandEntry {
-        get => OffhandItem != null && OffhandCount > 0 ? new ItemEntry(GameData.NewItem(OffhandItem), OffhandCount) : null;
+        get => _offhandEntry;
+        set => _offhandEntry = (value.HasValue && value.Value.Quantity > 0) ? value : null;
+    }
+    public ItemDefinition? OffhandItem {
+        get => _offhandEntry?.Item.Definition;
         set {
-            if (value.HasValue && value.Value.Quantity > 0) {
-                OffhandItem = value.Value.Item.Definition;
-                OffhandCount = value.Value.Quantity;
+            if (value != null) {
+                if (_offhandEntry == null || _offhandEntry.Value.Item.Definition != value) {
+                    _offhandEntry = new ItemEntry(GameData.NewItem(value), _offhandEntry?.Quantity ?? 1);
+                }
             } else {
-                OffhandItem = null;
-                OffhandCount = 0;
+                _offhandEntry = null;
+            }
+        }
+    }
+    public int OffhandCount {
+        get => _offhandEntry?.Quantity ?? 0;
+        set {
+            if (value <= 0) {
+                _offhandEntry = null;
+            } else if (_offhandEntry != null) {
+                _offhandEntry = _offhandEntry.Value with { Quantity = value };
             }
         }
     }
@@ -214,25 +227,20 @@ public sealed partial class Player {
 
     public void SwapMainAndOffhand() {
         if (SelectedSlot < 0 || SelectedSlot >= 9) return;
-        var mainSlot = Inventory.Slots[SelectedSlot];
-        var oldMainItem = mainSlot?.Item.Definition;
-        int oldMainCount = mainSlot?.Quantity ?? 0;
-
-        var oldOffhandItem = OffhandItem;
-        int oldOffhandCount = OffhandCount;
+        var mainEntry = Inventory.Slots[SelectedSlot];
+        var offhandEntry = _offhandEntry;
 
         // Очищаем текущий слот хотбара
-        if (mainSlot != null && oldMainItem != null) {
+        if (mainEntry != null) {
             Inventory.RemoveAt(SelectedSlot);
         }
 
-        // Переносим предмет в левую руку
-        OffhandItem = oldMainItem;
-        OffhandCount = oldMainCount;
+        // Переносим предмет в левую руку (сохраняя точный ItemInstance и его Durability)
+        _offhandEntry = mainEntry;
 
-        // Переносим бывший предмет из левой руки в выбранный слот хотбара
-        if (oldOffhandItem != null && oldOffhandCount > 0) {
-            Inventory.InsertAt(SelectedSlot, new ItemEntry(GameData.NewItem(oldOffhandItem), oldOffhandCount));
+        // Переносим бывший предмет из левой руки в выбранный слот хотбара (сохраняя точный ItemInstance)
+        if (offhandEntry != null) {
+            Inventory.InsertAt(SelectedSlot, offhandEntry.Value);
         }
         SoundSystem.PlayPop();
     }

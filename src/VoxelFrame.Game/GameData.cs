@@ -502,13 +502,19 @@ public static class GameData {
         if (itemId == DiamondLeggingsItem.Id) return 495;
         if (itemId == DiamondBootsItem.Id) return 429;
 
-        return 100;
+        return 0;
+    }
+
+    public static int GetMaxItemDurability(ushort itemId) {
+        int toolDur = GetMaxToolDurability(itemId);
+        if (toolDur > 0) return toolDur;
+        return GetMaxArmorDurability(itemId);
     }
 
     public static ItemInstance NewItem(ItemDefinition def) {
         var inst = new ItemInstance(def, _nextInstanceId++);
-        if (GetToolTier(def.Id) > 0) inst.Durability = GetMaxToolDurability(def.Id);
-        else if (GetArmorType(def.Id) != null) inst.Durability = GetMaxArmorDurability(def.Id);
+        int maxDur = GetMaxItemDurability(def.Id);
+        if (maxDur > 0) inst.Durability = maxDur;
         else inst.Durability = 0;
         return inst;
     }
@@ -538,7 +544,7 @@ public static class GameData {
         if (itemId == IronPickaxeItem.Id || itemId == IronAxeItem.Id || itemId == IronShovelItem.Id || itemId == IronSwordItem.Id || itemId == IronHoeItem.Id) return 250;
         if (itemId == GoldPickaxeItem.Id || itemId == GoldAxeItem.Id || itemId == GoldShovelItem.Id || itemId == GoldSwordItem.Id || itemId == GoldHoeItem.Id) return 32;
         if (itemId == DiamondPickaxeItem.Id || itemId == DiamondAxeItem.Id || itemId == DiamondShovelItem.Id || itemId == DiamondSwordItem.Id || itemId == DiamondHoeItem.Id) return 1561;
-        return 59;
+        return 0;
     }
 
     public static bool RequiresPickaxe(ushort blockId) =>

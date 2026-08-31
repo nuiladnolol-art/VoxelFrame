@@ -479,8 +479,8 @@ public static class Hud {
     /// <summary>Отрисовка полоски прочности инструмента/оружия/брони в слоте интерфейса.</summary>
     public static void DrawItemDurability(VoxelFrame.Core.Inventory.ItemInstance? item, Rectangle slot) {
         if (item == null) return;
-        int maxDur = GameData.GetMaxToolDurability(item.Definition.Id);
-        if (maxDur > 0 && item.Durability < maxDur) {
+        int maxDur = GameData.GetMaxItemDurability(item.Definition.Id);
+        if (maxDur > 0 && item.Durability < maxDur && item.Durability >= 0) {
             float frac = Math.Clamp((float)item.Durability / maxDur, 0f, 1f);
             float bw = slot.Width - 8f;
             float bx = slot.X + 4f;
