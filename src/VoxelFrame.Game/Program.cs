@@ -112,6 +112,12 @@ internal static class Program {
         Raylib.SetExitKey(KeyboardKey.Null);   // ESC обрабатывается игрой
 
         SaveSystem.LoadSettings();
+        if (!string.IsNullOrEmpty(PlayerName) && PlayerName != "Player") {
+            Screens.PlayerNick = PlayerName;
+        } else if (!string.IsNullOrEmpty(Screens.PlayerNick)) {
+            PlayerName = Screens.PlayerNick;
+        }
+        SkinSystem.Initialize();
         SoundSystem.Initialize();
         TextureAtlas.Load();
         Fonts.Load();
@@ -130,6 +136,7 @@ internal static class Program {
 
         while (!Raylib.WindowShouldClose()) {
             float dt = MathF.Min(Raylib.GetFrameTime(), 0.1f);
+            SoundSystem.UpdateMusic(dt);
             if (pauseDebounce > 0f) pauseDebounce -= dt;
 
             if (session == null) {
@@ -248,16 +255,26 @@ internal static class Program {
                 }
 
                 if (Screens.InOpenToLanScreen) {
-                    Ui.Begin();
-                    Screens.DrawOpenToLan(session);
-                    Ui.End();
-                    PostProcessing.EndScene();
-                    Raylib.EndDrawing();
-                    if (pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause)) {
-                        pauseDebounce = 0.25f;
+                    if (GameClient.Active != null) {
                         Screens.InOpenToLanScreen = false;
+                    } else {
+                        Ui.Begin();
+                        Screens.DrawOpenToLan(session);
+                        Ui.End();
+                        PostProcessing.EndScene();
+                        Raylib.EndDrawing();
+                        if (pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause)) {
+                            pauseDebounce = 0.25f;
+                            Screens.InOpenToLanScreen = false;
+                        }
+                        continue;
                     }
-                    continue;
+                }
+
+                // В сетевой игре мир и другие игроки продолжают обновляться в реальном времени даже в меню паузы
+                if (GameClient.Active != null || GameServer.Active != null) {
+                    session.Tick(dt, PlayerInput.Idle);
+                    GameClient.Active?.UpdateRemotePlayers(dt);
                 }
                 
                 Raylib.ClearBackground(new Color(10, 12, 20, 255));
@@ -265,9 +282,11 @@ internal static class Program {
                 renderer.DrawSky();
                 Raylib.BeginMode3D(session.Camera);
                 renderer.Draw3DSky(session.Camera);
-                renderer.DrawWorld();
+                renderer.DrawWorldOpaque();
                 renderer.DrawEntities(session.Camera);
                 renderer.DrawDecorations(dt);
+                renderer.DrawPickups(session.Camera);
+                renderer.DrawWorldTranslucent();
                 Raylib.EndMode3D();
 
                 // Пост-обработка до паузы-UI
@@ -282,17 +301,23 @@ internal static class Program {
                     session.Ui = UiState.Playing;
                     pauseDebounce = 0.25f;
                 } else if (pauseAction == PauseAction.OpenToLan) {
-                    Screens.InOpenToLanScreen = true;
-                    pauseDebounce = 0.25f;
+                    if (GameClient.Active == null) {
+                        Screens.InOpenToLanScreen = true;
+                        pauseDebounce = 0.25f;
+                    }
                 } else if (pauseAction == PauseAction.Settings) {
                     Screens.InSettingsScreen = true;
                     Screens.SettingsOpenedFromGame = true;
                     pauseDebounce = 0.25f;
                 } else if (pauseAction == PauseAction.SaveAndExit) {
                     SoundSystem.StopTotem();
+                    SoundSystem.StopDisc();
+                    bool wasClient = GameClient.Active != null;
                     GameClient.Disconnect();
                     GameServer.Stop();
-                    session.SaveTo(SaveSystem.SavePath);
+                    if (!wasClient) {
+                        session.SaveTo(SaveSystem.SavePath);
+                    }
                     session.Ui = UiState.Playing;
                     session = null;
                     renderer = null;
@@ -339,15 +364,16 @@ internal static class Program {
             Raylib.BeginMode3D(session.Camera);
             renderer.Draw3DSky(session.Camera);
             CrashDiag("05_pre_drawworld");
-            renderer.DrawWorld();
+            renderer.DrawWorldOpaque();
             CrashDiag("06_post_drawworld");
             renderer.DrawEntities(session.Camera);
             CrashDiag("07_pre_decos");
             renderer.DrawDecorations(dt);
             CrashDiag("08_post_decos");
+            renderer.DrawPickups(session.Camera);
+            renderer.DrawWorldTranslucent();
             renderer.DrawClouds(session.Camera);
             renderer.DrawWeather(session.Camera);
-            renderer.DrawPickups(session.Camera); // последними: прозрачные части предмета не режут ни мобов, ни облака
             Raylib.EndMode3D();
             CrashDiag("09_post_endmode3d");
 
@@ -377,6 +403,7 @@ internal static class Program {
                         if (session.CreditsLeadToMenu) {
                             // Истинный финал: титры просмотрены — сохраняем и выходим в главное меню.
                             SoundSystem.StopTotem();
+                            SoundSystem.StopDisc();
                             session.SaveTo(SaveSystem.SavePath);
                             session.Ui = UiState.Playing;
                             session = null;
@@ -453,6 +480,7 @@ internal static class Program {
                         session.RespawnPlayer();
                     } else if (deathAction == Screens.DeathAction.MainMenu) {
                         SoundSystem.StopTotem();
+                        SoundSystem.StopDisc();
                         session.SaveTo(SaveSystem.SavePath);
                         session.Ui = UiState.Playing;
                         session = null;
@@ -637,6 +665,9 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.CarrotItem.Id, TextureAtlas.TCarrot);
         TextureAtlas.SetItemTile(GameData.PotatoItem.Id, TextureAtlas.TPotato);
         TextureAtlas.SetItemTile(GameData.BakedPotatoItem.Id, TextureAtlas.TBakedPotato);
+        TextureAtlas.SetItemTile(GameData.RawChickenItem.Id, TextureAtlas.TRawChicken);
+        TextureAtlas.SetItemTile(GameData.CookedChickenItem.Id, TextureAtlas.TCookedChicken);
+        TextureAtlas.SetItemTile(GameData.EggItem.Id, TextureAtlas.TEgg);
         TextureAtlas.SetItemTile(GameData.SandItem.Id, TextureAtlas.TSand);
         TextureAtlas.SetItemTile(GameData.GravelItem.Id, TextureAtlas.TGravel);
         TextureAtlas.SetItemTile(GameData.CobblestoneItem.Id, TextureAtlas.TCobblestone);
@@ -704,8 +735,6 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.FlintItem.Id, TextureAtlas.TFlint);
         TextureAtlas.SetItemTile(GameData.FlintAndSteelItem.Id, TextureAtlas.TFlintAndSteel);
         TextureAtlas.SetItemTile(GameData.GoldenAppleItem.Id, TextureAtlas.TGoldenApple);
-        TextureAtlas.SetItemTile(GameData.SaddleItem.Id, TextureAtlas.TSaddle);
-        TextureAtlas.SetItemTile(GameData.EnchantedBookItem.Id, TextureAtlas.TEnchantedBook);
         TextureAtlas.SetItemTile(GameData.MusicDiscItem.Id, TextureAtlas.TMusicDisc);
         TextureAtlas.SetItemTile(GameData.NetherQuartzItem.Id, TextureAtlas.TNetherQuartz);
         TextureAtlas.SetItemTile(GameData.BlazeRodItem.Id, TextureAtlas.TBlazeRod);
@@ -725,7 +754,10 @@ internal static class Program {
         TextureAtlas.SetItemTile(GameData.BucketItem.Id, TextureAtlas.TBucket);
         TextureAtlas.SetItemTile(GameData.WaterBucketItem.Id, TextureAtlas.TWaterBucket);
         TextureAtlas.SetItemTile(GameData.LavaBucketItem.Id, TextureAtlas.TLavaBucket);
+        TextureAtlas.SetItemTile(GameData.JukeboxItem.Id, TextureAtlas.TJukeboxSide);
+        TextureAtlas.SetBlockFaces(GameData.BJukebox.Id, TextureAtlas.TJukeboxSide, TextureAtlas.TJukeboxSide, TextureAtlas.TJukeboxTop, TextureAtlas.TPlanks, TextureAtlas.TJukeboxSide, TextureAtlas.TJukeboxSide);
 
+        TextureAtlas.SetBlockTiles(GameData.BFire.Id, TextureAtlas.TFire, TextureAtlas.TFire, TextureAtlas.TFire);
         TextureAtlas.SetBlockTiles(GameData.BFarmland.Id, TextureAtlas.TFarmland, TextureAtlas.TDirt, TextureAtlas.TDirt);
         TextureAtlas.SetBlockTiles(GameData.BTallGrass.Id, TextureAtlas.TTallGrass, TextureAtlas.TTallGrass, TextureAtlas.TTallGrass);
         TextureAtlas.SetBlockTiles(GameData.BMossyCobblestone.Id, TextureAtlas.TMossyCobble, TextureAtlas.TMossyCobble, TextureAtlas.TMossyCobble);

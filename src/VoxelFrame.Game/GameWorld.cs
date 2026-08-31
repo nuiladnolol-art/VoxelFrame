@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using Raylib_cs;
 using VoxelFrame.Core;
 using VoxelFrame.Core.Inventory;
 using VoxelFrame.Core.World;
@@ -217,6 +218,7 @@ public sealed partial class GameWorld : IDisposable {
     public bool IsTargetableBlock(Vec3i w, bool hitFluids = false) {
         ushort type = GetVoxel(w).TypeId;
         return type != 0 && type != GameData.BEnderCrystal.Id &&
+               type != GameData.BNetherPortal.Id && type != GameData.BEndPortal.Id &&
                (hitFluids || (type != GameData.BWater.Id && type != GameData.BLava.Id));
     }
 
@@ -305,9 +307,11 @@ public sealed partial class GameWorld : IDisposable {
     public event Action<Vec3i, ushort>? OnBlockRemoved;
     public event Action<Vector3, int>? OnDustSpawned;
     public event Action<Vector3, int>? OnCritSpawned;
+    public event Action<Vector3, Color, int>? OnEatParticlesSpawned;
 
     public void SpawnDust(Vector3 pos, int count = 4) => OnDustSpawned?.Invoke(pos, count);
     public void SpawnCrit(Vector3 pos, int count = 14) => OnCritSpawned?.Invoke(pos, count);
+    public void SpawnEatParticles(Vector3 pos, Color color, int count = 5) => OnEatParticlesSpawned?.Invoke(pos, color, count);
 
     /// <summary>Событие луча лечения: частицы летят от точки A к точке B (визуализация регенерации босса).</summary>
     public event Action<Vector3, Vector3, int>? OnHealBeamSpawned;
@@ -320,6 +324,12 @@ public sealed partial class GameWorld : IDisposable {
             OnBlockRemoved?.Invoke(w, curVox.TypeId);
         }
         Fire.Extinguish(w);
+        if (curVox.TypeId == GameData.BJukebox.Id) {
+            if (curVox.SubGridLayerMask == 1) {
+                SpawnPickup(GameData.MusicDiscItem.Id, 1, w);
+            }
+            SoundSystem.StopDisc();
+        }
         if (Furnaces.Remove(w, out var furnace)) {
             if (furnace.Input.HasValue && furnace.Input.Value.Quantity > 0)
                 SpawnPickup(furnace.Input.Value.Item.Definition.Id, furnace.Input.Value.Quantity, w);
@@ -442,7 +452,6 @@ public sealed partial class GameWorld : IDisposable {
             Add(GameData.GunpowderItem, rng.Next(1, 4));
             Add(GameData.BreadItem, rng.Next(1, 3));
             Add(GameData.TorchItem, rng.Next(4, 10));
-            if (rng.NextDouble() < 0.15) Add(GameData.EnchantedBookItem, 1);
             if (rng.NextDouble() < 0.10) Add(GameData.MusicDiscItem, 1);
             if (rng.NextDouble() < 0.06) Add(GameData.TotemItem, 1); // редкий тотем в глубоких сокровищницах
         } else {
@@ -614,7 +623,7 @@ public sealed partial class GameWorld : IDisposable {
                 RemoveBlock(leafPos);
 
                 double roll = _random.NextDouble();
-                ItemDefinition? leafDrop = roll < 0.12 ? GameData.AppleItem : roll < 0.30 ? GameData.StickItem : null;
+                ItemDefinition? leafDrop = roll < 0.15 ? GameData.OakSaplingItem : (roll < 0.20 ? GameData.AppleItem : (roll < 0.35 ? GameData.StickItem : null));
                 if (leafDrop != null) {
                     SpawnPickup(leafDrop.Id, 1, leafPos);
                 }
@@ -882,7 +891,7 @@ public sealed partial class GameWorld : IDisposable {
     public void TickGrassSpread(float dt) {
         _grassSpreadTimer -= dt;
         if (_grassSpreadTimer > 0f) return;
-        _grassSpreadTimer = 0.35f;
+        _grassSpreadTimer = 0.20f;
 
         if (_chunks.Count == 0) return;
         _tempChunkList.Clear();
@@ -891,24 +900,26 @@ public sealed partial class GameWorld : IDisposable {
         }
         if (_tempChunkList.Count == 0) return;
 
-        // Берем случайные активные чанки за тик
-        int chunksToTick = Math.Min(_tempChunkList.Count, 8);
+        int chunksToTick = Math.Min(_tempChunkList.Count, 12);
         for (int c = 0; c < chunksToTick; c++) {
             var chunk = _tempChunkList[_random.Next(_tempChunkList.Count)];
-            for (int r = 0; r < 4; r++) {
+            // Используем карту высот чанка для мгновенного попадания на поверхность
+            for (int r = 0; r < 8; r++) {
                 int lx = _random.Next(Chunk.SizeX);
                 int lz = _random.Next(Chunk.SizeZ);
-                int ly = _random.Next(Chunk.SizeY);
+                int surfIdx = chunk.SurfaceIndex(lx, lz);
+                int sy = chunk.Surface[surfIdx];
+                if (sy == int.MinValue) continue;
 
                 int wx = chunk.Coord.X * Chunk.SizeX + lx;
                 int wz = chunk.Coord.Z * Chunk.SizeZ + lz;
-                var blockPos = new Vec3i(wx, ly, wz);
-
+                var blockPos = new Vec3i(wx, sy, wz);
                 var vox = GetVoxel(blockPos);
+
                 if (vox.TypeId == GameData.BGrass.Id) {
                     var abovePos = blockPos + new Vec3i(0, 1, 0);
                     var aboveVox = GetVoxel(abovePos);
-                    var aboveBlock = GameData.GetBlock(aboveVox.TypeId);
+                    var aboveBlock = aboveVox.TypeId != 0 && GameData.TryGetBlock(aboveVox.TypeId, out var ab) ? ab : null;
 
                     // Если блок сверху непрозрачный и твердый — трава погибает и становится землей
                     if (aboveBlock != null && aboveBlock.IsSolid && aboveBlock.IsOpaque) {
@@ -916,19 +927,40 @@ public sealed partial class GameWorld : IDisposable {
                         continue;
                     }
 
-                    // Попытка распространить траву на соседнюю землю (dx: -1..1, dz: -1..1, dy: -3..1)
-                    int targetWx = wx + _random.Next(-1, 2);
-                    int targetWz = wz + _random.Next(-1, 2);
-                    int targetWy = ly + _random.Next(-3, 2);
-                    var targetPos = new Vec3i(targetWx, targetWy, targetWz);
-
-                    if (GetVoxel(targetPos).TypeId == GameData.BDirt.Id) {
-                        var targetAbove = targetPos + new Vec3i(0, 1, 0);
-                        var targetAboveVox = GetVoxel(targetAbove);
-                        var targetAboveBlock = GameData.GetBlock(targetAboveVox.TypeId);
-
-                        if (targetAboveBlock == null || !targetAboveBlock.IsSolid || !targetAboveBlock.IsOpaque) {
-                            PlacePlacedBlock(targetPos, GameData.BGrass);
+                    // Распространение травы на соседнюю землю вокруг
+                    int targetWx = wx + _random.Next(-2, 3);
+                    int targetWz = wz + _random.Next(-2, 3);
+                    int targetSurf = GetColumnSurfaceHeight(targetWx, targetWz);
+                    if (targetSurf != int.MinValue && Math.Abs(targetSurf - sy) <= 3) {
+                        var targetPos = new Vec3i(targetWx, targetSurf, targetWz);
+                        if (GetVoxel(targetPos).TypeId == GameData.BDirt.Id) {
+                            var targetAbove = targetPos + new Vec3i(0, 1, 0);
+                            var targetAboveVox = GetVoxel(targetAbove);
+                            var targetAboveBlock = targetAboveVox.TypeId != 0 && GameData.TryGetBlock(targetAboveVox.TypeId, out var tab) ? tab : null;
+                            if (targetAboveBlock == null || !targetAboveBlock.IsSolid || !targetAboveBlock.IsOpaque) {
+                                PlacePlacedBlock(targetPos, GameData.BGrass);
+                            }
+                        }
+                    }
+                } else if (vox.TypeId == GameData.BDirt.Id) {
+                    // Земля на открытой поверхности со светом проверяет соседнюю траву и прорастает
+                    var abovePos = blockPos + new Vec3i(0, 1, 0);
+                    var aboveVox = GetVoxel(abovePos);
+                    var aboveBlock = aboveVox.TypeId != 0 && GameData.TryGetBlock(aboveVox.TypeId, out var ab) ? ab : null;
+                    if (aboveBlock == null || !aboveBlock.IsSolid || !aboveBlock.IsOpaque) {
+                        bool nearGrass = false;
+                        for (int dx = -2; dx <= 2 && !nearGrass; dx++) {
+                            for (int dz = -2; dz <= 2 && !nearGrass; dz++) {
+                                int checkSurf = GetColumnSurfaceHeight(wx + dx, wz + dz);
+                                if (checkSurf != int.MinValue && Math.Abs(checkSurf - sy) <= 2) {
+                                    if (GetVoxel(new Vec3i(wx + dx, checkSurf, wz + dz)).TypeId == GameData.BGrass.Id) {
+                                        nearGrass = true;
+                                    }
+                                }
+                            }
+                        }
+                        if (nearGrass) {
+                            PlacePlacedBlock(blockPos, GameData.BGrass);
                         }
                     }
                 }
@@ -1291,7 +1323,7 @@ public sealed partial class GameWorld : IDisposable {
         // Сбалансированный спавн животных (в деревнях гарантированно или 18% в дикой природе, максимум 24 на мир)
         if (!inVillage && _random.NextDouble() > 0.18) return;
         if (Animals.Count >= (inVillage ? 24 : 16)) return;
-        var animalType = (AnimalType)_random.Next(0, 3); // Pig, Cow, Sheep
+        var animalType = (AnimalType)_random.Next(0, 4); // Pig, Cow, Sheep, Chicken
         int count = inVillage ? _random.Next(3, 6) : _random.Next(2, 5); // 2..5 особей в стаде
         int baseLx = _random.Next(4, Chunk.SizeX - 4);
         int baseLz = _random.Next(4, Chunk.SizeZ - 4);
@@ -1344,7 +1376,7 @@ public sealed partial class GameWorld : IDisposable {
             var surfaceBlock = GetVoxel(new Vec3i(wx, surface, wz));
             if (surfaceBlock.TypeId != GameData.BGrass.Id) continue;
 
-            var animalType = (AnimalType)_random.Next(0, 3);
+            var animalType = (AnimalType)_random.Next(0, 4);
             var anim = new Animal(animalType, Vector3.Zero);
             var pos = new Vector3(wx + 0.5f, surface + 1.0f + anim.HalfSizeY + 0.05f, wz + 0.5f);
             var half = new Vector3(anim.HalfSizeX, anim.HalfSizeY, anim.HalfSizeZ);

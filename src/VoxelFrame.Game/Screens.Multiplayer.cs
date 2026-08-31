@@ -54,7 +54,7 @@ public static partial class Screens {
             return;
         }
 
-        int sw = Raylib.GetScreenWidth(), sh = Raylib.GetScreenHeight();
+        int sw = Ui.Vw, sh = Ui.Vh;
         _lanDiscovery?.CleanupOldServers();
 
         // Анимированный фон меню
@@ -74,24 +74,24 @@ public static partial class Screens {
         bool leftClick = Raylib.IsMouseButtonPressed(MouseButton.Left);
 
         // ── Заголовок ──────────────────────────────────────────────────────────
-        Fonts.DrawTitle3D("СЕТЕВАЯ ИГРА", sw / 2f, 38f, 38f);
-        Fonts.DrawCentered("Локальные миры LAN и прямое подключение по IP", sw / 2f, 74f, 15f, new Color(190, 205, 225, 230));
+        Fonts.DrawTitle3D("СЕТЕВАЯ ИГРА", sw / 2f, 32f, 36f);
+        Fonts.DrawCentered("Локальные миры LAN и прямое подключение по IP", sw / 2f, 68f, 14f, new Color(190, 205, 225, 230));
 
         // ── Верхняя панель: Никнейм игрока ───────────────────────────────────
-        int panelW = Math.Min(840, sw - 60);
+        int panelW = Math.Min(800, sw - 60);
         int panelX = (sw - panelW) / 2;
-        int nickBarY = 98;
-        int nickBarH = 42;
+        int nickBarY = 88;
+        int nickBarH = 40;
 
         var nickBarRect = new Rectangle(panelX, nickBarY, panelW, nickBarH);
-        Raylib.DrawRectangleRounded(nickBarRect, 0.18f, 6, new Color(26, 30, 42, 230));
-        Raylib.DrawRectangleRoundedLinesEx(nickBarRect, 0.18f, 6, 1.2f, new Color(55, 65, 88, 220));
+        Raylib.DrawRectangleRounded(nickBarRect, 0.15f, 6, new Color(26, 30, 42, 230));
+        Raylib.DrawRectangleRoundedLinesEx(nickBarRect, 0.15f, 6, 1.2f, new Color(55, 65, 88, 220));
 
-        Fonts.Draw("Ваш никнейм:", panelX + 16f, nickBarY + 12f, 15f, new Color(210, 220, 235, 255));
+        Fonts.Draw("Ваш никнейм:", panelX + 16f, nickBarY + 11f, 15f, new Color(210, 220, 235, 255));
 
-        int nickInputW = 240;
+        int nickInputW = 220;
         int nickInputX = panelX + 130;
-        var nickInputRect = new Rectangle(nickInputX, nickBarY + 6f, nickInputW, 30f);
+        var nickInputRect = new Rectangle(nickInputX, nickBarY + 5f, nickInputW, 30f);
         bool nickHov = Raylib.CheckCollisionPointRec(mouse, nickInputRect);
 
         if (leftClick) {
@@ -110,21 +110,22 @@ public static partial class Screens {
 
         bool cursorBlink = ((int)(Raylib.GetTime() * 2.5) % 2) == 0;
         string nickDisplay = PlayerNick + (_activeInputField == 1 && cursorBlink ? "_" : "");
-        Fonts.Draw(nickDisplay, nickInputX + 10f, nickBarY + 12f, 15f, Color.White);
+        Fonts.Draw(nickDisplay, nickInputX + 10f, nickBarY + 11f, 15f, Color.White);
 
         HandleTextInput(ref PlayerNick, 1, maxLen: 16);
 
         // Подсказка справа в панели ника
-        string statusHint = "Миры в вашей локальной сети определяются автоматически";
-        Fonts.Draw(statusHint, panelX + panelW - Fonts.Measure(statusHint, 13f) - 16f, nickBarY + 13f, 13f, new Color(140, 160, 185, 200));
+        string statusHint = "Миры LAN определяются автоматически";
+        Fonts.Draw(statusHint, panelX + panelW - Fonts.Measure(statusHint, 13f) - 16f, nickBarY + 12f, 13f, new Color(140, 160, 185, 200));
 
         // ── Список найденных серверов ─────────────────────────────────────────
-        int listY = nickBarY + nickBarH + 12;
-        int listH = sh - listY - 84;
+        int listY = nickBarY + nickBarH + 10;
+        int bottomH = 96; // Высота блока кнопок внизу
+        int listH = sh - listY - bottomH - 12;
         var listRect = new Rectangle(panelX, listY, panelW, listH);
 
-        Raylib.DrawRectangleRounded(listRect, 0.12f, 6, new Color(18, 22, 32, 235));
-        Raylib.DrawRectangleRoundedLinesEx(listRect, 0.12f, 6, 1.5f, new Color(48, 58, 80, 240));
+        Raylib.DrawRectangleRounded(listRect, 0.10f, 6, new Color(18, 22, 32, 235));
+        Raylib.DrawRectangleRoundedLinesEx(listRect, 0.10f, 6, 1.5f, new Color(48, 58, 80, 240));
 
         var servers = _lanDiscovery?.FoundServers.OrderByDescending(s => s.LastSeen).ToList() ?? [];
 
@@ -137,14 +138,19 @@ public static partial class Screens {
             float pulse = 0.5f + 0.5f * MathF.Sin(time * 3f);
             Color radarCol = new Color((byte)(70 + 40 * pulse), (byte)(160 + 50 * pulse), (byte)255, (byte)255);
 
-            Fonts.DrawCentered($"Поиск серверов в локальной сети{dotStr}", sw / 2f, listY + listH / 2f - 30f, 20f, radarCol);
-            Fonts.DrawCentered("Откройте мир на другом компьютере через меню: Esc → «Открыть для сети»", sw / 2f, listY + listH / 2f + 5f, 15f, new Color(180, 190, 210, 220));
-            Fonts.DrawCentered("Или подключитесь напрямую по IP-адресу кнопкой ниже", sw / 2f, listY + listH / 2f + 30f, 14f, new Color(140, 150, 170, 180));
+            Fonts.DrawCentered($"Поиск серверов в локальной сети{dotStr}", sw / 2f, listY + listH / 2f - 32f, 20f, radarCol);
+            Fonts.DrawCentered("Откройте мир на другом компьютере через меню: Esc → «Открыть для сети»", sw / 2f, listY + listH / 2f + 2f, 14f, new Color(180, 190, 210, 220));
+            Fonts.DrawCentered("Или подключитесь напрямую по IP-адресу кнопкой ниже", sw / 2f, listY + listH / 2f + 26f, 13f, new Color(140, 150, 170, 180));
         } else {
-            // Ограничивающий Scissor для списка серверов
-            Raylib.BeginScissorMode(panelX + 4, listY + 4, panelW - 8, listH - 8);
+            // Ограничивающий Scissor для списка серверов с масштабированием в реальные экранные пиксели
+            int scissorX = (int)((panelX + 4) * Ui.CurrentScale);
+            int scissorY = (int)((listY + 4) * Ui.CurrentScale);
+            int scissorW = (int)((panelW - 8) * Ui.CurrentScale);
+            int scissorH = (int)((listH - 8) * Ui.CurrentScale);
 
-            const int cardH = 72;
+            Raylib.BeginScissorMode(scissorX, scissorY, scissorW, scissorH);
+
+            const int cardH = 68;
             const int cardGap = 8;
             int totalContentH = servers.Count * (cardH + cardGap);
 
@@ -159,7 +165,7 @@ public static partial class Screens {
 
             for (int i = 0; i < servers.Count; i++) {
                 var s = servers[i];
-                var cardRect = new Rectangle(panelX + 12, cardY, panelW - 24, cardH);
+                var cardRect = new Rectangle(panelX + 10, cardY, panelW - 20, cardH);
                 bool isSelected = _selectedServerIndex == i;
                 bool hovered = Raylib.CheckCollisionPointRec(mouse, cardRect);
 
@@ -177,27 +183,27 @@ public static partial class Screens {
                 Color cardBg = isSelected ? new Color(38, 55, 80, 255) : (hovered ? new Color(30, 38, 54, 240) : new Color(22, 27, 38, 220));
                 Color cardBorder = isSelected ? new Color(100, 200, 255, 255) : (hovered ? new Color(70, 110, 160, 230) : new Color(40, 50, 70, 200));
 
-                Raylib.DrawRectangleRounded(cardRect, 0.16f, 4, cardBg);
-                Raylib.DrawRectangleRoundedLinesEx(cardRect, 0.16f, 4, 1.2f, cardBorder);
+                Raylib.DrawRectangleRounded(cardRect, 0.14f, 4, cardBg);
+                Raylib.DrawRectangleRoundedLinesEx(cardRect, 0.14f, 4, 1.2f, cardBorder);
 
                 // Иконка LAN мира
-                var iconRect = new Rectangle(cardRect.X + 8, cardRect.Y + 8, 56, 56);
+                var iconRect = new Rectangle(cardRect.X + 8, cardRect.Y + 8, 52, 52);
                 Raylib.DrawRectangleRounded(iconRect, 0.2f, 4, new Color(18, 90, 55, 255));
                 Raylib.DrawRectangleRoundedLinesEx(iconRect, 0.2f, 4, 1f, new Color(50, 190, 110, 255));
-                Fonts.DrawCentered("LAN", iconRect.X + iconRect.Width / 2f, iconRect.Y + 18f, 18f, Color.White);
+                Fonts.DrawCentered("LAN", iconRect.X + iconRect.Width / 2f, iconRect.Y + 16f, 17f, Color.White);
 
                 // Название мира и хост
-                Fonts.Draw(s.WorldName, cardRect.X + 76f, cardRect.Y + 10f, 18f, Color.White);
-                Fonts.Draw($"Хост: {s.HostPlayer}  ({s.Host}:{s.Port})", cardRect.X + 76f, cardRect.Y + 38f, 14f, new Color(170, 185, 205, 240));
+                Fonts.Draw(s.WorldName, cardRect.X + 70f, cardRect.Y + 8f, 17f, Color.White);
+                Fonts.Draw($"Хост: {s.HostPlayer}  ({s.Host}:{s.Port})", cardRect.X + 70f, cardRect.Y + 34f, 13f, new Color(170, 185, 205, 240));
 
                 // Бейдж онлайна игроков
                 string countTxt = $"👥 {s.PlayerCount} игр.";
-                Fonts.Draw(countTxt, cardRect.X + cardRect.Width - 220f, cardRect.Y + 25f, 15f, new Color(255, 215, 100, 255));
+                Fonts.Draw(countTxt, cardRect.X + cardRect.Width - 190f, cardRect.Y + 24f, 14f, new Color(255, 215, 100, 255));
 
                 // Кнопка подключения на карточке
-                int joinBtnW = 96, joinBtnH = 34;
-                int joinBtnX = (int)(cardRect.X + cardRect.Width - joinBtnW - 12);
-                int joinBtnY = (int)(cardRect.Y + 19);
+                int joinBtnW = 86, joinBtnH = 32;
+                int joinBtnX = (int)(cardRect.X + cardRect.Width - joinBtnW - 10);
+                int joinBtnY = (int)(cardRect.Y + 18);
                 if (Button(joinBtnX, joinBtnY, joinBtnW, joinBtnH, "Войти", true)) {
                     ConnectToServer(s.Host, s.Port);
                 }
@@ -208,64 +214,63 @@ public static partial class Screens {
             Raylib.EndScissorMode();
         }
 
-        // ── Нижняя панель действий ───────────────────────────────────────────
-        int bottomY = sh - 64;
-        int btnH = 42;
+        // ── Нижняя панель действий (2 ряда кнопок) ───────────────────────────
+        int btnW = (panelW - 16) / 2;
+        int btnH = 38;
+        int row1Y = sh - bottomH + 6;
+        int row2Y = row1Y + btnH + 8;
 
-        // Прямое подключение
-        if (Button(panelX, bottomY, 210, btnH, "Прямое подключение", true)) {
-            InDirectConnectModal = true;
-            _activeInputField = 2; // Фокус на поле IP
-        }
-
-        // Подключиться к выбранному серверу
+        // Ряд 1: [ Подключиться к выбранному ] | [ Прямое подключение ]
         bool hasSelection = _selectedServerIndex >= 0 && _selectedServerIndex < servers.Count;
-        if (Button(panelX + 225, bottomY, 180, btnH, "Подключиться", hasSelection)) {
+        if (Button(panelX, row1Y, btnW, btnH, "Подключиться", hasSelection)) {
             if (hasSelection) {
                 var s = servers[_selectedServerIndex];
                 ConnectToServer(s.Host, s.Port);
             }
         }
 
-        // Обновить список
-        if (Button(panelX + 420, bottomY, 130, btnH, "Обновить", true)) {
+        if (Button(panelX + btnW + 16, row1Y, btnW, btnH, "Прямое подключение", true)) {
+            InDirectConnectModal = true;
+            _activeInputField = 2; // Фокус на поле IP
+        }
+
+        // Ряд 2: [ Обновить список ] | [ Назад ]
+        if (Button(panelX, row2Y, btnW, btnH, "Обновить", true)) {
             _lanDiscovery?.CleanupOldServers();
         }
 
-        // Назад в главное меню
-        int backBtnW = 150;
-        if (Button(panelX + panelW - backBtnW, bottomY, backBtnW, btnH, "Назад", true) || Raylib.IsKeyPressed(KeyboardKey.Escape)) {
+        if (Button(panelX + btnW + 16, row2Y, btnW, btnH, "Назад", true) || Raylib.IsKeyPressed(KeyboardKey.Escape)) {
             CloseMultiplayerMenu();
         }
     }
 
     private static void DrawDirectConnectModal(int sw, int sh) {
-        int modalW = 500, modalH = 310;
+        int modalW = 520, modalH = 320;
         int mx = (sw - modalW) / 2, my = (sh - modalH) / 2;
         var mouse = Ui.Mouse();
         bool leftClick = Raylib.IsMouseButtonPressed(MouseButton.Left);
 
-        Raylib.DrawRectangle(0, 0, sw, sh, new Color(0, 0, 0, 180));
+        Raylib.DrawRectangle(0, 0, sw, sh, new Color(0, 0, 0, 190));
 
         var modalRect = new Rectangle(mx, my, modalW, modalH);
         Raylib.DrawRectangleRounded(modalRect, 0.08f, 6, new Color(24, 28, 38, 255));
         Raylib.DrawRectangleRoundedLinesEx(modalRect, 0.08f, 6, 2f, new Color(75, 95, 135, 255));
 
-        Fonts.DrawTitle3D("ПРЯМОЕ ПОДКЛЮЧЕНИЕ", sw / 2f, my + 24f, 26f);
-        Fonts.DrawCentered("Введите IP-адрес или домен сервера и порт", sw / 2f, my + 58f, 14f, new Color(175, 185, 205, 230));
+        Fonts.DrawTitle3D("ПРЯМОЕ ПОДКЛЮЧЕНИЕ", sw / 2f, my + 22f, 26f);
+        Fonts.DrawCentered("Введите IP-адрес или домен сервера и порт", sw / 2f, my + 56f, 14f, new Color(175, 185, 205, 230));
 
         int fieldW = modalW - 60;
         int fieldH = 34;
         int fx = mx + 30;
 
         // 1. Поле ввода IP
-        int ipY = my + 84;
+        int ipY = my + 82;
         Fonts.Draw("IP-адрес или хост сервера:", fx, ipY, 14f, new Color(210, 220, 235, 255));
         var ipRect = new Rectangle(fx, ipY + 20, fieldW, fieldH);
         bool ipHov = Raylib.CheckCollisionPointRec(mouse, ipRect);
 
         // 2. Поле ввода Порта
-        int portY = ipY + 68;
+        int portY = ipY + 66;
         Fonts.Draw("Порт сервера (по умолчанию 25565):", fx, portY, 14f, new Color(210, 220, 235, 255));
         var portRect = new Rectangle(fx, portY + 20, fieldW, fieldH);
         bool portHov = Raylib.CheckCollisionPointRec(mouse, portRect);
@@ -288,23 +293,23 @@ public static partial class Screens {
         Color ipBorder = _activeInputField == 2 ? new Color(100, 200, 255, 255) : new Color(60, 70, 95, 230);
         Raylib.DrawRectangleRounded(ipRect, 0.18f, 4, ipBg);
         Raylib.DrawRectangleRoundedLinesEx(ipRect, 0.18f, 4, 1.2f, ipBorder);
-        Fonts.Draw(DirectConnectIp + (_activeInputField == 2 && blink ? "_" : ""), fx + 10f, ipY + 28f, 16f, Color.White);
+        Fonts.Draw(DirectConnectIp + (_activeInputField == 2 && blink ? "_" : ""), fx + 10f, ipY + 27f, 15f, Color.White);
 
         // Рендер поля Port
         Color portBg = _activeInputField == 3 ? new Color(38, 46, 62, 255) : new Color(16, 20, 28, 255);
         Color portBorder = _activeInputField == 3 ? new Color(100, 200, 255, 255) : new Color(60, 70, 95, 230);
         Raylib.DrawRectangleRounded(portRect, 0.18f, 4, portBg);
         Raylib.DrawRectangleRoundedLinesEx(portRect, 0.18f, 4, 1.2f, portBorder);
-        Fonts.Draw(DirectConnectPort + (_activeInputField == 3 && blink ? "_" : ""), fx + 10f, portY + 28f, 16f, Color.White);
+        Fonts.Draw(DirectConnectPort + (_activeInputField == 3 && blink ? "_" : ""), fx + 10f, portY + 27f, 15f, Color.White);
 
         HandleTextInput(ref DirectConnectIp, 2, maxLen: 64);
         HandleTextInput(ref DirectConnectPort, 3, maxLen: 6);
 
         // Кнопки действий
-        int modalBtnW = (fieldW - 20) / 2;
+        int modalBtnW = (fieldW - 16) / 2;
         int modalBtnY = my + modalH - 56;
 
-        bool doConnect = Button(fx, modalBtnY, modalBtnW, 40, "Подключиться", true) || Raylib.IsKeyPressed(KeyboardKey.Enter);
+        bool doConnect = Button(fx, modalBtnY, modalBtnW, 38, "Подключиться", true) || Raylib.IsKeyPressed(KeyboardKey.Enter);
         if (doConnect) {
             if (int.TryParse(DirectConnectPort, out int port) && port > 0 && port <= 65535) {
                 SaveSystem.SaveSettings();
@@ -315,14 +320,14 @@ public static partial class Screens {
             }
         }
 
-        if (Button(fx + modalBtnW + 20, modalBtnY, modalBtnW, 40, "Отмена", true) || Raylib.IsKeyPressed(KeyboardKey.Escape)) {
+        if (Button(fx + modalBtnW + 16, modalBtnY, modalBtnW, 38, "Отмена", true) || Raylib.IsKeyPressed(KeyboardKey.Escape)) {
             InDirectConnectModal = false;
         }
     }
 
     private static void DrawConnectingOverlay(int sw, int sh) {
-        Raylib.DrawRectangle(0, 0, sw, sh, new Color(0, 0, 0, 190));
-        int boxW = 440, boxH = 170;
+        Raylib.DrawRectangle(0, 0, sw, sh, new Color(0, 0, 0, 200));
+        int boxW = 460, boxH = 170;
         int bx = (sw - boxW) / 2, by = (sh - boxH) / 2;
 
         var boxRect = new Rectangle(bx, by, boxW, boxH);

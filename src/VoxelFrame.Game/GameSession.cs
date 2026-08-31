@@ -52,6 +52,19 @@ public sealed class GameSession {
         SubtitleColor = subColor ?? new Color(235, 235, 245, 255);
     }
 
+    // Actionbar над хотбаром (статусные уведомления, трек пластинки и т.д.)
+    public string? ActionbarText;
+    public float ActionbarTimer;
+    public float ActionbarDuration = 4.0f;
+    public Color ActionbarColor = Color.White;
+
+    public void ShowActionbar(string text, float duration = 4.0f, Color? color = null) {
+        ActionbarText = text;
+        ActionbarDuration = MathF.Max(3.0f, duration);
+        ActionbarTimer = ActionbarDuration;
+        ActionbarColor = color ?? new Color(255, 240, 100, 255);
+    }
+
     // Чат и команды
     public string ChatInput = "";
     public readonly List<(string Text, Color Col, float Time)> ChatLog = new();
@@ -150,11 +163,13 @@ public sealed class GameSession {
 
     // ── Создание / загрузка ──────────────────────────────────────────────────
 
+    public int CameraPerspective = 0; // 0 = 1st person, 1 = 3rd person back, 2 = 3rd person front
+
     public static GameSession NewGame(int seed, bool headless) {
         var session = new GameSession(headless) {
             World = new GameWorld(seed),
             DayNight = new DayNightCycle(),
-            Player = new Player(),
+            Player = new Player { Name = !string.IsNullOrEmpty(Screens.PlayerNick) ? Screens.PlayerNick : "Player" },
             MasterSeed = seed,
         };
 
@@ -424,6 +439,7 @@ public sealed class GameSession {
             _messages[i] = (_messages[i].Text, _messages[i].Age + dt);
         _messages.RemoveAll(m => m.Age > 6f);
         if (TitleTimer > 0f) TitleTimer = MathF.Max(0f, TitleTimer - dt);
+        if (ActionbarTimer > 0f) ActionbarTimer = MathF.Max(0f, ActionbarTimer - dt);
 
         if (Ui == UiState.Paused || Ui == UiState.Death || Ui == UiState.Credits) return;
 
@@ -476,15 +492,44 @@ public sealed class GameSession {
             if (!IsSleeping) {
                 Player.Update(dt, input, World, this);
             }
+
+            if (Raylib.IsKeyPressed(KeyboardKey.F5)) {
+                CameraPerspective = (CameraPerspective + 1) % 3;
+                string modeName = CameraPerspective == 0 ? "Вид от первого лица" : CameraPerspective == 1 ? "Вид от третьего лица (сзади)" : "Вид от третьего лица (спереди)";
+                AddMessage(modeName);
+            }
+
             var shake = Player.ScreenShake > 0.001f
                 ? new Vector3(
                     (Random.Shared.NextSingle() - 0.5f) * Player.ScreenShake,
                     (Random.Shared.NextSingle() - 0.5f) * Player.ScreenShake,
                     (Random.Shared.NextSingle() - 0.5f) * Player.ScreenShake)
                 : Vector3.Zero;
-            Camera.Position = Player.Eye + new Vector3(0f, Player.BobOffset, 0f) + shake;
-            Camera.Target = Player.Eye + new Vector3(0f, Player.BobOffset, 0f) + Player.Forward + shake;
+
+            Vector3 eyePos = Player.Eye + new Vector3(0f, Player.BobOffset, 0f);
+            if (CameraPerspective == 0) {
+                Camera.Position = eyePos + shake;
+                Camera.Target = eyePos + Player.Forward + shake;
+            } else if (CameraPerspective == 1) {
+                // Вид от 3-го лица сзади
+                Vector3 backDir = -Player.Forward;
+                Camera.Position = eyePos + backDir * 3.5f + shake;
+                Camera.Target = eyePos + shake;
+            } else {
+                // Вид от 3-го лица спереди
+                Vector3 frontDir = Player.Forward;
+                Camera.Position = eyePos + frontDir * 3.5f + shake;
+                Camera.Target = eyePos + shake;
+            }
             Camera.FovY = SaveSystem.FovSetting + Player.SprintFovProgress * 10f;
+
+            // Обновление координат слушателя звука для 3D аудио
+            SoundSystem.ListenerPosition = Player.Eye;
+            SoundSystem.ListenerForward = Player.Forward;
+            var fwdH = new Vector3(Player.Forward.X, 0f, Player.Forward.Z);
+            SoundSystem.ListenerRight = fwdH.LengthSquared() > 0.001f 
+                ? Vector3.Normalize(new Vector3(-fwdH.Z, 0f, fwdH.X)) 
+                : new Vector3(1f, 0f, 0f);
 
             // Наклон камеры при получении урона (Hurt Tilt)
             if (Player.HurtTimer > 0f) {
@@ -620,9 +665,16 @@ public sealed class GameSession {
             return;
         }
 
+        bool isClient = GameClient.Active != null;
+        if (isClient && (c is "gamerule" or "keepinventory" or "time" or "weather")) {
+            AddChatMessage("У вас нет прав администратора для изменения правил и параметров сервера.", Color.Red);
+            return;
+        }
+
         // Проверка прав на использование читов в этом мире
         if (!CheatsEnabled) {
-            AddChatMessage("Читы отключены в этом мире! Включите их через Меню паузы (Esc) -> «Открыть для сети...»", Color.Red);
+            string hint = isClient ? "Читы отключены создателем сервера!" : "Читы отключены в этом мире! Включите их через Меню паузы (Esc) -> «Открыть для сети...»";
+            AddChatMessage(hint, Color.Red);
             return;
         }
 

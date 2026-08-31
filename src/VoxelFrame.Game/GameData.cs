@@ -108,6 +108,9 @@ public static class GameData {
     public static readonly Material OrganicM = new() {
         Id = 27, Name = "Органика", Category = MaterialCategory.Organic,
     };
+    public static readonly Material FireM = new() {
+        Id = 28, Name = "Огонь", Category = MaterialCategory.Organic,
+    };
 
     // ── Предметы ─────────────────────────────────────────────────────────────
     public static readonly ItemDefinition DirtItem = Item(1, "Земля", DirtM);
@@ -184,8 +187,6 @@ public static class GameData {
     public static readonly ItemDefinition FlintItem = Item(74, "Кремень", Stone);
     public static readonly ItemDefinition FlintAndSteelItem = Item(75, "Огниво", IronM, maxStack: 1);
     public static readonly ItemDefinition GoldenAppleItem = Item(76, "Золотое яблоко", GoldM);
-    public static readonly ItemDefinition SaddleItem = Item(77, "Седло", LeatherM, maxStack: 1);
-    public static readonly ItemDefinition EnchantedBookItem = Item(78, "Зачарованная книга", LeatherM, maxStack: 1);
     public static readonly ItemDefinition MusicDiscItem = Item(79, "Музыкальная пластинка", DiamondM, maxStack: 1);
     public static readonly ItemDefinition NetherQuartzItem = Item(80, "Кварц", DiamondM);
     public static readonly ItemDefinition BlazeRodItem = Item(81, "Стержень ифрита", GoldM);
@@ -253,6 +254,10 @@ public static class GameData {
     public static readonly ItemDefinition CarrotItem = Item(131, "Морковь", OrganicM);
     public static readonly ItemDefinition PotatoItem = Item(132, "Картофель", OrganicM);
     public static readonly ItemDefinition BakedPotatoItem = Item(133, "Печеный картофель", OrganicM);
+    public static readonly ItemDefinition RawChickenItem = Item(134, "Сырая курятина", BeefM);
+    public static readonly ItemDefinition CookedChickenItem = Item(135, "Жареная курятина", BeefM);
+    public static readonly ItemDefinition EggItem = Item(136, "Яйцо", OrganicM);
+    public static readonly ItemDefinition JukeboxItem = Item(137, "Проигрыватель", Oak);
 
     // ── Блоки ─────────────────────────────────────────────────────────────────
     public static readonly BlockType BGrass = Block(1, "Трава", DirtM, drop: DirtItem);
@@ -275,8 +280,8 @@ public static class GameData {
     public static readonly BlockType BSand = Block(16, "Песок", SandM, drop: SandItem);
     public static readonly BlockType BGravel = Block(17, "Гравий", Stone, drop: GravelItem);
     public static readonly BlockType BGlass = Block(18, "Стекло", GlassM, drop: null).With(b => { b.IsOpaque = false; });
-    public static readonly BlockType BWater = Block(19, "Вода", WaterM, drop: null).With(b => { b.IsSolid = false; b.IsOpaque = false; });
-    public static readonly BlockType BLava = Block(20, "Лава", LavaM, drop: null, light: 15).With(b => { b.IsSolid = false; b.IsOpaque = true; });
+    public static readonly BlockType BWater = Block(19, "Вода", WaterM, drop: null).With(b => { b.IsSolid = false; b.IsOpaque = false; b.IsUnbreakable = true; });
+    public static readonly BlockType BLava = Block(20, "Лава", LavaM, drop: null, light: 15).With(b => { b.IsSolid = false; b.IsOpaque = true; b.IsUnbreakable = true; });
     public static readonly BlockType BGoldOre = Block(21, "Золотая руда", Stone, drop: GoldOreItem);
     public static readonly BlockType BDiamondOre = Block(22, "Алмазная руда", Stone, drop: DiamondItem);
     public static readonly BlockType BObsidian = Block(24, "Обсидиан", ObsidianM, drop: ObsidianItem);
@@ -331,6 +336,8 @@ public static class GameData {
     public static readonly BlockType BVoidGate = Block(53, "Врата Бездны", ObsidianM, drop: null, light: 12)
         .With(b => { b.IsUnbreakable = true; b.IsOpaque = false; });
 
+    public static readonly BlockType BFire = Block(54, "Огонь", FireM, drop: null, light: 15)
+        .With(b => { b.IsSolid = false; b.IsOpaque = false; });
     public static readonly BlockType BSapling = Block(55, "Саженец дуба", LeavesM, drop: OakSaplingItem, flammable: true, burnTime: 4f)
         .With(b => { b.IsSolid = false; b.IsOpaque = false; });
     public static readonly BlockType BRedFlower = Block(56, "Мак", OrganicM, drop: RedFlowerItem)
@@ -341,6 +348,7 @@ public static class GameData {
         .With(b => { b.IsSolid = false; b.IsOpaque = false; });
     public static readonly BlockType BPotatoCrop = Block(59, "Посевы картофеля", OrganicM, drop: PotatoItem)
         .With(b => { b.IsSolid = false; b.IsOpaque = false; });
+    public static readonly BlockType BJukebox = Block(60, "Проигрыватель", Oak, drop: JukeboxItem, flammable: true, burnTime: 8f);
 
     public static readonly BlockType[] Blocks =
         { BGrass, BDirt, BStone, BLog, BLeaves, BPlanks, BCoalOre, BTorch, BBedrock, BIronOre, BWorkbench, BFurnace,
@@ -348,7 +356,7 @@ public static class GameData {
           BFarmland, BWheatCrop, BTallGrass, BMossyCobblestone, BMobSpawner, BWeb, BRail, BPressurePlate, BTNT, BChiseledSandstone,
           BNetherrack, BSoulSand, BGlowstone, BNetherQuartzOre, BNetherBrick, BNetherPortal, BDoorLower, BDoorUpper,
           BEndStone, BEndPortalFrame, BEndPortal, BObsidianPillar, BEnderCrystal, BChorusPlant, BChorusFlower, BVoidGate,
-          BSapling, BRedFlower, BYellowFlower, BCarrotCrop, BPotatoCrop };
+          BFire, BSapling, BRedFlower, BYellowFlower, BCarrotCrop, BPotatoCrop, BJukebox };
 
 
     private static readonly Dictionary<ushort, BlockType> _byId = Blocks.ToDictionary(b => b.Id);
@@ -384,6 +392,7 @@ public static class GameData {
         { OakSaplingItem.Id, BSapling.Id },
         { RedFlowerItem.Id, BRedFlower.Id },
         { YellowFlowerItem.Id, BYellowFlower.Id },
+        { JukeboxItem.Id, BJukebox.Id },
     };
 
     /// <summary>Возвращает блок по его Id.</summary>
@@ -422,6 +431,8 @@ public static class GameData {
         { CarrotItem.Id, 3f },       // Морковь: +3 HP
         { PotatoItem.Id, 1f },       // Картофель: +1 HP
         { BakedPotatoItem.Id, 5f },  // Печеный картофель: +5 HP
+        { RawChickenItem.Id, 2f },   // Сырая курятина: +2 HP
+        { CookedChickenItem.Id, 6f },// Жареная курятина: +6 HP
     };
 
     // ── Реестр предметов ───────────────────────────────────────────────────────
@@ -732,8 +743,8 @@ public static class GameData {
             WheatItem, WheatSeedsItem,
             BoneMealItem, SawdustItem, SawdustPorridgeItem, TotemItem,
             RawMuttonItem, CookedMuttonItem, BowItem, ShieldItem,
-            FlintItem, FlintAndSteelItem, GoldenAppleItem, SaddleItem,
-            EnchantedBookItem, MusicDiscItem, NetherQuartzItem, BlazeRodItem,
+            FlintItem, FlintAndSteelItem, GoldenAppleItem,
+            MusicDiscItem, NetherQuartzItem, BlazeRodItem,
             GlowstoneDustItem, TNTItem, NetherrackItem, SoulSandItem,
             GlowstoneItem, NetherQuartzOreItem, NetherBrickItem, MossyCobblestoneItem,
             ChiseledSandstoneItem, RailItem, BucketItem, WaterBucketItem, LavaBucketItem, DoorItem,
@@ -744,7 +755,8 @@ public static class GameData {
             LeatherHelmetItem, LeatherChestplateItem, LeatherLeggingsItem, LeatherBootsItem,
             IronHelmetItem, IronChestplateItem, IronLeggingsItem, IronBootsItem,
             DiamondHelmetItem, DiamondChestplateItem, DiamondLeggingsItem, DiamondBootsItem,
-            OakSaplingItem, RedFlowerItem, YellowFlowerItem, CarrotItem, PotatoItem, BakedPotatoItem }) {
+            OakSaplingItem, RedFlowerItem, YellowFlowerItem, CarrotItem, PotatoItem, BakedPotatoItem,
+            RawChickenItem, CookedChickenItem, EggItem, JukeboxItem }) {
             Items.Add(item.Id, item);
         }
 
@@ -1473,6 +1485,24 @@ public static class GameData {
                 null,               null,               null
             },
             false, CraftCategory.Materials);
+
+        RegisterRecipe("Проигрыватель", JukeboxItem, 1,
+            new[] { (IronIngotItem, 3), (PlankItem, 5), (GoldIngotItem, 1) },
+            new ItemDefinition?[] {
+                IronIngotItem, IronIngotItem, IronIngotItem,
+                PlankItem,     GoldIngotItem, PlankItem,
+                PlankItem,     PlankItem,     PlankItem
+            },
+            true, CraftCategory.Blocks);
+
+        RegisterRecipe("Музыкальная пластинка", MusicDiscItem, 1,
+            new[] { (CoalItem, 8), (ObsidianItem, 1) },
+            new ItemDefinition?[] {
+                CoalItem, CoalItem,     CoalItem,
+                CoalItem, ObsidianItem, CoalItem,
+                CoalItem, CoalItem,     CoalItem
+            },
+            true, CraftCategory.Materials);
     }
 
     private static void InitSmeltingRecipes() {
@@ -1486,6 +1516,7 @@ public static class GameData {
         SmeltingRecipes[RawBeefItem.Id] = (CookedBeefItem, 1);
         SmeltingRecipes[RawMuttonItem.Id] = (CookedMuttonItem, 1);
         SmeltingRecipes[PotatoItem.Id] = (BakedPotatoItem, 1);
+        SmeltingRecipes[RawChickenItem.Id] = (CookedChickenItem, 1);
     }
 
 

@@ -27,6 +27,7 @@ public sealed class RemotePlayer {
     public int SelectedItemId { get; set; }
     public float ArmSwingTimer { get; set; }
     public float HurtTimer { get; set; }
+    public string SkinName { get; set; } = "steve";
 
     public RemotePlayer(int id, string name, Vector3 pos, float yaw, float pitch) {
         Id = id;
@@ -223,12 +224,13 @@ public sealed class GameClient : IDisposable {
 
                         if (_session != null) {
                             var cell = new Vec3i(bx, by, bz);
+                            var cellPos = new Vector3(bx + 0.5f, by + 0.5f, bz + 0.5f);
                             if (isBreak) {
                                 _session.World.RemoveBlock(cell);
-                                SoundSystem.PlayDig(typeId);
+                                SoundSystem.PlayDigAt(cellPos, typeId);
                             } else {
                                 _session.World.PlacePlacedBlock(cell, GameData.GetBlock(typeId), mask);
-                                SoundSystem.PlayPlace();
+                                SoundSystem.PlayPlaceAt(cellPos);
                             }
                         }
                         break;

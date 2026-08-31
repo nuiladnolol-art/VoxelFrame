@@ -886,7 +886,12 @@ public static class SaveSystem {
     public static int ParticlesMode = 2; // 0=Minimal, 1=Decreased, 2=All
     public static bool DynamicLighting = true;
     public static bool EntityShadows = true;
-    public static int SoundVolume = 100; // 0..100%
+    public static int SoundVolume = 100; // 0..100% (Общая громкость)
+    public static int MusicVolume = 70;  // 0..100% (Музыка)
+    public static int BlocksVolume = 100; // 0..100% (Блоки, шаги, копание)
+    public static int CreaturesVolume = 100; // 0..100% (Мобы и животные)
+    public static int WeatherVolume = 100; // 0..100% (Погода, гром, вода)
+    public static int PlayerVolume = 100; // 0..100% (Игрок и интерфейс)
     public static int RenderDistanceSetting = 5; // 2..20
     public static int MouseSensitivity = 100; // 20..200%
     public static int FovSetting = 70; // 50..110
@@ -897,6 +902,8 @@ public static class SaveSystem {
     public static int PostFxVignetteStrength = 35; // 0..60 %
     public static bool PostFxGoldenHour = true;
     public static bool PostFxBloom = true;
+
+    public static string SelectedSkin = "steve";
 
     public static void SaveSettings() {
         try {
@@ -922,6 +929,11 @@ public static class SaveSystem {
                 ["DynamicLighting"] = DynamicLighting,
                 ["EntityShadows"] = EntityShadows,
                 ["SoundVolume"] = SoundVolume,
+                ["MusicVolume"] = MusicVolume,
+                ["BlocksVolume"] = BlocksVolume,
+                ["CreaturesVolume"] = CreaturesVolume,
+                ["WeatherVolume"] = WeatherVolume,
+                ["PlayerVolume"] = PlayerVolume,
                 ["RenderDistanceSetting"] = RenderDistanceSetting,
                 ["MouseSensitivity"] = MouseSensitivity,
                 ["FovSetting"] = FovSetting,
@@ -933,6 +945,7 @@ public static class SaveSystem {
                 ["PostFxGoldenHour"] = PostFxGoldenHour,
                 ["PostFxBloom"] = PostFxBloom,
                 ["PlayerNick"] = Screens.PlayerNick,
+                ["SelectedSkin"] = SelectedSkin,
                 ["DirectConnectIp"] = Screens.DirectConnectIp,
                 ["DirectConnectPort"] = Screens.DirectConnectPort,
             };
@@ -971,7 +984,12 @@ public static class SaveSystem {
             R("ParticlesMode", v => ParticlesMode = Math.Clamp(v, 0, 2));
             B("DynamicLighting", v => DynamicLighting = v);
             B("EntityShadows", v => EntityShadows = v);
-            R("SoundVolume", v => SoundVolume = v);
+            R("SoundVolume", v => SoundVolume = Math.Clamp(v, 0, 100));
+            R("MusicVolume", v => MusicVolume = Math.Clamp(v, 0, 100));
+            R("BlocksVolume", v => BlocksVolume = Math.Clamp(v, 0, 100));
+            R("CreaturesVolume", v => CreaturesVolume = Math.Clamp(v, 0, 100));
+            R("WeatherVolume", v => WeatherVolume = Math.Clamp(v, 0, 100));
+            R("PlayerVolume", v => PlayerVolume = Math.Clamp(v, 0, 100));
             R("RenderDistanceSetting", v => RenderDistanceSetting = v);
             R("MouseSensitivity", v => MouseSensitivity = Math.Clamp(v, 20, 200));
             R("FovSetting", v => FovSetting = Math.Clamp(v, 50, 110));
@@ -983,6 +1001,10 @@ public static class SaveSystem {
             B("PostFxGoldenHour", v => PostFxGoldenHour = v);
             B("PostFxBloom", v => PostFxBloom = v);
             S("PlayerNick", v => Screens.PlayerNick = v);
+            S("SelectedSkin", v => {
+                SelectedSkin = v;
+                SkinSystem.SetSkin(v);
+            });
             S("DirectConnectIp", v => Screens.DirectConnectIp = v);
             S("DirectConnectPort", v => Screens.DirectConnectPort = v);
         } catch { }

@@ -1,12 +1,22 @@
+using System;
+using System.Collections.Generic;
 using System.IO;
 using Raylib_cs;
 
 namespace VoxelFrame.Game;
 
+public enum SoundCategory {
+    Master,
+    Music,
+    Blocks,
+    Creatures,
+    Weather,
+    Player
+}
+
 /// <summary>
-/// Процедурная звуковая система на основе генератора WAV-байтов в память.
-/// Создает богатый спектр 16-битных звуков для различных материалов блоков,
-/// шагов, оружия, поломки инструментов, сундуков и взрывов без внешних файлов.
+/// Процедурная и файловая звуковая система с поддержкой категорий громкости
+/// и фоновой музыки (Background Music / BGM).
 /// </summary>
 public static class SoundSystem {
     private static bool _audioReady;
@@ -45,10 +55,23 @@ public static class SoundSystem {
     private static Sound _doorCloseSound;
     private static Sound _dupePoliceSound;
     private static Sound _totemSound;
-    private static Sound _fertilizeSound;
-    private static Sound _caveAmbianceSound;
     private static Sound _thunderSound;
-    private static Sound _bgmMusic;
+
+    // Фоновая музыка (BGM)
+    private static readonly List<string> _musicFiles = new();
+    private static Music _currentMusic;
+    private static bool _musicLoaded;
+    private static bool _musicPlaying;
+    private static float _musicPauseTimer = 1.0f; // небольшая пауза перед стартом первого трека
+    private static int _currentMusicIndex = -1;
+    private static readonly Random _musicRng = new();
+
+    // Музыкальная пластинка (Disc Music)
+    private static Music _discMusic;
+    private static bool _discLoaded;
+    private static bool _discPlaying;
+
+    public static bool IsDiscPlaying => _discLoaded && _discPlaying && Raylib.IsMusicStreamPlaying(_discMusic);
 
     public static void Initialize() {
         if (_audioReady) return;
@@ -88,10 +111,7 @@ public static class SoundSystem {
                 _doorOpenSound = LoadProceduralSound(CreateToneWav(44100 / 6, 220f, 360f, 0.45f));
                 _doorCloseSound = LoadProceduralSound(CreateToneWav(44100 / 6, 360f, 180f, 0.45f));
                 _dupePoliceSound = LoadProceduralSound(CreateToneWav(44100 / 4, 880f, 220f, 0.65f));
-                _fertilizeSound = LoadProceduralSound(CreateToneWav(44100 / 6, 600f, 1200f, 0.40f));
-                _caveAmbianceSound = LoadProceduralSound(CreateToneWav(44100 * 3, 110f, 75f, 0.40f));
-                _thunderSound = LoadProceduralSound(CreateNoiseWav(44100 * 2, 0.90f, highPass: false));
-                _bgmMusic = LoadProceduralSound(CreateToneWav(44100 * 6, 261.6f, 329.6f, 0.25f));
+                _thunderSound = LoadProceduralSound(CreateThunderWav(44100 * 3, 0.95f));
 
                 // Звук тотема (MP3 / WAV файл, обрезанный ровно до 12.0 секунд)
                 string? totemPath = FindSoundFile("totem.mp3") 
@@ -114,11 +134,52 @@ public static class SoundSystem {
                     _totemSound = LoadProceduralSound(CreateToneWav(44100 * 2, 580f, 880f, 0.70f));
                 }
 
+                // Поиск музыкальных файлов
+                DiscoverMusicFiles();
+
                 _audioReady = true;
             }
         } catch {
             _audioReady = false;
         }
+    }
+
+    private static void DiscoverMusicFiles() {
+        _musicFiles.Clear();
+        string[] probeStarts = { Directory.GetCurrentDirectory(), AppDomain.CurrentDomain.BaseDirectory };
+        foreach (var start in probeStarts) {
+            var dir = new DirectoryInfo(start);
+            while (dir != null) {
+                string musicDir = Path.Combine(dir.FullName, "assets", "music");
+                if (Directory.Exists(musicDir)) {
+                    foreach (var f in Directory.GetFiles(musicDir)) {
+                        string name = Path.GetFileName(f).ToLowerInvariant();
+                        if (name.StartsWith("disc_") || name.StartsWith("record_")) continue; // Пластинки исключаем из обычной фоновой музыки
+                        string ext = Path.GetExtension(f).ToLowerInvariant();
+                        if (ext is ".mp3" or ".ogg" or ".wav" or ".flac") {
+                            if (!_musicFiles.Contains(f)) _musicFiles.Add(f);
+                        }
+                    }
+                }
+                dir = dir.Parent;
+            }
+        }
+    }
+
+    public static float GetCategoryVolume(SoundCategory cat) {
+        float master = SaveSystem.SoundVolume / 100f;
+        if (master <= 0.001f) return 0f;
+
+        float catFactor = cat switch {
+            SoundCategory.Master => 1.0f,
+            SoundCategory.Music => SaveSystem.MusicVolume / 100f,
+            SoundCategory.Blocks => SaveSystem.BlocksVolume / 100f,
+            SoundCategory.Creatures => SaveSystem.CreaturesVolume / 100f,
+            SoundCategory.Weather => SaveSystem.WeatherVolume / 100f,
+            SoundCategory.Player => SaveSystem.PlayerVolume / 100f,
+            _ => 1.0f
+        };
+        return Math.Clamp(master * catFactor, 0f, 1f);
     }
 
     private static string? FindSoundFile(string fileName) {
@@ -128,90 +189,316 @@ public static class SoundSystem {
             while (dir != null) {
                 string candidate = Path.Combine(dir.FullName, "assets", "sounds", fileName);
                 if (File.Exists(candidate)) return candidate;
+                candidate = Path.Combine(dir.FullName, "assets", "music", fileName);
+                if (File.Exists(candidate)) return candidate;
                 dir = dir.Parent;
             }
         }
         return null;
     }
 
-    private static void Play(Sound s, float pitch = 1.0f) {
-        if (!_audioReady || SaveSystem.SoundVolume <= 0) return;
-        Raylib.SetMasterVolume(SaveSystem.SoundVolume / 100f);
-        Raylib.SetSoundVolume(s, 1.0f);
+    public static System.Numerics.Vector3 ListenerPosition;
+    public static System.Numerics.Vector3 ListenerForward = new(0f, 0f, 1f);
+    public static System.Numerics.Vector3 ListenerRight = new(1f, 0f, 0f);
+
+    private static void Play(Sound s, SoundCategory cat = SoundCategory.Player, float pitch = 1.0f) {
+        if (!_audioReady) return;
+        float vol = GetCategoryVolume(cat);
+        if (vol <= 0.001f) return;
+
+        Raylib.SetSoundVolume(s, vol);
         Raylib.SetSoundPitch(s, pitch);
+        Raylib.SetSoundPan(s, 0.5f);
         Raylib.PlaySound(s);
     }
 
-    public static void PlayStep(ushort blockId = 0) {
+    /// <summary>
+    /// Воспроизведение звука в 3D пространстве с учетом расстояния до слушателя (падающая громкость)
+    /// и направления источника (стерео-панорамирование влево/вправо).
+    /// </summary>
+    public static void Play3D(Sound s, System.Numerics.Vector3 soundPos, SoundCategory cat = SoundCategory.Player, float pitch = 1.0f, float maxDistance = 24f, float baseVol = 1.0f) {
+        if (!_audioReady) return;
+
+        float dist = System.Numerics.Vector3.Distance(soundPos, ListenerPosition);
+        if (dist > maxDistance) return; // Звук за пределами радиуса слышимости — полная тишина
+
+        float distFrac = Math.Clamp(1.0f - (dist / maxDistance), 0f, 1f);
+        float falloff = distFrac * distFrac; // Плавное квадратичное затухание
+
+        float categoryVol = GetCategoryVolume(cat);
+        float finalVol = categoryVol * baseVol * falloff;
+        if (finalVol <= 0.002f) return;
+
+        // Расчет панорамирования стерео (0.0 = слева, 0.5 = центр, 1.0 = справа)
+        float pan = 0.5f;
+        if (dist > 0.3f) {
+            var soundDir = System.Numerics.Vector3.Normalize(soundPos - ListenerPosition);
+            float rightDot = System.Numerics.Vector3.Dot(ListenerRight, soundDir);
+            pan = Math.Clamp(0.5f + rightDot * 0.42f, 0.08f, 0.92f);
+        }
+
+        Raylib.SetSoundVolume(s, finalVol);
+        Raylib.SetSoundPitch(s, pitch);
+        Raylib.SetSoundPan(s, pan);
+        Raylib.PlaySound(s);
+    }
+
+    public static void PlayStep(ushort blockId = 0) => PlayStepAt(ListenerPosition, blockId);
+    public static void PlayStepAt(System.Numerics.Vector3 pos, ushort blockId = 0) {
         float p = 0.9f + (float)Random.Shared.NextDouble() * 0.2f;
-        if (blockId == GameData.BStone.Id || blockId == GameData.BCobblestone.Id || blockId == GameData.BObsidian.Id ||
+        Sound snd = (blockId == GameData.BStone.Id || blockId == GameData.BCobblestone.Id || blockId == GameData.BObsidian.Id ||
             blockId == GameData.BCoalOre.Id || blockId == GameData.BIronOre.Id || blockId == GameData.BGoldOre.Id ||
             blockId == GameData.BDiamondOre.Id || blockId == GameData.BMossyCobblestone.Id ||
             blockId == GameData.BNetherrack.Id || blockId == GameData.BNetherBrick.Id || blockId == GameData.BNetherQuartzOre.Id ||
-            blockId == GameData.BChiseledSandstone.Id || blockId == GameData.BFurnace.Id) {
-            Play(_stepStone, p);
-        } else if (blockId == GameData.BLog.Id || blockId == GameData.BPlanks.Id || blockId == GameData.BWorkbench.Id || blockId == GameData.BChest.Id) {
-            Play(_stepWood, p);
-        } else if (blockId == GameData.BGravel.Id) {
-            Play(_stepGravel, p);
-        } else if (blockId == GameData.BSand.Id || blockId == GameData.BSoulSand.Id) {
-            Play(_stepSand, p);
-        } else if (blockId == GameData.BWater.Id || blockId == GameData.BLava.Id) {
-            Play(_stepWater, p);
-        } else {
-            Play(_stepGrass, p);
-        }
+            blockId == GameData.BChiseledSandstone.Id || blockId == GameData.BFurnace.Id) ? _stepStone :
+            (blockId == GameData.BLog.Id || blockId == GameData.BPlanks.Id || blockId == GameData.BWorkbench.Id || blockId == GameData.BChest.Id) ? _stepWood :
+            (blockId == GameData.BGravel.Id) ? _stepGravel :
+            (blockId == GameData.BSand.Id || blockId == GameData.BSoulSand.Id) ? _stepSand :
+            (blockId == GameData.BWater.Id || blockId == GameData.BLava.Id) ? _stepWater : _stepGrass;
+
+        Play3D(snd, pos, SoundCategory.Blocks, p, maxDistance: 16f, baseVol: 0.85f);
     }
 
-    public static void PlayDig(ushort blockId = 0) {
+    public static void PlayDig(ushort blockId = 0) => PlayDigAt(ListenerPosition, blockId);
+    public static void PlayDigAt(System.Numerics.Vector3 pos, ushort blockId = 0) {
         float p = 0.9f + (float)Random.Shared.NextDouble() * 0.2f;
-        if (blockId == GameData.BStone.Id || blockId == GameData.BCobblestone.Id || blockId == GameData.BObsidian.Id ||
+        Sound snd = (blockId == GameData.BStone.Id || blockId == GameData.BCobblestone.Id || blockId == GameData.BObsidian.Id ||
             blockId == GameData.BCoalOre.Id || blockId == GameData.BIronOre.Id || blockId == GameData.BGoldOre.Id ||
             blockId == GameData.BDiamondOre.Id || blockId == GameData.BMossyCobblestone.Id ||
-            blockId == GameData.BNetherrack.Id || blockId == GameData.BNetherBrick.Id || blockId == GameData.BNetherQuartzOre.Id) {
-            Play(_digStone, p);
-        } else if (blockId == GameData.BLog.Id || blockId == GameData.BPlanks.Id || blockId == GameData.BWorkbench.Id || blockId == GameData.BChest.Id) {
-            Play(_digWood, p);
-        } else if (blockId == GameData.BSand.Id || blockId == GameData.BGravel.Id || blockId == GameData.BSoulSand.Id) {
-            Play(_digSand, p);
-        } else {
-            Play(_digGrass, p);
-        }
+            blockId == GameData.BNetherrack.Id || blockId == GameData.BNetherBrick.Id || blockId == GameData.BNetherQuartzOre.Id) ? _digStone :
+            (blockId == GameData.BLog.Id || blockId == GameData.BPlanks.Id || blockId == GameData.BWorkbench.Id || blockId == GameData.BChest.Id) ? _digWood :
+            (blockId == GameData.BSand.Id || blockId == GameData.BGravel.Id || blockId == GameData.BSoulSand.Id) ? _digSand : _digGrass;
+
+        Play3D(snd, pos, SoundCategory.Blocks, p, maxDistance: 20f, baseVol: 0.9f);
     }
 
-    public static void PlayPlace() => Play(_placeSound, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);
-    public static void PlayHit() => Play(_hitSound, 0.9f + (float)Random.Shared.NextDouble() * 0.2f);
-    public static void PlayPlayerHurt() => Play(_hitSound, 0.85f);
-    public static void PlayStrongAttack() => Play(_critSound, 1.15f);
-    public static void PlayWeakAttack() => Play(_hitSound, 1.30f);
-    public static void PlayCrit() => Play(_critSound, 1.0f + (float)Random.Shared.NextDouble() * 0.15f);
-    public static void PlayBreakTool() => Play(_breakToolSound);
-    public static void PlayBowShoot() => Play(_placeSound, 1.4f); // Мягкий тихий щелчок тетивы вместо свистящего "вжух"
-    public static void PlayArrowHit() => Play(_arrowHitSound);
+    public static void PlayPlace() => PlayPlaceAt(ListenerPosition);
+    public static void PlayPlaceAt(System.Numerics.Vector3 pos) => Play3D(_placeSound, pos, SoundCategory.Blocks, 0.95f + (float)Random.Shared.NextDouble() * 0.1f, maxDistance: 20f);
+
+    public static void PlayHit() => PlayHitAt(ListenerPosition);
+    public static void PlayHitAt(System.Numerics.Vector3 pos) => Play3D(_hitSound, pos, SoundCategory.Player, 0.9f + (float)Random.Shared.NextDouble() * 0.2f, maxDistance: 22f);
+
+    public static void PlayPlayerHurt() => Play(_hitSound, SoundCategory.Player, 0.85f);
+    public static void PlayStrongAttack() => Play(_critSound, SoundCategory.Player, 1.15f);
+    public static void PlayWeakAttack() => Play(_hitSound, SoundCategory.Player, 1.30f);
+    public static void PlayCrit() => Play(_critSound, SoundCategory.Player, 1.0f + (float)Random.Shared.NextDouble() * 0.15f);
+
+    public static void PlayBreakTool() => PlayBreakToolAt(ListenerPosition);
+    public static void PlayBreakToolAt(System.Numerics.Vector3 pos) => Play3D(_breakToolSound, pos, SoundCategory.Blocks, 1.0f, maxDistance: 20f);
+
+    public static void PlayBowShoot() => PlayBowShootAt(ListenerPosition);
+    public static void PlayBowShootAt(System.Numerics.Vector3 pos) => Play3D(_placeSound, pos, SoundCategory.Player, 1.4f, maxDistance: 22f);
+
+    public static void PlayArrowHit() => PlayArrowHitAt(ListenerPosition);
+    public static void PlayArrowHitAt(System.Numerics.Vector3 pos) => Play3D(_arrowHitSound, pos, SoundCategory.Player, 1.0f, maxDistance: 24f);
+
     private static double _lastExplodeTime;
-    public static void PlayExplosion() {
+    public static void PlayExplosion() => PlayExplosionAt(ListenerPosition);
+    public static void PlayExplosionAt(System.Numerics.Vector3 pos) {
         double now = Raylib.GetTime();
         if (now - _lastExplodeTime < 0.1) return;
         _lastExplodeTime = now;
-        Play(_explosionSound);
+        Play3D(_explosionSound, pos, SoundCategory.Creatures, 1.0f, maxDistance: 36f, baseVol: 1.2f);
     }
-    public static void PlayShieldBlock() => Play(_shieldBlockSound, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);
-    public static void PlayBabakherHiss() => Play(_babakherHissSound, 1.0f);
-    public static void PlayCaveAmbiance() { /* Отключено по запросу */ }
-    public static void PlayThunder() => Play(_thunderSound, 0.9f + (float)Random.Shared.NextDouble() * 0.2f);
-    public static void PlayBackgroundMusic() { /* Отключено: устраняет гул и фризы аудиодрайвера */ }
-    public static void PlayEat() => Play(_eatSound, 0.9f + (float)Random.Shared.NextDouble() * 0.2f);
-    public static void PlaySplash() => Play(_splashSound);
-    public static void PlayPop() => Play(_popSound, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);
-    public static void PlayChest() => Play(_chestSound);
-    public static void PlayDoorOpen() => Play(_doorOpenSound, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);
-    public static void PlayDoorClose() => Play(_doorCloseSound, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);
-    public static void PlayDupePolice() => Play(_dupePoliceSound, 1.0f);
-    public static void PlayTotem() => Play(_totemSound, 1.0f);
+
+    public static void PlayShieldBlock() => Play(_shieldBlockSound, SoundCategory.Player, 0.95f + (float)Random.Shared.NextDouble() * 0.1f);
+    public static void PlayBabakherHiss() => PlayBabakherHissAt(ListenerPosition);
+    public static void PlayBabakherHissAt(System.Numerics.Vector3 pos) => Play3D(_babakherHissSound, pos, SoundCategory.Creatures, 1.0f, maxDistance: 22f);
+
+    public static void PlayCaveAmbiance() { /* Заменено фоновой музыкой */ }
+    public static void PlayThunder() => Play(_thunderSound, SoundCategory.Weather, 0.9f + (float)Random.Shared.NextDouble() * 0.2f);
+    public static void PlayEat() => PlayEatAt(ListenerPosition);
+    public static void PlayEatAt(System.Numerics.Vector3 pos) => Play3D(_eatSound, pos, SoundCategory.Player, 0.9f + (float)Random.Shared.NextDouble() * 0.2f, maxDistance: 16f);
+
+    public static void PlaySplash() => PlaySplashAt(ListenerPosition);
+    public static void PlaySplashAt(System.Numerics.Vector3 pos) => Play3D(_splashSound, pos, SoundCategory.Weather, 1.0f, maxDistance: 20f);
+
+    public static void PlayPop() => PlayPopAt(ListenerPosition);
+    public static void PlayPopAt(System.Numerics.Vector3 pos) => Play3D(_popSound, pos, SoundCategory.Player, 0.95f + (float)Random.Shared.NextDouble() * 0.1f, maxDistance: 18f);
+
+    public static void PlayChest() => PlayChestAt(ListenerPosition);
+    public static void PlayChestAt(System.Numerics.Vector3 pos) => Play3D(_chestSound, pos, SoundCategory.Player, 1.0f, maxDistance: 18f);
+
+    public static void PlayDoorOpen() => PlayDoorOpenAt(ListenerPosition);
+    public static void PlayDoorOpenAt(System.Numerics.Vector3 pos) => Play3D(_doorOpenSound, pos, SoundCategory.Blocks, 0.95f + (float)Random.Shared.NextDouble() * 0.1f, maxDistance: 20f);
+
+    public static void PlayDoorClose() => PlayDoorCloseAt(ListenerPosition);
+    public static void PlayDoorCloseAt(System.Numerics.Vector3 pos) => Play3D(_doorCloseSound, pos, SoundCategory.Blocks, 0.95f + (float)Random.Shared.NextDouble() * 0.1f, maxDistance: 20f);
+
+    public static void PlayDupePolice() => Play(_dupePoliceSound, SoundCategory.Player, 1.0f);
+    public static void PlayTotem() => Play(_totemSound, SoundCategory.Player, 1.0f);
     public static void StopTotem() {
         if (_audioReady) Raylib.StopSound(_totemSound);
     }
-    public static void PlayFertilize() => Play(_placeSound, 1.2f);
+    public static void PlayFertilize() => PlayFertilizeAt(ListenerPosition);
+    public static void PlayFertilizeAt(System.Numerics.Vector3 pos) => Play3D(_placeSound, pos, SoundCategory.Blocks, 1.2f, maxDistance: 18f);
+
+    // ── Музыкальная пластинка (Music Disc) ───────────────────────────────────
+
+    public static bool ToggleDisc(string fileName = "disc_circus.mp3") {
+        if (IsDiscPlaying) {
+            StopDisc();
+            return false;
+        } else {
+            return PlayDisc(fileName);
+        }
+    }
+
+    public static bool PlayDisc(string fileName = "disc_circus.mp3") {
+        if (!_audioReady) return false;
+        try {
+            string? discPath = FindSoundFile(fileName) 
+                            ?? FindSoundFile("disc_circus.mp3")
+                            ?? FindSoundFile("record_13.mp3");
+
+            if (discPath != null && File.Exists(discPath)) {
+                if (_discLoaded) {
+                    Raylib.StopMusicStream(_discMusic);
+                    Raylib.UnloadMusicStream(_discMusic);
+                    _discLoaded = false;
+                    _discPlaying = false;
+                }
+                _discMusic = Raylib.LoadMusicStream(discPath);
+                if (_discMusic.FrameCount > 0) {
+                    _discLoaded = true;
+                    _discPlaying = true;
+                    // Ставим фоновую музыку на паузу во время пластинки
+                    if (_musicLoaded && _musicPlaying) {
+                        Raylib.PauseMusicStream(_currentMusic);
+                    }
+                    Raylib.SetMusicVolume(_discMusic, GetCategoryVolume(SoundCategory.Music));
+                    Raylib.PlayMusicStream(_discMusic);
+                    return true;
+                }
+            }
+        } catch {
+            _discLoaded = false;
+            _discPlaying = false;
+        }
+        return false;
+    }
+
+    public static void StopDisc() {
+        try {
+            if (_discLoaded) {
+                Raylib.StopMusicStream(_discMusic);
+                Raylib.UnloadMusicStream(_discMusic);
+            }
+        } catch {
+            // Игнорируем возможные ошибки аудио-потока
+        } finally {
+            _discLoaded = false;
+            _discPlaying = false;
+        }
+    }
+
+    // ── Фоновая музыка (Background Music Streamer) ───────────────────────────
+
+    public static void UpdateMusic(float dt) {
+        if (!_audioReady) return;
+
+        float musicVol = GetCategoryVolume(SoundCategory.Music);
+
+        // 1. Если играет пластинка — обновляем её и глушим фоновый BGM
+        if (_discLoaded && _discPlaying) {
+            if (musicVol <= 0.001f) {
+                Raylib.PauseMusicStream(_discMusic);
+            } else {
+                if (!Raylib.IsMusicStreamPlaying(_discMusic)) {
+                    Raylib.ResumeMusicStream(_discMusic);
+                }
+                Raylib.SetMusicVolume(_discMusic, musicVol);
+                Raylib.UpdateMusicStream(_discMusic);
+            }
+
+            if (!Raylib.IsMusicStreamPlaying(_discMusic)) {
+                // Пластинка завершила воспроизведение
+                StopDisc();
+            } else {
+                if (_musicLoaded && _musicPlaying) {
+                    Raylib.PauseMusicStream(_currentMusic);
+                }
+                return;
+            }
+        }
+
+        // 2. Фоновый стрим BGM
+        if (musicVol <= 0.001f || _musicFiles.Count == 0) {
+            if (_musicPlaying && _musicLoaded) {
+                Raylib.PauseMusicStream(_currentMusic);
+                _musicPlaying = false;
+            }
+            return;
+        }
+
+        if (_musicLoaded) {
+            Raylib.SetMusicVolume(_currentMusic, musicVol);
+            Raylib.UpdateMusicStream(_currentMusic);
+
+            if (!Raylib.IsMusicStreamPlaying(_currentMusic)) {
+                // Трек завершился или был на паузе
+                if (_musicPlaying) {
+                    // Трек только что доиграл до конца
+                    _musicPlaying = false;
+                    _musicPauseTimer = 15f + (float)_musicRng.NextDouble() * 25f; // Пауза 15-40 сек перед следующим треком
+                } else {
+                    _musicPauseTimer -= dt;
+                    if (_musicPauseTimer <= 0f) {
+                        PlayNextTrack();
+                    }
+                }
+            } else {
+                _musicPlaying = true;
+            }
+        } else {
+            _musicPauseTimer -= dt;
+            if (_musicPauseTimer <= 0f) {
+                PlayNextTrack();
+            }
+        }
+    }
+
+    private static void PlayNextTrack() {
+        if (_musicFiles.Count == 0) return;
+
+        try {
+            if (_musicLoaded) {
+                Raylib.StopMusicStream(_currentMusic);
+                Raylib.UnloadMusicStream(_currentMusic);
+                _musicLoaded = false;
+                _musicPlaying = false;
+            }
+
+            // Выбираем следующий случайный трек
+            int nextIdx = _musicRng.Next(0, _musicFiles.Count);
+            if (nextIdx == _currentMusicIndex && _musicFiles.Count > 1) {
+                nextIdx = (nextIdx + 1) % _musicFiles.Count;
+            }
+            _currentMusicIndex = nextIdx;
+
+            string trackPath = _musicFiles[_currentMusicIndex];
+            if (File.Exists(trackPath)) {
+                _currentMusic = Raylib.LoadMusicStream(trackPath);
+                if (_currentMusic.FrameCount > 0) {
+                    _musicLoaded = true;
+                    Raylib.SetMusicVolume(_currentMusic, GetCategoryVolume(SoundCategory.Music));
+                    Raylib.PlayMusicStream(_currentMusic);
+                    _musicPlaying = true;
+                }
+            }
+        } catch {
+            _musicLoaded = false;
+            _musicPlaying = false;
+            _musicPauseTimer = 10f;
+        }
+    }
+
+    public static void PlayBackgroundMusic() {
+        // Вызывается для гарантированного запуска фоновой музыки
+        if (!_musicLoaded || !_musicPlaying) {
+            _musicPauseTimer = 0f;
+        }
+    }
 
     private static unsafe Sound LoadProceduralSound(byte[] wavBytes) {
         fixed (byte* ptr = wavBytes)
@@ -274,6 +561,40 @@ public static class SoundSystem {
             phase += 2f * MathF.PI * (300f - 180f * t) / sampleRate;
             float wave = (noise * 0.6f + MathF.Sin(phase) * 0.4f) * env;
             short sample = (short)(wave * 32767f * volume);
+            bw.Write(sample);
+        }
+        return ms.ToArray();
+    }
+
+    private static byte[] CreateThunderWav(int sampleCount, float volume) {
+        using var ms = new MemoryStream();
+        using var bw = new BinaryWriter(ms);
+        WriteWavHeader(bw, sampleCount);
+
+        var rng = new Random(54321);
+        int sampleRate = 44100;
+        float lowFilter = 0f;
+        float lowFilter2 = 0f;
+        for (int i = 0; i < sampleCount; i++) {
+            float t = (float)i / sampleCount;
+            // Удар молнии в начале + мощный раскатистый рокот с реверберацией
+            float strike = MathF.Exp(-t * 18f) * (float)(rng.NextDouble() * 2.0 - 1.0) * 0.8f;
+            float rumbleNoise = (float)(rng.NextDouble() * 2.0 - 1.0);
+            
+            // 2-полюсный НЧ-фильтр для создания глубокого басового рокота 45-80 Гц
+            float freq = 55f + MathF.Sin(t * 12f) * 20f;
+            float rc = 1.0f / (2f * MathF.PI * freq);
+            float dtSample = 1.0f / sampleRate;
+            float alpha = dtSample / (rc + dtSample);
+            lowFilter += alpha * (rumbleNoise - lowFilter);
+            lowFilter2 += alpha * (lowFilter - lowFilter2);
+
+            // Огибающая громкости грома с несколькими эхо-волнами
+            float echoWaves = 1.0f + 0.5f * MathF.Sin(t * 15f) * MathF.Exp(-t * 2.5f);
+            float env = MathF.Pow(1.0f - t, 1.8f) * echoWaves;
+
+            float sampleVal = (strike + lowFilter2 * 3.5f) * env * volume;
+            short sample = (short)Math.Clamp((int)(sampleVal * 32767f), -32768, 32767);
             bw.Write(sample);
         }
         return ms.ToArray();
@@ -407,6 +728,14 @@ public static class SoundSystem {
             Raylib.UnloadSound(_splashSound);
             Raylib.UnloadSound(_popSound);
             Raylib.UnloadSound(_chestSound);
+
+            if (_musicLoaded) {
+                Raylib.StopMusicStream(_currentMusic);
+                Raylib.UnloadMusicStream(_currentMusic);
+                _musicLoaded = false;
+            }
+
+            StopDisc();
 
             Raylib.CloseAudioDevice();
             _audioReady = false;

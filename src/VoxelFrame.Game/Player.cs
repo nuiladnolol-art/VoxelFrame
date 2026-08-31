@@ -621,7 +621,7 @@ public sealed partial class Player {
             var toLoreAltar = Position - new Vector3(100.5f, 73f, 100.5f);
             if (toLoreAltar.Length() < 6.5f) {
                 session.EndLoreDiscovered = true;
-                session.ShowTitle("ЗАБЫТЫЙ ОБЕЛИСК КРАЯ", "«Скоуй Ключ Бездны из Слизи Края и трёх реликвий...»", 6.0f, new Color(255, 215, 80, 255), new Color(255, 240, 180, 255));
+                session.ShowTitle("ЗАБЫТЫЙ ОБЕЛИСК КРАЯ", "«Скуй Ключ Бездны из Слизи Края и трёх реликвий...»", 6.0f, new Color(255, 215, 80, 255), new Color(255, 240, 180, 255));
                 session.AddMessage("§6[Забытый Обелиск Края]:");
                 session.AddMessage("§e«Соедини Слизь Края с тремя реликвиями (Ад, Болото, Пустыня), чтобы сковать Ключ Бездны...»");
                 session.AddMessage("§c«Но путь в Бездну лежит сквозь смертоносное падение в Пустоту (~3 сердца в секунду). Лишь вкусивший Золотые яблоки и запасшийся Тотемами достигнет пола из бедрока...»");
@@ -890,10 +890,13 @@ public sealed partial class Player {
             if ((input.UseHeld || input.UsePressed) && canEatFood) {
                 EatingTimer += dt;
                 EatingSoundTimer += dt;
+                var foodColor = GetFoodParticleColor(heldFoodItem);
+                var eatPos = Eye - new Vector3(0f, 0.35f, 0f) + Forward * 0.35f;
+
                 if (EatingSoundTimer >= 0.22f) {
                     EatingSoundTimer = 0f;
                     SoundSystem.PlayEat();
-                    world.SpawnCrit(Position + new Vector3(0f, 1.2f, 0f), 3);
+                    world.SpawnEatParticles(eatPos, foodColor, 4);
                 }
 
                 if (EatingTimer >= 1.6f) {
@@ -901,6 +904,7 @@ public sealed partial class Player {
                     if (TryConsumeSelected(heldFoodItem, 1)) {
                         Hunger = MathF.Min(MaxHunger, Hunger + foodVal);
                         Saturation = MathF.Min(Hunger, Saturation + foodVal * 0.6f);
+                        world.SpawnEatParticles(eatPos, foodColor, 10);
                         if (heldFoodItem.Id == GameData.GoldenAppleItem.Id) {
                             Health = MathF.Min(MaxHealth, Health + 4f);
                             InvulnerabilityTimer = 1.5f;
@@ -997,6 +1001,29 @@ public sealed partial class Player {
                     session.Ui = UiState.Chest;
                     SoundSystem.PlayChest();
                     wantUse = false;
+                } else if (targetVox.TypeId == GameData.BJukebox.Id) {
+                    wantUse = false;
+                    bool hasDiscInside = targetVox.SubGridLayerMask == 1;
+                    if (hasDiscInside) {
+                        // Извлекаем пластинку из проигрывателя
+                        targetVox.SubGridLayerMask = 0;
+                        world.SetVoxelRaw(session.TargetBlock, in targetVox);
+                        SoundSystem.StopDisc();
+                        world.SpawnPickup(GameData.MusicDiscItem.Id, 1, session.TargetBlock);
+                        session.ShowActionbar("§7♪ Воспроизведение пластинки остановлено ♪", 3.5f);
+                    } else {
+                        // Если в руках пластинка — вставляем её в проигрыватель
+                        var held = SelectedEntry?.Item.Definition;
+                        if (held != null && held.Id == GameData.MusicDiscItem.Id) {
+                            if (session.GameMode == GameMode.Creative || TryConsumeSelected(held, 1, session)) {
+                                targetVox.SubGridLayerMask = 1;
+                                world.SetVoxelRaw(session.TargetBlock, in targetVox);
+                                SoundSystem.PlayDisc("disc_circus");
+                                world.SpawnCrit(new Vector3(session.TargetBlock.X + 0.5f, session.TargetBlock.Y + 1.1f, session.TargetBlock.Z + 0.5f), 10);
+                                session.ShowActionbar("§e♪ Сейчас играет: The Amazing Digital Circus - The One Who's Running the Show [8-Bit Remix] ♪", 5.0f);
+                            }
+                        }
+                    }
                 } else if (GameData.IsDoor(targetVox.TypeId)) {
                     var lowerPos = targetVox.TypeId == GameData.BDoorLower.Id ? session.TargetBlock : session.TargetBlock + new Vec3i(0, -1, 0);
                     var upperPos = lowerPos + new Vec3i(0, 1, 0);
@@ -1166,6 +1193,7 @@ public sealed partial class Player {
                                 var placeVox = world.GetVoxel(placeCell);
                                 if (placeVox.TypeId == 0) {
                                     float dur = targetVox.TypeId == GameData.BNetherrack.Id ? 99999f : 14f;
+                                    world.PlacePlacedBlock(placeCell, GameData.BFire);
                                     world.Fire.Burning[placeCell] = dur;
                                     world.MarkLightDirty(placeCell);
                                     SoundSystem.PlayPlace();
@@ -1339,6 +1367,11 @@ public sealed partial class Player {
                             } else {
                                 session.AddMessage("§2Тотем Топей можно использовать только в биоме Болота!");
                             }
+                        }
+                    } else if (item.Id == GameData.MusicDiscItem.Id) {
+                        wantUse = false;
+                        if (input.UsePressed) {
+                            session.AddMessage("§7Для воспроизведения пластинки нужен проигрыватель!");
                         }
                     } else if (session.HasTarget && GameData.TryGetBlockByItem(item.Id, out var block)) {
                         var targetVox = world.GetVoxel(session.TargetBlock);
@@ -1590,6 +1623,9 @@ public sealed partial class Player {
 
     public void BreakBlock(GameWorld world, GameSession session, Vec3i pos, BlockType block) {
         var oldVox = world.GetVoxel(pos);
+        if (block.Id == GameData.BJukebox.Id) {
+            SoundSystem.StopDisc();
+        }
         world.RemoveBlock(pos);
         SoundSystem.PlayDig(block.Id);
         GameClient.Active?.SendBlockChange(pos.X, pos.Y, pos.Z, 0, 0, isBreak: true);
@@ -1678,6 +1714,12 @@ public sealed partial class Player {
                     world.SpawnPickup(GameData.SawdustItem.Id, 1, pos);
                 }
             }
+
+            // При разрушении проигрывателя с пластинкой — извлекаем пластинку и останавливаем трек
+            if (block.Id == GameData.BJukebox.Id && oldVox.SubGridLayerMask == 1) {
+                world.SpawnPickup(GameData.MusicDiscItem.Id, 1, pos);
+                SoundSystem.StopDisc();
+            }
         }
     }
 
@@ -1726,13 +1768,17 @@ public sealed partial class Player {
                 if (eb.IsSolid || eb.IsOpaque) return false;
             }
         }
-        var center = new Vector3(cell.X + 0.5f, cell.Y + 0.5f, cell.Z + 0.5f);
-        var min = center - new Vector3(0.25f, 0.25f, 0.25f);
-        var max = center + new Vector3(0.25f, 0.25f, 0.25f);
         var pmin = Position - HalfExtents;
         var pmax = Position + HalfExtents;
-        if (min.X < pmax.X && max.X > pmin.X && min.Y < pmax.Y && max.Y > pmin.Y && min.Z < pmax.Z && max.Z > pmin.Z)
-            return false;
+
+        // Если блок твердый (или кровать, или дверь) — проверяем, чтобы он не ставился внутрь игрока
+        bool isSolidPlacement = block.IsSolid || block.Id == GameData.BBed.Id || item.Id == GameData.DoorItem.Id;
+        if (isSolidPlacement) {
+            var min = new Vector3(cell.X, cell.Y, cell.Z);
+            var max = new Vector3(cell.X + 1f, cell.Y + 1f, cell.Z + 1f);
+            if (min.X < pmax.X && max.X > pmin.X && min.Y < pmax.Y && max.Y > pmin.Y && min.Z < pmax.Z && max.Z > pmin.Z)
+                return false;
+        }
 
         // Вычисляем ориентацию блока (facing: 0..3) по направлению взгляда игрока
         byte facing = 0;
@@ -1750,6 +1796,12 @@ public sealed partial class Player {
             var above = cell + new Vec3i(0, 1, 0);
             if (world.IsSolidAt(above) || world.GetVoxel(above).TypeId != 0) return false;
             if (!world.IsSolidAt(cell + new Vec3i(0, -1, 0))) return false;
+
+            // Проверка коллизии верхней половины двери с игроком
+            var aboveMin = new Vector3(above.X, above.Y, above.Z);
+            var aboveMax = new Vector3(above.X + 1f, above.Y + 1f, above.Z + 1f);
+            if (aboveMin.X < pmax.X && aboveMax.X > pmin.X && aboveMin.Y < pmax.Y && aboveMax.Y > pmin.Y && aboveMin.Z < pmax.Z && aboveMax.Z > pmin.Z)
+                return false;
 
             if (TryConsumeSelected(item, 1, session)) {
                 world.PlacePlacedBlock(cell, GameData.BDoorLower, facing);
@@ -1779,6 +1831,12 @@ public sealed partial class Player {
             if (!world.IsSolidAt(cell + new Vec3i(0, -1, 0)) || !world.IsSolidAt(headCell + new Vec3i(0, -1, 0)))
                 return false;
 
+            // Проверка коллизии изголовья кровати с игроком
+            var headMin = new Vector3(headCell.X, headCell.Y, headCell.Z);
+            var headMax = new Vector3(headCell.X + 1f, headCell.Y + 1f, headCell.Z + 1f);
+            if (headMin.X < pmax.X && headMax.X > pmin.X && headMin.Y < pmax.Y && headMax.Y > pmin.Y && headMin.Z < pmax.Z && headMax.Z > pmin.Z)
+                return false;
+
             if (TryConsumeSelected(item, 1, session)) {
                 world.PlacePlacedBlock(cell, GameData.BBed, facing);
                 world.PlacePlacedBlock(headCell, GameData.BBedHead, facing);
@@ -1796,10 +1854,10 @@ public sealed partial class Player {
         if (block.Id == GameData.BTorch.Id) {
             var hitNormal = cell - session.TargetBlock;
             byte torchFacing = 0;
-            if (hitNormal.X == 1) torchFacing = 1;      // Прикреплен к стене на западе
-            else if (hitNormal.X == -1) torchFacing = 2; // Прикреплен к стене на востоке
-            else if (hitNormal.Z == 1) torchFacing = 3;  // Прикреплен к стене на севере
-            else if (hitNormal.Z == -1) torchFacing = 4; // Прикреплен к стене на юге
+            if (hitNormal.X == 1) torchFacing = 2;      // Стена на -X от факела (клик по правой грани)
+            else if (hitNormal.X == -1) torchFacing = 1; // Стена на +X от факела (клик по левой грани)
+            else if (hitNormal.Z == 1) torchFacing = 4;  // Стена на -Z от факела (клик по дальней грани)
+            else if (hitNormal.Z == -1) torchFacing = 3; // Стена на +Z от факела (клик по ближней грани)
 
             if (TryConsumeSelected(item, 1, session)) {
                 world.PlacePlacedBlock(cell, block, torchFacing);
@@ -2071,4 +2129,25 @@ public sealed partial class Player {
         t = tmin;
         return true;
     }
+    /// <summary>Цвет частиц поедания под конкретный вид еды.</summary>
+    public static Color GetFoodParticleColor(ItemDefinition item) => item.Id switch {
+        var id when id == GameData.AppleItem.Id => new Color(220, 35, 35, 255),
+        var id when id == GameData.GoldenAppleItem.Id => new Color(255, 215, 30, 255),
+        var id when id == GameData.BreadItem.Id => new Color(196, 150, 70, 255),
+        var id when id == GameData.RawPorkItem.Id => new Color(230, 140, 140, 255),
+        var id when id == GameData.CookedPorkItem.Id => new Color(160, 95, 60, 255),
+        var id when id == GameData.RawBeefItem.Id => new Color(190, 45, 45, 255),
+        var id when id == GameData.CookedBeefItem.Id => new Color(115, 60, 35, 255),
+        var id when id == GameData.RawMuttonItem.Id => new Color(215, 65, 75, 255),
+        var id when id == GameData.CookedMuttonItem.Id => new Color(145, 75, 40, 255),
+        var id when id == GameData.RawChickenItem.Id => new Color(235, 175, 160, 255),
+        var id when id == GameData.CookedChickenItem.Id => new Color(185, 110, 40, 255),
+        var id when id == GameData.CarrotItem.Id => new Color(245, 120, 20, 255),
+        var id when id == GameData.PotatoItem.Id => new Color(200, 165, 95, 255),
+        var id when id == GameData.BakedPotatoItem.Id => new Color(185, 120, 50, 255),
+        var id when id == GameData.RottenFleshItem.Id => new Color(125, 85, 40, 255),
+        var id when id == GameData.ChorusFruitItem.Id => new Color(185, 100, 210, 255),
+        var id when id == GameData.SawdustPorridgeItem.Id => new Color(210, 170, 95, 255),
+        _ => new Color(200, 170, 100, 255)
+    };
 }

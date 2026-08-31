@@ -220,25 +220,39 @@ public static class Hud {
                 if (entry.Value.Quantity > 1) {
                     Fonts.DrawShadowed($"×{entry.Value.Quantity}", rect.X + 3f, rect.Y + rect.Height - 20f, 15f, Color.White);
                 }
-                // Полоска прочности инструмента/оружия
-                int maxDur = GameData.GetMaxToolDurability(entry.Value.Item.Definition.Id);
-                if (GameData.GetToolTier(entry.Value.Item.Definition.Id) > 0 && entry.Value.Item.Durability < maxDur) {
-                    float frac = Math.Clamp((float)entry.Value.Item.Durability / maxDur, 0f, 1f);
-                    float bw = rect.Width - 8f;
-                    Raylib.DrawRectangle((int)(rect.X + 4), (int)(rect.Y + rect.Height - 6), (int)bw, 3, new Color(20, 20, 25, 190));
-                    var barCol = frac > 0.5f ? new Color(90, 220, 120, 255) : frac > 0.25f ? new Color(240, 200, 70, 255) : new Color(235, 75, 60, 255);
-                    Raylib.DrawRectangle((int)(rect.X + 4), (int)(rect.Y + rect.Height - 6), (int)(bw * frac), 3, barCol);
-                }
+                // Полоска прочности инструмента/оружия/брони
+                DrawItemDurability(entry.Value.Item, rect);
             }
         }
 
         // Название предмета при переключении слота хотбара (над индикаторами здоровья и сытости).
-        if (player.SlotToastTimer > 0f && player.SlotToastText.Length > 0) {
+        if (player.SlotToastTimer > 0f && player.SlotToastText.Length > 0 && session.ActionbarTimer <= 0f) {
             float fade = Math.Clamp(player.SlotToastTimer / 0.4f, 0f, 1f);
-            float toastY = h - 116f;
+            float toastY = session.GameMode == GameMode.Creative ? (h - 96f) : (h - 124f);
             float tw = Fonts.Measure(player.SlotToastText, 28f);
             Fonts.DrawShadowed(player.SlotToastText, w / 2f - tw / 2f, toastY, 28f,
                 new Color((byte)255, (byte)255, (byte)255, (byte)(255 * fade)));
+        }
+
+        // Actionbar над хотбаром (статусные уведомления, трек пластинки и т.д., минимум 3+ сек)
+        if (session.ActionbarTimer > 0f && !string.IsNullOrEmpty(session.ActionbarText)) {
+            float fade = 1.0f;
+            float elapsed = session.ActionbarDuration - session.ActionbarTimer;
+            if (elapsed < 0.3f) fade = elapsed / 0.3f;
+            else if (session.ActionbarTimer < 0.8f) fade = session.ActionbarTimer / 0.8f;
+            fade = Math.Clamp(fade, 0f, 1f);
+
+            int alpha = (int)(255 * fade);
+            float fontSize = 22f;
+            float textW = Fonts.Measure(session.ActionbarText, fontSize);
+            float barX = (w - textW) / 2f;
+            float barY = session.GameMode == GameMode.Creative ? (h - 96f) : (h - 124f);
+
+            // Тёмная полупрозрачная плашка под текстом
+            Raylib.DrawRectangle((int)(barX - 10f), (int)(barY - 3f), (int)(textW + 20f), 26, new Color((byte)10, (byte)10, (byte)15, (byte)(160 * fade)));
+            
+            var col = new Color((int)session.ActionbarColor.R, (int)session.ActionbarColor.G, (int)session.ActionbarColor.B, alpha);
+            Fonts.DrawShadowed(session.ActionbarText, barX, barY, fontSize, col);
         }
 
         // Предмет во второй руке (левый нижний угол, вид от первого лица)
@@ -462,6 +476,21 @@ public static class Hud {
         }
     }
 
+    /// <summary>Отрисовка полоски прочности инструмента/оружия/брони в слоте интерфейса.</summary>
+    public static void DrawItemDurability(VoxelFrame.Core.Inventory.ItemInstance? item, Rectangle slot) {
+        if (item == null) return;
+        int maxDur = GameData.GetMaxToolDurability(item.Definition.Id);
+        if (maxDur > 0 && item.Durability < maxDur) {
+            float frac = Math.Clamp((float)item.Durability / maxDur, 0f, 1f);
+            float bw = slot.Width - 8f;
+            float bx = slot.X + 4f;
+            float by = slot.Y + slot.Height - 6f;
+            Raylib.DrawRectangle((int)bx, (int)by, (int)bw, 3, new Color(20, 20, 25, 200));
+            var barCol = frac > 0.5f ? new Color(90, 220, 120, 255) : frac > 0.25f ? new Color(240, 200, 70, 255) : new Color(235, 75, 60, 255);
+            Raylib.DrawRectangle((int)bx, (int)by, (int)(bw * frac), 3, barCol);
+        }
+    }
+
     /// <summary>Иконка предмета (тайл атласа) в прямоугольнике слота.</summary>
     public static void DrawItemIcon(VoxelFrame.Core.Inventory.ItemDefinition def, Rectangle slot, float scale) {
         byte tile = TextureAtlas.ItemTile(def.Id);
@@ -480,7 +509,9 @@ public static class Hud {
     /// hStretch > 1 визуально растягивает предмет по горизонтали (натяжение лука).</summary>
     private static void DrawHandHeldItem(VoxelFrame.Core.Inventory.ItemDefinition def, Rectangle slot, float scale, float rotation, float hStretch = 1f) {
         if (GameData.TryGetBlockByItem(def.Id, out var block) && block != null &&
-            block.Id != GameData.BTorch.Id && block.Id != GameData.BWheatCrop.Id && block.Id != GameData.BTallGrass.Id &&
+            block.Id != GameData.BTorch.Id && block.Id != GameData.BBed.Id && block.Id != GameData.BBedHead.Id &&
+            block.Id != GameData.BFire.Id && block.Id != GameData.BRail.Id && block.Id != GameData.BPressurePlate.Id &&
+            block.Id != GameData.BWeb.Id && block.Id != GameData.BWheatCrop.Id && block.Id != GameData.BTallGrass.Id &&
             block.Id != GameData.BSapling.Id && block.Id != GameData.BRedFlower.Id && block.Id != GameData.BYellowFlower.Id &&
             block.Id != GameData.BCarrotCrop.Id && block.Id != GameData.BPotatoCrop.Id &&
             block.Id != GameData.BChorusPlant.Id && block.Id != GameData.BChorusFlower.Id && block.Id != GameData.BEnderCrystal.Id &&
@@ -570,7 +601,7 @@ public static class Hud {
             y += 20f;
         }
 
-        LineL($"VoxelFrame 1.0.0-pre1 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
+        LineL($"VoxelFrame 1.0.0-pre2 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
         LineL($"XYZ: {player.Position.X:F3} / {player.Position.Y:F5} / {player.Position.Z:F3}", new Color(255, 240, 120, 255));
         LineL($"Block: {px} {py} {pz} [{(px & 15)} {(py & 15)} {(pz & 15)} in sub-chunk]");
         LineL($"Chunk: {px >> 4} {py >> 4} {pz >> 4} in chunk [{px >> 4}, {pz >> 4}]");

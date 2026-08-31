@@ -29,6 +29,7 @@ public sealed class ConnectedClient {
     public int SelectedItemId { get; set; }
     public float ArmSwingTimer { get; set; }
     public float HurtTimer { get; set; }
+    public string SkinName { get; set; } = "steve";
 
     public ConnectedClient(int id, TcpClient socket) {
         Id = id;

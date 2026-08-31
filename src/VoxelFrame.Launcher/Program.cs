@@ -86,7 +86,7 @@ public class LauncherForm : Form {
         headerPanel.Controls.Add(lblTitle);
 
         Label lblBadge = new Label {
-            Text = "1.0.0-pre1",
+            Text = "1.0.0-pre2",
             Font = new Font("Segoe UI", 9, FontStyle.Bold),
             ForeColor = Color.FromArgb(100, 220, 120),
             BackColor = Color.FromArgb(30, 60, 40),
@@ -250,7 +250,7 @@ public class LauncherForm : Form {
             FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand,
             Location = new Point(contentX, 365),
-            Size = new Size(contentW, 55)
+            Size = new Size(contentW, 52)
         };
         btnPlay.FlatAppearance.BorderSize = 0;
         btnPlay.MouseEnter += (s, e) => {
@@ -261,6 +261,62 @@ public class LauncherForm : Form {
         };
         btnPlay.Click += async (s, e) => await HandlePlayClickAsync();
         this.Controls.Add(btnPlay);
+
+        // Дополнительные кнопки быстрого доступа (папка сохранений, скриншоты)
+        Button btnOpenSaves = new Button {
+            Text = "📁 Папка сохранений",
+            Font = new Font("Segoe UI", 9, FontStyle.Regular),
+            BackColor = Color.FromArgb(36, 42, 54),
+            ForeColor = Color.FromArgb(200, 215, 235),
+            FlatStyle = FlatStyle.Flat,
+            Cursor = Cursors.Hand,
+            Location = new Point(contentX, 426),
+            Size = new Size(265, 32)
+        };
+        btnOpenSaves.FlatAppearance.BorderSize = 0;
+        btnOpenSaves.Click += (s, e) => {
+            try {
+                string? sDir = FindSavesDir() ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "saves");
+                Directory.CreateDirectory(sDir);
+                Process.Start(new ProcessStartInfo { FileName = sDir, UseShellExecute = true });
+            } catch { }
+        };
+        this.Controls.Add(btnOpenSaves);
+
+        Button btnOpenScreenshots = new Button {
+            Text = "📸 Скриншоты",
+            Font = new Font("Segoe UI", 9, FontStyle.Regular),
+            BackColor = Color.FromArgb(36, 42, 54),
+            ForeColor = Color.FromArgb(200, 215, 235),
+            FlatStyle = FlatStyle.Flat,
+            Cursor = Cursors.Hand,
+            Location = new Point(contentX + 285, 426),
+            Size = new Size(265, 32)
+        };
+        btnOpenScreenshots.FlatAppearance.BorderSize = 0;
+        btnOpenScreenshots.Click += (s, e) => {
+            try {
+                string? gameDir = FindGameDir();
+                string root = gameDir != null ? Path.GetFullPath(Path.Combine(gameDir, "..", "..")) : AppDomain.CurrentDomain.BaseDirectory;
+                string scrDir = Path.Combine(root, "screenshots");
+                Directory.CreateDirectory(scrDir);
+                Process.Start(new ProcessStartInfo { FileName = scrDir, UseShellExecute = true });
+            } catch { }
+        };
+        this.Controls.Add(btnOpenScreenshots);
+
+        // Панель подсказок по управлению
+        Label lblControlsHint = new Label {
+            Text = "Управление: WASD — ходьба | Пробел — прыжок | Shift — красться | Ctrl — бег | E — инвентарь | F5 — вид | F2 — скриншот",
+            Font = new Font("Segoe UI", 8, FontStyle.Regular),
+            ForeColor = Color.FromArgb(115, 125, 140),
+            TextAlign = ContentAlignment.MiddleCenter,
+            Location = new Point(contentX, 468),
+            Size = new Size(contentW, 35)
+        };
+        this.Controls.Add(lblControlsHint);
+
+        this.Size = new Size(640, 560);
 
         PopulateInitialVersions();
     }
@@ -295,7 +351,7 @@ public class LauncherForm : Form {
         if (newestExe != null) {
             _versions.Add(new GameReleaseItem {
                 DisplayName = "⚡ VoxelFrame (Актуальная версия)",
-                Tag = "v1.0.0-pre1",
+                Tag = "v1.0.0-pre2",
                 IsInstalled = true,
                 InstallPath = Path.GetDirectoryName(newestExe)!,
                 ExePath = newestExe
@@ -303,7 +359,7 @@ public class LauncherForm : Form {
         } else if (gameDir != null) {
             _versions.Add(new GameReleaseItem {
                 DisplayName = "⚡ VoxelFrame (Актуальная версия)",
-                Tag = "v1.0.0-pre1",
+                Tag = "v1.0.0-pre2",
                 IsLocalDev = true,
                 IsInstalled = true,
                 InstallPath = gameDir

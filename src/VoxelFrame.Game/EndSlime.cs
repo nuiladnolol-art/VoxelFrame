@@ -337,11 +337,27 @@ public sealed class EndSlime {
         int cx = (int)MathF.Floor(_islandCenter.X);
         int cy = (int)MathF.Floor(_islandCenter.Y);
         int cz = (int)MathF.Floor(_islandCenter.Z);
-        // Выходной портал — небольшая площадка под ногами у центра острова
+
+        // 1. Выходной портал — площадка под ногами у центра острова
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 world.PlacePlacedBlock(new Vec3i(cx + dx, cy, cz + dz), GameData.BEndPortal);
             }
         }
+
+        // 2. Наградной сундук Энда рядом с порталом на обсидиановом постаменте
+        var pedestalPos = new Vec3i(cx + 3, cy, cz);
+        world.PlacePlacedBlock(pedestalPos, GameData.BObsidian);
+        var chestPos = new Vec3i(cx + 3, cy + 1, cz);
+        world.PlacePlacedBlock(chestPos, GameData.BChest);
+
+        var chest = world.GetOrCreateChest(chestPos);
+        chest.TryInsert(GameData.NewItem(GameData.TotemItem), 1);
+        chest.TryInsert(GameData.NewItem(GameData.GoldenAppleItem), 4);
+        chest.TryInsert(GameData.NewItem(GameData.DiamondPickaxeItem), 1);
+        chest.TryInsert(GameData.NewItem(GameData.DiamondSwordItem), 1);
+        chest.TryInsert(GameData.NewItem(GameData.DiamondItem), 12);
+        chest.TryInsert(GameData.NewItem(GameData.GoldIngotItem), 16);
+        chest.TryInsert(GameData.NewItem(GameData.ObsidianItem), 32);
     }
 }

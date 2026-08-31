@@ -36,8 +36,7 @@ public static partial class Screens {
                                                     item.Id == GameData.ArrowItem.Id || item.Id == GameData.ShieldItem.Id ||
                                                     item.Id == GameData.FlintAndSteelItem.Id || item.Id == GameData.BucketItem.Id ||
                                                     item.Id == GameData.WaterBucketItem.Id || item.Id == GameData.LavaBucketItem.Id ||
-                                                    item.Id == GameData.TotemItem.Id || item.Id == GameData.SaddleItem.Id ||
-                                                    item.Id == GameData.EnchantedBookItem.Id),
+                                                    item.Id == GameData.TotemItem.Id),
             3 => GameData.Items.Values.Where(item => GameData.FoodValue.ContainsKey(item.Id) || item.Id == GameData.CoalItem.Id ||
                                                     item.Id == GameData.CharcoalItem.Id || item.Id == GameData.IronIngotItem.Id ||
                                                     item.Id == GameData.GoldIngotItem.Id || item.Id == GameData.DiamondItem.Id ||

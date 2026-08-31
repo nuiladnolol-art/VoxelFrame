@@ -263,47 +263,28 @@ public sealed class TrueEndSlime {
 
         session.ShowTitle("ИСТИННЫЙ ТРИУМФ", "Бездна очищена! Все миры спасены!", 6.0f, new Color(255, 215, 0, 255), new Color(255, 240, 180, 255));
         session.AddMessage("ИСТИННЫЙ СЛИЗЕНЬ КРАЯ ПОВЕРЖЕН!");
-        session.AddMessage("Тьма рассеивается... В центре материализуется Истинное Сокровище Бездны и Портал Триумфа!");
+        session.AddMessage("Тьма рассеивается... В центре материализуется Портал Триумфа!");
 
-        // Спавним сундук с легендарными наградами и портал победы
-        SpawnTreasureAndVictoryPortal(world);
+        // Спавним Портал Триумфа на обсидиановом постаменте
+        SpawnVictoryPortal(world);
     }
 
-    private void SpawnTreasureAndVictoryPortal(GameWorld world) {
+    private void SpawnVictoryPortal(GameWorld world) {
         int cx = (int)MathF.Round(_arenaCenter.X);
         int cy = (int)MathF.Round(_arenaCenter.Y);
         int cz = (int)MathF.Round(_arenaCenter.Z);
 
-        // 1. Постамент из чистого обсидиана и золота
+        // 1. Постамент из обсидиана
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 world.PlacePlacedBlock(new Vec3i(cx + dx, cy, cz + dz), GameData.BObsidian);
             }
         }
-        world.PlacePlacedBlock(new Vec3i(cx, cy, cz), GameData.BGoldOre);
 
-        // 2. Сундук с легендарной наградой
-        var chestPos = new Vec3i(cx, cy + 1, cz);
-        world.PlacePlacedBlock(chestPos, GameData.BChest);
-        
-        var chest = world.GetOrCreateChest(chestPos);
-        chest.TryInsert(GameData.NewItem(GameData.TotemItem), 3);
-        chest.TryInsert(GameData.NewItem(GameData.GoldenAppleItem), 8);
-        chest.TryInsert(GameData.NewItem(GameData.DiamondSwordItem), 1);
-        chest.TryInsert(GameData.NewItem(GameData.DiamondPickaxeItem), 1);
-        chest.TryInsert(GameData.NewItem(GameData.DiamondItem), 24);
-        chest.TryInsert(GameData.NewItem(GameData.EnchantedBookItem), 3);
-        chest.TryInsert(GameData.NewItem(GameData.GoldIngotItem), 32);
-        chest.TryInsert(GameData.NewItem(GameData.ObsidianItem), 64);
-
-        // 3. Портал Триумфа рядом с сундуком
+        // 2. Портал Триумфа в центре
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
-                var pPos = new Vec3i(cx + dx + 4, cy, cz + dz);
-                world.PlacePlacedBlock(pPos, GameData.BObsidian);
-                if (dx == 0 && dz == 0) {
-                    world.PlacePlacedBlock(pPos + new Vec3i(0, 1, 0), GameData.BEndPortal);
-                }
+                world.PlacePlacedBlock(new Vec3i(cx + dx, cy + 1, cz + dz), GameData.BEndPortal);
             }
         }
     }

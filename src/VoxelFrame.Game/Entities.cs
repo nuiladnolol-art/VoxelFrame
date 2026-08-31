@@ -21,7 +21,8 @@ public static class Collision {
                     if ((v.Flags & VoxelFlags.Solid) == 0) continue;
 
                     if (GameData.IsDoor(v.TypeId)) {
-                        // Открытая дверь проходима для всех, закрытая — твердая преграда.
+                        if (ignoreDoors) continue;
+                        // Открытая дверь проходима для всех, закрытая — преграда
                         bool isOpen = (v.SubGridLayerMask & 8) != 0;
                         if (isOpen) continue;
                     }
@@ -56,12 +57,9 @@ public static class Collision {
             bz0 = z + 0.0625f; bz1 = z + 0.9375f;
         } else if (GameData.IsDoor(typeId)) {
             // Тонкая дверная панель 3/16 — совпадает с визуалом в ChunkMesher
-            // (биты 0..1 — facing, бит 8 — открыта, при открытии панель повёрнута на 90°).
             byte facing = (byte)(v.SubGridLayerMask & 3);
-            bool isOpen = (v.SubGridLayerMask & 8) != 0;
-            byte effFacing = isOpen ? (byte)((facing + 1) & 3) : facing;
             const float T = 0.1875f;
-            switch (effFacing) {
+            switch (facing) {
                 case 0: bz0 = z + (1f - T); bz1 = z + 1f; break;
                 case 1: bx0 = x; bx1 = x + T; break;
                 case 2: bz0 = z; bz1 = z + T; break;
@@ -71,35 +69,29 @@ public static class Collision {
     }
 
     /// <summary>Сдвигает тело с учётом коллизий; возвращает признак «стоит на земле».</summary>
-    public static bool Move(GameWorld world, ref Vector3 pos, Vector3 half, ref Vector3 vel, float dt, bool sneaking = false, float stepHeight = 0.60f, bool ignoreDoors = false) {
+    public static bool Move(GameWorld world, ref Vector3 pos, Vector3 half, ref Vector3 vel, float dt, bool sneaking = false, float stepHeight = 0.56f, bool ignoreDoors = false) {
         bool onGround = false;
 
-        // 1. Если крадемся (Shift) на земле — независимое удержание на краю по X и Z для плавного скольжения
-        if (sneaking) {
+        // 1. Если крадемся (Shift) на краю блока
+        if (sneaking && vel.Y <= 0.01f) {
             float testX = pos.X + vel.X * dt;
             float testZ = pos.Z + vel.Z * dt;
             bool groundX = IntersectsSolid(world, new Vector3(testX, pos.Y - 0.1f, pos.Z) - half, new Vector3(testX, pos.Y - 0.1f, pos.Z) + half, ignoreDoors);
-            if (!groundX) {
-                vel.X = 0f;
-            }
+            if (!groundX) vel.X = 0f;
             bool groundZ = IntersectsSolid(world, new Vector3(pos.X, pos.Y - 0.1f, testZ) - half, new Vector3(pos.X, pos.Y - 0.1f, testZ) + half, ignoreDoors);
-            if (!groundZ) {
-                vel.Z = 0f;
-            }
+            if (!groundZ) vel.Z = 0f;
         }
 
-        // 2. Движение по X (с поддержкой авто-подъема / step-up на полублоки, грядки, кровати)
+        // 2. Движение по X (с аккуратным подъемом на полублоки)
         if (vel.X != 0f) {
             pos.X += vel.X * dt;
             if (IntersectsSolid(world, pos - half, pos + half, ignoreDoors)) {
                 bool stepped = false;
-                if (stepHeight > 0f && vel.Y <= 0.01f) {
-                    for (float dy = 0.05f; dy <= stepHeight; dy += 0.05f) {
+                if (stepHeight > 0f && vel.Y <= 0.05f) {
+                    for (float dy = 0.1f; dy <= stepHeight; dy += 0.1f) {
                         var steppedPos = new Vector3(pos.X, pos.Y + dy, pos.Z);
                         if (!IntersectsSolid(world, steppedPos - half, steppedPos + half, ignoreDoors)) {
-                            // Проверяем, что на новой высоте под ногами есть опора
-                            bool hasSupport = IntersectsSolid(world, new Vector3(steppedPos.X, steppedPos.Y - 0.05f, steppedPos.Z) - half, new Vector3(steppedPos.X, steppedPos.Y - 0.05f, steppedPos.Z) + half, ignoreDoors);
-                            if (hasSupport) {
+                            if (IntersectsSolid(world, new Vector3(steppedPos.X, steppedPos.Y - 0.15f, steppedPos.Z) - half, new Vector3(steppedPos.X, steppedPos.Y - 0.01f, steppedPos.Z) + half, ignoreDoors)) {
                                 pos.Y += dy;
                                 stepped = true;
                                 break;
@@ -114,18 +106,16 @@ public static class Collision {
             }
         }
 
-        // 3. Движение по Z (с поддержкой авто-подъема / step-up на полублоки, грядки, кровати)
+        // 3. Движение по Z (с аккуратным подъемом на полублоки)
         if (vel.Z != 0f) {
             pos.Z += vel.Z * dt;
             if (IntersectsSolid(world, pos - half, pos + half, ignoreDoors)) {
                 bool stepped = false;
-                if (stepHeight > 0f && vel.Y <= 0.01f) {
-                    for (float dy = 0.05f; dy <= stepHeight; dy += 0.05f) {
+                if (stepHeight > 0f && vel.Y <= 0.05f) {
+                    for (float dy = 0.1f; dy <= stepHeight; dy += 0.1f) {
                         var steppedPos = new Vector3(pos.X, pos.Y + dy, pos.Z);
                         if (!IntersectsSolid(world, steppedPos - half, steppedPos + half, ignoreDoors)) {
-                            // Проверяем, что на новой высоте под ногами есть опора
-                            bool hasSupport = IntersectsSolid(world, new Vector3(steppedPos.X, steppedPos.Y - 0.05f, steppedPos.Z) - half, new Vector3(steppedPos.X, steppedPos.Y - 0.05f, steppedPos.Z) + half, ignoreDoors);
-                            if (hasSupport) {
+                            if (IntersectsSolid(world, new Vector3(steppedPos.X, steppedPos.Y - 0.15f, steppedPos.Z) - half, new Vector3(steppedPos.X, steppedPos.Y - 0.01f, steppedPos.Z) + half, ignoreDoors)) {
                                 pos.Y += dy;
                                 stepped = true;
                                 break;
@@ -150,7 +140,7 @@ public static class Collision {
 
         // 5. Проверка касания земли чуть ниже стоп
         if (!onGround && vel.Y <= 0f) {
-            if (IntersectsSolid(world, new Vector3(pos.X, pos.Y - 0.05f, pos.Z) - half, new Vector3(pos.X, pos.Y - 0.05f, pos.Z) + half, ignoreDoors)) {
+            if (IntersectsSolid(world, new Vector3(pos.X, pos.Y - 0.05f, pos.Z) - half, new Vector3(pos.X, pos.Y - 0.01f, pos.Z) + half, ignoreDoors)) {
                 onGround = true;
             }
         }
@@ -232,7 +222,7 @@ public sealed class ItemPickup {
     }
 }
 
-public enum AnimalType { Pig, Cow, Sheep }
+public enum AnimalType { Pig, Cow, Sheep, Chicken }
 
 public sealed class Animal {
     public AnimalType Type;
@@ -245,22 +235,24 @@ public sealed class Animal {
     public Vector2 WanderDir;
     public float FleeTimer;
 
-    // Размножение (Breeding) и возраст
+    // Размножение (Breeding), возраст и яйца
     public float LoveTimer;
     public float BreedCooldown;
     public bool IsBaby;
     public float BabyAgeTimer = 180f;
+    public float EggLayTimer;
 
     private static readonly Random _random = new();
 
     public const float HalfSize = 0.45f;
-    public float HalfSizeX => IsBaby ? 0.25f : 0.45f;
+    public float HalfSizeX => IsBaby ? 0.15f : (Type == AnimalType.Chicken ? 0.22f : 0.45f);
     public float HalfSizeY => (Type switch {
         AnimalType.Cow => 0.65f,
         AnimalType.Sheep => 0.55f,
+        AnimalType.Chicken => 0.35f,
         _ => 0.45f // Pig
     }) * (IsBaby ? 0.55f : 1.0f);
-    public float HalfSizeZ => IsBaby ? 0.25f : 0.45f;
+    public float HalfSizeZ => IsBaby ? 0.15f : (Type == AnimalType.Chicken ? 0.22f : 0.45f);
 
     public Animal() {
         Health = 10f;
@@ -272,13 +264,18 @@ public sealed class Animal {
         Health = type switch {
             AnimalType.Sheep => 8f,
             AnimalType.Cow => 10f,
+            AnimalType.Chicken => 4f,
             _ => 10f
         };
+        if (type == AnimalType.Chicken) {
+            EggLayTimer = 180f + (float)_random.NextDouble() * 300f;
+        }
     }
 
     public bool LikesFood(ushort itemId) => Type switch {
         AnimalType.Cow or AnimalType.Sheep => itemId == GameData.WheatItem.Id,
         AnimalType.Pig => itemId == GameData.CarrotItem.Id || itemId == GameData.PotatoItem.Id || itemId == GameData.AppleItem.Id || itemId == GameData.BreadItem.Id,
+        AnimalType.Chicken => itemId == GameData.WheatSeedsItem.Id,
         _ => false
     };
 
@@ -305,6 +302,10 @@ public sealed class Animal {
                     world.SpawnPickup(GameData.WhiteWoolItem.Id, 1, pos);
                     world.SpawnPickup(GameData.RawMuttonItem.Id, _random.Next(1, 3), pos);
                     break;
+                case AnimalType.Chicken:
+                    world.SpawnPickup(GameData.RawChickenItem.Id, 1, pos);
+                    world.SpawnPickup(GameData.FeatherItem.Id, _random.Next(1, 3), pos);
+                    break;
             }
         }
     }
@@ -326,6 +327,14 @@ public sealed class Animal {
             BabyAgeTimer -= dt;
             if (BabyAgeTimer <= 0f) {
                 IsBaby = false;
+            }
+        } else if (Type == AnimalType.Chicken) {
+            EggLayTimer -= dt;
+            if (EggLayTimer <= 0f) {
+                EggLayTimer = 180f + (float)_random.NextDouble() * 300f;
+                var eggPos = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z));
+                world.SpawnPickup(GameData.EggItem.Id, 1, eggPos);
+                SoundSystem.PlayPop();
             }
         }
 
@@ -421,7 +430,10 @@ public sealed class Animal {
             }
         }
 
-        Velocity.Y -= 22f * dt;
+        Velocity.Y -= (Type == AnimalType.Chicken ? 8f : 22f) * dt;
+        if (Type == AnimalType.Chicken && Velocity.Y < -2.2f) {
+            Velocity.Y = -2.2f;
+        }
 
         bool grounded = Collision.Move(world, ref Position, new Vector3(HalfSizeX, HalfSizeY, HalfSizeZ), ref Velocity, dt, ignoreDoors: true);
         if (grounded && Velocity.Y < 0f) {

@@ -82,52 +82,132 @@ public static class Fonts {
         set.Add(0x25B6); // ▶
         set.Add(0x2728); // ✨
         set.Add(0x2764); // ❤
+        set.Add(0x266A); // ♪
+        set.Add(0x266B); // ♫
+        set.Add(0x25C0); // ◀
+        set.Add(0x25B2); // ▲
+        set.Add(0x25BC); // ▼
 
         var list = set.ToList();
         list.Sort();
         return list.ToArray();
     }
 
+    public static string StripFormatting(string text) {
+        if (string.IsNullOrEmpty(text) || !text.Contains('§')) return text;
+        var sb = new System.Text.StringBuilder(text.Length);
+        for (int i = 0; i < text.Length; i++) {
+            if (text[i] == '§' && i + 1 < text.Length) {
+                i++; // Пропускаем '§' и код форматирования
+            } else {
+                sb.Append(text[i]);
+            }
+        }
+        return sb.ToString();
+    }
+
+    public static Color GetMinecraftColor(char code, Color fallback) {
+        int a = (int)fallback.A;
+        return code switch {
+            '0' => new Color(0, 0, 0, a),
+            '1' => new Color(0, 0, 170, a),
+            '2' => new Color(0, 170, 0, a),
+            '3' => new Color(0, 170, 170, a),
+            '4' => new Color(170, 0, 0, a),
+            '5' => new Color(170, 0, 170, a),
+            '6' => new Color(255, 170, 0, a),
+            '7' => new Color(170, 170, 170, a),
+            '8' => new Color(85, 85, 85, a),
+            '9' => new Color(85, 85, 255, a),
+            'a' or 'A' => new Color(85, 255, 85, a),
+            'b' or 'B' => new Color(85, 255, 255, a),
+            'c' or 'C' => new Color(255, 85, 85, a),
+            'd' or 'D' => new Color(255, 85, 255, a),
+            'e' or 'E' => new Color(255, 255, 85, a),
+            'f' or 'F' => new Color(255, 255, 255, a),
+            _ => fallback
+        };
+    }
+
     public static float Measure(string text, float size) {
         if (string.IsNullOrEmpty(text)) return 0f;
-        if (!Cyrillic) return PixelFont.Measure(text, size);
-        return Raylib.MeasureTextEx(_font, text, size, 1f).X;
+        string clean = StripFormatting(text);
+        if (!Cyrillic) return PixelFont.Measure(clean, size);
+        return Raylib.MeasureTextEx(_font, clean, size, 1f).X;
     }
 
     public static void Draw(string text, float x, float y, float size, Color color) {
         if (string.IsNullOrEmpty(text)) return;
         if (!Cyrillic) {
-            PixelFont.Draw(text, x, y, size, color);
+            PixelFont.Draw(StripFormatting(text), x, y, size, color);
             return;
         }
-        Raylib.DrawTextEx(_font, text, new Vector2(x, y), size, 1f, color);
+
+        if (!text.Contains('§')) {
+            Raylib.DrawTextEx(_font, text, new Vector2(x, y), size, 1f, color);
+            return;
+        }
+
+        // Рендерим текст с учетом цветовых тегов Minecraft (§)
+        float curX = x;
+        Color curColor = color;
+        var sb = new System.Text.StringBuilder();
+
+        void Flush() {
+            if (sb.Length > 0) {
+                string chunk = sb.ToString();
+                Raylib.DrawTextEx(_font, chunk, new Vector2(curX, y), size, 1f, curColor);
+                curX += Raylib.MeasureTextEx(_font, chunk, size, 1f).X;
+                sb.Clear();
+            }
+        }
+
+        for (int i = 0; i < text.Length; i++) {
+            if (text[i] == '§' && i + 1 < text.Length) {
+                Flush();
+                i++;
+                char code = text[i];
+                curColor = GetMinecraftColor(code, color);
+            } else {
+                sb.Append(text[i]);
+            }
+        }
+        Flush();
     }
 
     public static void DrawShadowed(string text, float x, float y, float size, Color color, float shadowDist = 2f) {
         if (string.IsNullOrEmpty(text)) return;
         if (!Cyrillic) {
-            PixelFont.Draw(text, x + shadowDist, y + shadowDist, size, new Color(0, 0, 0, 180));
-            PixelFont.Draw(text, x, y, size, color);
+            string cleanTxt = StripFormatting(text);
+            PixelFont.Draw(cleanTxt, x + shadowDist, y + shadowDist, size, new Color(0, 0, 0, (int)(color.A * 180 / 255)));
+            PixelFont.Draw(cleanTxt, x, y, size, color);
             return;
         }
-        Raylib.DrawTextEx(_font, text, new Vector2(x + shadowDist, y + shadowDist), size, 1f, new Color(0, 0, 0, 190));
-        Raylib.DrawTextEx(_font, text, new Vector2(x, y), size, 1f, color);
+
+        // 1. Тень (чистый текст без тегов разметки)
+        string clean = StripFormatting(text);
+        int shadowA = (int)(color.A * 190 / 255);
+        Raylib.DrawTextEx(_font, clean, new Vector2(x + shadowDist, y + shadowDist), size, 1f, new Color(0, 0, 0, shadowA));
+
+        // 2. Лицевой цветной слой
+        Draw(text, x, y, size, color);
     }
 
     public static void DrawOutlined(string text, float x, float y, float size, Color color, Color outlineColor, float outlineWidth = 1.5f) {
         if (string.IsNullOrEmpty(text)) return;
+        string clean = StripFormatting(text);
         if (!Cyrillic) {
-            PixelFont.DrawShadowed(text, x, y, size, color);
+            PixelFont.DrawShadowed(clean, x, y, size, color);
             return;
         }
         for (float ox = -outlineWidth; ox <= outlineWidth; ox += outlineWidth) {
             for (float oy = -outlineWidth; oy <= outlineWidth; oy += outlineWidth) {
                 if (ox != 0 || oy != 0) {
-                    Raylib.DrawTextEx(_font, text, new Vector2(x + ox, y + oy), size, 1f, outlineColor);
+                    Raylib.DrawTextEx(_font, clean, new Vector2(x + ox, y + oy), size, 1f, outlineColor);
                 }
             }
         }
-        Raylib.DrawTextEx(_font, text, new Vector2(x, y), size, 1f, color);
+        Draw(text, x, y, size, color);
     }
 
     public static void DrawCentered(string text, float cx, float y, float size, Color color) {
@@ -147,29 +227,30 @@ public static class Fonts {
     /// </summary>
     public static void DrawTitle3D(string text, float cx, float y, float size) {
         if (string.IsNullOrEmpty(text)) return;
-        float w = Measure(text, size);
+        string clean = StripFormatting(text);
+        float w = Measure(clean, size);
         float x = cx - w / 2f;
 
         // 1. Глубокая тень внизу
         for (int d = 6; d >= 3; d--) {
-            Raylib.DrawTextEx(_font, text, new Vector2(x + d, y + d), size, 1.5f, new Color(20, 15, 10, 220));
+            Raylib.DrawTextEx(_font, clean, new Vector2(x + d, y + d), size, 1.5f, new Color(20, 15, 10, 220));
         }
 
         // 2. Темно-бронзовый нижний 3D-скос (экструзия)
         for (int d = 2; d >= 1; d--) {
-            Raylib.DrawTextEx(_font, text, new Vector2(x, y + d), size, 1.5f, new Color(130, 80, 15, 255));
+            Raylib.DrawTextEx(_font, clean, new Vector2(x, y + d), size, 1.5f, new Color(130, 80, 15, 255));
         }
 
         // 3. Черная контурная подложка
         for (int dx = -2; dx <= 2; dx++) {
             for (int dy = -2; dy <= 2; dy++) {
                 if (Math.Abs(dx) + Math.Abs(dy) > 2) continue;
-                Raylib.DrawTextEx(_font, text, new Vector2(x + dx, y + dy), size, 1.5f, new Color(30, 22, 12, 255));
+                Raylib.DrawTextEx(_font, clean, new Vector2(x + dx, y + dy), size, 1.5f, new Color(30, 22, 12, 255));
             }
         }
 
         // 4. Золотой градиентный лицевой слой (с верхним сиянием)
-        Raylib.DrawTextEx(_font, text, new Vector2(x, y + 1f), size, 1.5f, new Color(255, 190, 50, 255));
-        Raylib.DrawTextEx(_font, text, new Vector2(x, y), size, 1.5f, new Color(255, 240, 140, 255));
+        Raylib.DrawTextEx(_font, clean, new Vector2(x, y + 1f), size, 1.5f, new Color(255, 190, 50, 255));
+        Raylib.DrawTextEx(_font, clean, new Vector2(x, y), size, 1.5f, new Color(255, 240, 140, 255));
     }
 }

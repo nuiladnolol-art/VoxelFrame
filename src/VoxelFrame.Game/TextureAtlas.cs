@@ -62,7 +62,9 @@ public static class TextureAtlas {
                      TCarrot = 179, TPotato = 180, TBakedPotato = 181,
                      TCarrotCrop0 = 182, TCarrotCrop1 = 183, TCarrotCrop2 = 184, TCarrotCrop3 = 185,
                      TPotatoCrop0 = 186, TPotatoCrop1 = 187, TPotatoCrop2 = 188, TPotatoCrop3 = 189,
-                     THeartParticle = 190;
+                     THeartParticle = 190, TFire = 191,
+                     TRawChicken = 192, TCookedChicken = 193, TEgg = 194,
+                     TJukeboxTop = 195, TJukeboxSide = 196;
 
     public record struct BlockFaceTiles(byte PosX, byte NegX, byte PosY, byte NegY, byte PosZ, byte NegZ);
 
@@ -257,6 +259,60 @@ public static class TextureAtlas {
         [TSwampArtifact] = "items/swamp_artifact.png",
         [TDesertArtifact] = "items/desert_artifact.png",
         [TVoidKey] = "items/void_key.png",
+        [TFire] = "blocks/fire.png",
+        [TSapling] = "blocks/sapling.png",
+        [TRedFlower] = "blocks/flower_red.png",
+        [TYellowFlower] = "blocks/flower_yellow.png",
+        [TRawChicken] = "items/chicken_raw.png",
+        [TCookedChicken] = "items/chicken_cooked.png",
+        [TEgg] = "items/egg.png",
+        [TJukeboxTop] = "blocks/jukebox_top.png",
+        [TJukeboxSide] = "blocks/jukebox_side.png",
+        // Биомные цвета листвы и воды
+        [TLeavesPlains] = "blocks/leaves_plains.png",
+        [TLeavesSavanna] = "blocks/leaves_savanna.png",
+        [TLeavesSwamp] = "blocks/leaves_swamp.png",
+        [TWaterSwamp] = "blocks/water_swamp.png",
+        // Биомные цвета травы
+        [TGrassTopPlains] = "blocks/grass_top_plains.png",
+        [TGrassSidePlains] = "blocks/grass_side_plains.png",
+        [TTallGrassPlains] = "blocks/tallgrass_plains.png",
+        [TGrassTopSavanna] = "blocks/grass_top_savanna.png",
+        [TGrassSideSavanna] = "blocks/grass_side_savanna.png",
+        [TTallGrassSavanna] = "blocks/tallgrass_savanna.png",
+        [TGrassTopSwamp] = "blocks/grass_top_swamp.png",
+        [TGrassSideSwamp] = "blocks/grass_side_swamp.png",
+        [TTallGrassSwamp] = "blocks/tallgrass_swamp.png",
+        // Броня (Кожаная, Железная, Алмазная)
+        [TLeatherHelmet] = "items/leather_helmet.png",
+        [TLeatherChestplate] = "items/leather_chestplate.png",
+        [TLeatherLeggings] = "items/leather_leggings.png",
+        [TLeatherBoots] = "items/leather_boots.png",
+        [TIronHelmet] = "items/iron_helmet.png",
+        [TIronChestplate] = "items/iron_chestplate.png",
+        [TIronLeggings] = "items/iron_leggings.png",
+        [TIronBoots] = "items/iron_boots.png",
+        [TDiamondHelmet] = "items/diamond_helmet.png",
+        [TDiamondChestplate] = "items/diamond_chestplate.png",
+        [TDiamondLeggings] = "items/diamond_leggings.png",
+        [TDiamondBoots] = "items/diamond_boots.png",
+        // GUI иконки
+        [TArmorIcon] = "gui/armor.png",
+        [TArmorIconHalf] = "gui/armor_half.png",
+        [TArmorIconEmpty] = "gui/armor_empty.png",
+        [THeartParticle] = "gui/heart_particle.png",
+        // Культуры и корнеплоды
+        [TCarrot] = "items/carrot.png",
+        [TPotato] = "items/potato.png",
+        [TBakedPotato] = "items/potato_baked.png",
+        [TCarrotCrop0] = "blocks/carrot_crop_0.png",
+        [TCarrotCrop1] = "blocks/carrot_crop_1.png",
+        [TCarrotCrop2] = "blocks/carrot_crop_2.png",
+        [TCarrotCrop3] = "blocks/carrot_crop_3.png",
+        [TPotatoCrop0] = "blocks/potato_crop_0.png",
+        [TPotatoCrop1] = "blocks/potato_crop_1.png",
+        [TPotatoCrop2] = "blocks/potato_crop_2.png",
+        [TPotatoCrop3] = "blocks/potato_crop_3.png",
     };
 
     public static Texture2D Atlas => _atlas;
@@ -506,6 +562,9 @@ public static class TextureAtlas {
         palette[TPotatoCrop2] = (new Color(80, 190, 45, 255), false);
         palette[TPotatoCrop3] = (new Color(90, 200, 50, 255), false);
         palette[THeartParticle] = (new Color(235, 30, 60, 255), false);
+        palette[TFire] = (new Color(255, 120, 0, 255), false);
+        palette[TJukeboxTop] = (new Color(110, 75, 45, 255), false);
+        palette[TJukeboxSide] = (new Color(115, 78, 48, 255), false);
 
         var rng = new Random(20260812);
         for (int tile = 0; tile < palette.Length; tile++) {
@@ -1487,6 +1546,99 @@ public static class TextureAtlas {
                             r = 235; g = 30; b = 60; a = 255;
                         } else {
                             a = 0;
+                        }
+                    } else if (tile == TRawChicken) {
+                        // Куриная ножка (сырая)
+                        bool bone = (px >= 10 && px <= 13 && py >= 10 && py <= 13 && Math.Abs(px - py) <= 1);
+                        bool meat = (px - 6) * (px - 6) * 1.1f + (py - 6) * (py - 6) * 0.9f <= 16;
+                        if (bone) {
+                            r = 240; g = 235; b = 225; a = 255;
+                        } else if (meat) {
+                            r = 235 + (px * 3 + py * 7) % 20; g = 170 + (px * 5) % 20; b = 160; a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == TCookedChicken) {
+                        // Куриная ножка (жареная)
+                        bool bone = (px >= 10 && px <= 13 && py >= 10 && py <= 13 && Math.Abs(px - py) <= 1);
+                        bool meat = (px - 6) * (px - 6) * 1.1f + (py - 6) * (py - 6) * 0.9f <= 16;
+                        if (bone) {
+                            r = 240; g = 235; b = 225; a = 255;
+                        } else if (meat) {
+                            bool crust = (px <= 4 || py <= 4 || (px + py) % 3 == 0);
+                            r = crust ? 140 : 185; g = crust ? 70 : 110; b = crust ? 25 : 40; a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == TEgg) {
+                        // Яйцо: гладкий белый овал
+                        float ex = (px - 8f) / 4.5f, ey = (py - 8.5f) / 6.0f;
+                        bool inEgg = (ex * ex + ey * ey <= 1.0f) && (py >= 3 && py <= 14);
+                        if (inEgg) {
+                            bool shine = px >= 6 && px <= 7 && py >= 5 && py <= 7;
+                            r = shine ? 255 : 235 + (px % 2) * 10;
+                            g = shine ? 255 : 230 + (py % 2) * 10;
+                            b = shine ? 250 : 215;
+                            a = 255;
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == TFire) {
+                        // Анимированное процедурное пламя огня
+                        bool isFlame = (px >= 2 && px <= 13 && py >= 1 && py <= 15 && ((15 - py) * 0.75f >= Math.Abs(px - 7.5f) - 1.8f));
+                        if (isFlame) {
+                            int flameGrad = 15 - py;
+                            if (flameGrad < 4) {
+                                r = 255; g = 230 + (px % 2) * 25; b = 70;
+                            } else if (flameGrad < 9) {
+                                r = 255; g = 140 + (px % 3) * 20; b = 10;
+                            } else {
+                                r = 220 + (px % 2) * 35; g = 40 + (py % 2) * 20; b = 0;
+                            }
+                            a = (byte)(py <= 2 ? 180 : 255);
+                        } else {
+                            a = 0;
+                        }
+                    } else if (tile == TJukeboxTop) {
+                        // Верх проигрывателя: полированное дубовое дерево, виниловый стол + игла
+                        bool isBorder = px == 0 || px == 15 || py == 0 || py == 15;
+                        float discDistSq = (px - 7.5f) * (px - 7.5f) + (py - 7.5f) * (py - 7.5f);
+                        bool isDisc = discDistSq <= 24f;
+                        bool isRim = discDistSq <= 27f && discDistSq > 21f;
+                        bool isCenter = discDistSq <= 3.5f;
+                        bool isToneArm = (px >= 10 && px <= 13 && py >= 2 && py <= 5 && Math.Abs(px + py - 15) <= 1);
+                        if (isCenter) {
+                            r = 235; g = 190; b = 40; a = 255; // Золотой шпиндель
+                        } else if (isRim) {
+                            r = 180; g = 130; b = 45; a = 255; // Латунный обод
+                        } else if (isDisc) {
+                            int groove = ((int)MathF.Sqrt(discDistSq)) % 2;
+                            r = groove == 0 ? 32 : 22; g = groove == 0 ? 32 : 22; b = groove == 0 ? 36 : 26; a = 255; // Черный винил
+                        } else if (isToneArm) {
+                            r = 240; g = 205; b = 70; a = 255; // Золотой тонарм
+                        } else if (isBorder) {
+                            r = 75; g = 50; b = 30; a = 255;
+                        } else {
+                            r = 120 + (px % 2) * 10; g = 80 + (py % 2) * 8; b = 45; a = 255;
+                        }
+                    } else if (tile == TJukeboxSide) {
+                        // Боковая сторона проигрывателя: дубовый корпус + декоративная латунная решетка
+                        bool isBorder = px == 0 || px == 15 || py == 0 || py == 15;
+                        bool isCorner = (px <= 2 || px >= 13) && (py <= 2 || py >= 13);
+                        bool isSpeakerGrille = px >= 4 && px <= 11 && py >= 4 && py <= 11;
+                        bool isDiamondPatt = isSpeakerGrille && ((px + py) % 2 == 0);
+                        if (isCorner) {
+                            r = 210; g = 175; b = 50; a = 255; // Латунные уголки
+                        } else if (isSpeakerGrille) {
+                            if (isDiamondPatt) {
+                                r = 165; g = 125; b = 40; a = 255; // Тканевая решетка / ромбы
+                            } else {
+                                r = 45; g = 30; b = 18; a = 255;
+                            }
+                        } else if (isBorder) {
+                            r = 70; g = 45; b = 25; a = 255;
+                        } else {
+                            r = 115 + (px % 3) * 8; g = 75 + (py % 3) * 6; b = 42; a = 255;
                         }
                     } else {
                         if (tile == TPlanks && (py == 4 || py == 11)) { r -= 40; g -= 30; b -= 20; }

@@ -814,10 +814,10 @@ public sealed class WorldGenerator {
                         }
                     }
 
-                    // Алмазы (Diamond) — РЕДКИЕ драгоценные жилы на глубине Y=5..15 (значительно реже золота)
-                    if (wy <= 15) {
+                    // Алмазы (Diamond) — РЕДКИЕ драгоценные жилы на глубине Y=5..20 (значительно реже золота)
+                    if (wy <= 20) {
                         float diaN = _diamondNoise.Fractal(wx * 0.26f + 5000f, wy * 0.26f, wz * 0.26f, 2, 0.5f);
-                        if (diaN > 0.86f) {
+                        if (diaN > 0.85f) {
                             var v = MakeVoxel(GameData.BDiamondOre.Id);
                             chunk.SetVoxel(idx, in v);
                             continue;

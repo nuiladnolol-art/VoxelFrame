@@ -87,8 +87,8 @@ namespace VoxelFrame.Game;
                     bool isFoliage = v.TypeId == GameData.BTallGrass.Id || v.TypeId == GameData.BWheatCrop.Id ||
                                      v.TypeId == GameData.BSapling.Id || v.TypeId == GameData.BRedFlower.Id ||
                                      v.TypeId == GameData.BYellowFlower.Id || v.TypeId == GameData.BCarrotCrop.Id ||
-                                     v.TypeId == GameData.BPotatoCrop.Id;
-                    bool isTranslucent = (isFluid && isWater) || isFoliage || GameData.IsDoor(v.TypeId) || v.TypeId == GameData.BGlass.Id
+                                     v.TypeId == GameData.BPotatoCrop.Id || v.TypeId == GameData.BFire.Id;
+                    bool isTranslucent = (isFluid && isWater) || isFoliage || v.TypeId == GameData.BGlass.Id
                         || v.TypeId == GameData.BNetherPortal.Id || v.TypeId == GameData.BEndPortal.Id;
                     if (pass == 0 && isTranslucent) continue;
                     if (pass == 1 && !isTranslucent) continue;
@@ -105,6 +105,8 @@ namespace VoxelFrame.Game;
                                 BiomeType.Swamp => (byte)TextureAtlas.TTallGrassSwamp,
                                 _ => (byte)TextureAtlas.TTallGrass
                             };
+                        } else if (v.TypeId == GameData.BFire.Id) {
+                            foliageTile = (byte)TextureAtlas.TFire;
                         } else if (v.TypeId == GameData.BSapling.Id) {
                             foliageTile = (byte)TextureAtlas.TSapling;
                         } else if (v.TypeId == GameData.BRedFlower.Id) {
@@ -817,29 +819,29 @@ namespace VoxelFrame.Game;
         if (f == 2) return tiles.PosY; // Верх (+Y)
         if (f == 3) return tiles.NegY; // Низ (-Y)
 
-        // Для блоков с ориентацией (Печь, Сундук, Кровать) поворачиваем 4 боковые грани
+        // Для блоков с ориентацией (Печь, Сундук, Кровать) поворачиваем 4 боковые грани к игроку
         if (typeId == GameData.BFurnace.Id || typeId == GameData.BChest.Id || typeId == GameData.BBed.Id || typeId == GameData.BBedHead.Id) {
             byte effFacing = (byte)(facing & 3);
             return effFacing switch {
-                1 => f switch { // перед на -X (f=1)
-                    1 => tiles.PosZ, // перед
-                    0 => tiles.NegZ, // зад
-                    4 => tiles.NegX, // бок
+                1 => f switch { // взгляд на -X (facing=1), перед на +X (f=0) к игроку
+                    0 => tiles.PosZ, // перед
+                    1 => tiles.NegZ, // зад
+                    5 => tiles.NegX, // бок
                     _ => tiles.PosX  // бок
                 },
-                2 => f switch { // перед на -Z (f=5)
+                2 => f switch { // взгляд на +Z (facing=2), перед на -Z (f=5) к игроку
                     5 => tiles.PosZ, // перед
                     4 => tiles.NegZ, // зад
                     0 => tiles.NegX, // бок
                     _ => tiles.PosX  // бок
                 },
-                3 => f switch { // перед на +X (f=0)
-                    0 => tiles.PosZ, // перед
-                    1 => tiles.NegZ, // зад
+                3 => f switch { // взгляд на +X (facing=3), перед на -X (f=1) к игроку
+                    1 => tiles.PosZ, // перед
+                    0 => tiles.NegZ, // зад
                     4 => tiles.PosX, // бок
                     _ => tiles.NegX  // бок
                 },
-                _ => f switch { // default 0: перед на +Z (f=4)
+                _ => f switch { // default 0: взгляд на -Z (facing=0), перед на +Z (f=4) к игроку
                     4 => tiles.PosZ, // перед
                     5 => tiles.NegZ, // зад
                     0 => tiles.PosX, // бок

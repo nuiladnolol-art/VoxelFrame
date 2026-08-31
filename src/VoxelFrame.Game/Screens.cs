@@ -383,7 +383,7 @@ public static partial class Screens {
             var verRec = new Rectangle(14f, h - 34f, 190f, 24f);
             Raylib.DrawRectangleRec(verRec, new Color(20, 24, 34, 180));
             Raylib.DrawRectangleLinesEx(verRec, 1f, new Color(50, 60, 80, 180));
-            Fonts.Draw("VoxelFrame 1.0.0-pre1", 22f, h - 30f, 14f, new Color(190, 205, 230, 220));
+            Fonts.Draw("VoxelFrame 1.0.0-pre2", 22f, h - 30f, 14f, new Color(190, 205, 230, 220));
 
             // Правый копирайт
             var copyRec = new Rectangle(w - 200f, h - 34f, 186f, 24f);
@@ -423,18 +423,24 @@ public static partial class Screens {
             InControlsScreen = true;
         }
 
+        // Выбор скина персонажа
+        string skinText = $"Скин: {SkinSystem.CurrentSkin.DisplayName}";
+        if (Button(rightX, cy + btnH + gapY, btnW, btnH, skinText, true)) {
+            SkinSystem.NextSkin();
+        }
+
         // Масштаб интерфейса: авто по высоте окна или фиксированный процент
         string scaleText = SaveSystem.UiScaleMode switch {
             0 => "Масштаб интерфейса: Авто",
             _ => $"Масштаб: {SaveSystem.UiScaleMode}%",
         };
-        if (Button(rightX, cy + btnH + gapY, btnW, btnH, scaleText, true)) {
+        if (Button(leftX, cy + (btnH + gapY) * 2, btnW, btnH, scaleText, true)) {
             int[] steps = { 0, 75, 100, 125, 150, 200 };
             int idx = Array.IndexOf(steps, SaveSystem.UiScaleMode);
             SaveSystem.UiScaleMode = steps[(idx + 1) % steps.Length];
         }
 
-        if (Button(w / 2f - 160f, cy + (btnH + gapY) * 2 + 20f, 320f, 48f, "Готово", true)) {
+        if (Button(rightX, cy + (btnH + gapY) * 2, btnW, btnH, "Готово", true) || Raylib.IsKeyPressed(KeyboardKey.Escape)) {
             InSettingsScreen = false;
         }
     }
@@ -594,12 +600,21 @@ public static partial class Screens {
         int w = Ui.Vw, h = Ui.Vh;
         DrawMenuBackground(Raylib.GetFrameTime());
 
-        Fonts.DrawTitle3D("НАСТРОЙКИ ЗВУКА", w / 2f, h * 0.15f, 44f);
+        Fonts.DrawTitle3D("НАСТРОЙКИ ЗВУКА", w / 2f, h * 0.10f, 44f);
 
-        float cy = h * 0.36f;
-        string volText = SaveSystem.SoundVolume > 0 ? $"Общая громкость: {SaveSystem.SoundVolume}%" : "Общая громкость: Выкл";
-        if (Slider(w / 2f - 180f, cy, 360f, 46f, volText, SaveSystem.SoundVolume, 0f, 100f, out float newVol)) {
-            SaveSystem.SoundVolume = Math.Clamp((int)MathF.Round(newVol), 0, 100);
+        float colW = 340f;
+        float rowH = 44f;
+        float gapY = 14f;
+        float startY = h * 0.18f;
+
+        float leftX = w / 2f - colW - 10f;
+        float rightX = w / 2f + 10f;
+        float centerX = w / 2f - colW / 2f;
+
+        // 1. Общая громкость (Master)
+        string masterText = SaveSystem.SoundVolume > 0 ? $"Общая громкость: {SaveSystem.SoundVolume}%" : "Общая громкость: Выкл";
+        if (Slider(centerX, startY, colW, rowH, masterText, SaveSystem.SoundVolume, 0f, 100f, out float newMaster)) {
+            SaveSystem.SoundVolume = Math.Clamp((int)MathF.Round(newMaster), 0, 100);
             if (SaveSystem.SoundVolume > 0) {
                 Raylib.SetMasterVolume(SaveSystem.SoundVolume / 100f);
             } else {
@@ -607,7 +622,50 @@ public static partial class Screens {
             }
         }
 
-        if (Button(w / 2f - 140f, h * 0.82f, 280f, 46f, "Готово", true)) {
+        // 2. Музыка (Music / BGM) - Левая колонка
+        string musicText = SaveSystem.MusicVolume > 0 ? $"Музыка (BGM): {SaveSystem.MusicVolume}%" : "Музыка (BGM): Выкл";
+        if (Slider(leftX, startY + (rowH + gapY), colW, rowH, musicText, SaveSystem.MusicVolume, 0f, 100f, out float newMusic)) {
+            SaveSystem.MusicVolume = Math.Clamp((int)MathF.Round(newMusic), 0, 100);
+        }
+
+        // 3. Блоки (Шаги, копание, установка) - Правая колонка
+        string blocksText = SaveSystem.BlocksVolume > 0 ? $"Блоки и шаги: {SaveSystem.BlocksVolume}%" : "Блоки и шаги: Выкл";
+        if (Slider(rightX, startY + (rowH + gapY), colW, rowH, blocksText, SaveSystem.BlocksVolume, 0f, 100f, out float newBlocks)) {
+            SaveSystem.BlocksVolume = Math.Clamp((int)MathF.Round(newBlocks), 0, 100);
+        }
+
+        // 4. Существа (Мобы, животные, криперы) - Левая колонка
+        string creaturesText = SaveSystem.CreaturesVolume > 0 ? $"Существа и мобы: {SaveSystem.CreaturesVolume}%" : "Существа: Выкл";
+        if (Slider(leftX, startY + (rowH + gapY) * 2f, colW, rowH, creaturesText, SaveSystem.CreaturesVolume, 0f, 100f, out float newCreatures)) {
+            SaveSystem.CreaturesVolume = Math.Clamp((int)MathF.Round(newCreatures), 0, 100);
+        }
+
+        // 5. Окружение и погода (Гром, вода, лава) - Правая колонка
+        string weatherText = SaveSystem.WeatherVolume > 0 ? $"Погода и окружение: {SaveSystem.WeatherVolume}%" : "Погода: Выкл";
+        if (Slider(rightX, startY + (rowH + gapY) * 2f, colW, rowH, weatherText, SaveSystem.WeatherVolume, 0f, 100f, out float newWeather)) {
+            SaveSystem.WeatherVolume = Math.Clamp((int)MathF.Round(newWeather), 0, 100);
+        }
+
+        // 6. Игрок и интерфейс (Удары, поедание, клики, тотем)
+        string playerText = SaveSystem.PlayerVolume > 0 ? $"Игрок и интерфейс: {SaveSystem.PlayerVolume}%" : "Игрок: Выкл";
+        if (Slider(centerX, startY + (rowH + gapY) * 3f, colW, rowH, playerText, SaveSystem.PlayerVolume, 0f, 100f, out float newPlayer)) {
+            SaveSystem.PlayerVolume = Math.Clamp((int)MathF.Round(newPlayer), 0, 100);
+        }
+
+        // Нижние кнопки
+        float bottomY = h * 0.85f;
+        if (Button(w / 2f - 210f, bottomY, 200f, 44f, "Сбросить по умолч.", true)) {
+            SaveSystem.SoundVolume = 100;
+            SaveSystem.MusicVolume = 70;
+            SaveSystem.BlocksVolume = 100;
+            SaveSystem.CreaturesVolume = 100;
+            SaveSystem.WeatherVolume = 100;
+            SaveSystem.PlayerVolume = 100;
+            Raylib.SetMasterVolume(1.0f);
+            SaveSystem.SaveSettings();
+        }
+
+        if (Button(w / 2f + 10f, bottomY, 200f, 44f, "Готово", true)) {
             InAudioScreen = false;
             SaveSystem.SaveSettings();
         }
@@ -753,7 +811,13 @@ public static partial class Screens {
     public static PauseAction DrawPause(GameSession session) {
         int w = Ui.Vw, h = Ui.Vh;
         Raylib.DrawRectangleGradientV(0, 0, w, h, new Color(10, 14, 22, 170), new Color(5, 7, 12, 220));
-        Fonts.DrawTitle3D("МЕНЮ ПАУЗЫ", w / 2f, h * 0.16f, 52f);
+
+        bool isClient = GameClient.Active != null;
+        bool isHost = GameServer.Active != null;
+        bool isMultiplayer = isClient || isHost;
+
+        string title = isMultiplayer ? (isClient ? "СЕТЕВАЯ ИГРА (КЛИЕНТ)" : "СЕТЕВАЯ ИГРА (СЕРВЕР LAN)") : "МЕНЮ ПАУЗЫ";
+        Fonts.DrawTitle3D(title, w / 2f, h * 0.16f, 44f);
 
         var action = PauseAction.None;
         float cy = h * 0.32f;
@@ -761,10 +825,19 @@ public static partial class Screens {
         float btnH = 48f;
         float gapY = 12f;
 
-        if (Button(w / 2f - btnW / 2f, cy, btnW, btnH, "Продолжить игру", true)) action = PauseAction.Resume;
-        if (Button(w / 2f - btnW / 2f, cy + btnH + gapY, btnW, btnH, "Открыть для сети...", true)) action = PauseAction.OpenToLan;
-        if (Button(w / 2f - btnW / 2f, cy + (btnH + gapY) * 2f, btnW, btnH, "Настройки...", true)) action = PauseAction.Settings;
-        if (Button(w / 2f - btnW / 2f, cy + (btnH + gapY) * 3f, btnW, btnH, "Сохранить и выйти", true)) action = PauseAction.SaveAndExit;
+        if (Button(w / 2f - btnW / 2f, cy, btnW, btnH, "Вернуться в игру", true)) action = PauseAction.Resume;
+
+        if (!isMultiplayer) {
+            // Одиночная игра: можно открыть для сети
+            if (Button(w / 2f - btnW / 2f, cy + btnH + gapY, btnW, btnH, "Открыть для сети...", true)) action = PauseAction.OpenToLan;
+            if (Button(w / 2f - btnW / 2f, cy + (btnH + gapY) * 2f, btnW, btnH, "Настройки...", true)) action = PauseAction.Settings;
+            if (Button(w / 2f - btnW / 2f, cy + (btnH + gapY) * 3f, btnW, btnH, "Сохранить и выйти в меню", true)) action = PauseAction.SaveAndExit;
+        } else {
+            // В сетевой игре: кнопки "Открыть для сети..." нет
+            if (Button(w / 2f - btnW / 2f, cy + btnH + gapY, btnW, btnH, "Настройки...", true)) action = PauseAction.Settings;
+            string exitText = isClient ? "Отключиться от сервера" : "Остановить LAN и выйти";
+            if (Button(w / 2f - btnW / 2f, cy + (btnH + gapY) * 2f, btnW, btnH, exitText, true)) action = PauseAction.SaveAndExit;
+        }
         return action;
     }
 
@@ -991,14 +1064,7 @@ public static partial class Screens {
 
             if (session.Player.Armor[a] is { } ae && ae.Quantity > 0) {
                 Hud.DrawItemIcon(ae.Item.Definition, new Rectangle(armorX + 3f, ay + 3f, slot - 6f, slot - 6f), 1f);
-                int maxDur = GameData.GetMaxArmorDurability(ae.Item.Definition.Id);
-                if (maxDur > 0 && ae.Item.Durability < maxDur) {
-                    float frac = Math.Clamp((float)ae.Item.Durability / maxDur, 0f, 1f);
-                    float bw = slot - 8f;
-                    Raylib.DrawRectangle((int)(armorX + 4), (int)(ay + slot - 6), (int)bw, 3, new Color(20, 20, 25, 190));
-                    var barCol = frac > 0.5f ? new Color(90, 220, 120, 255) : frac > 0.25f ? new Color(240, 200, 70, 255) : new Color(235, 75, 60, 255);
-                    Raylib.DrawRectangle((int)(armorX + 4), (int)(ay + slot - 6), (int)(bw * frac), 3, barCol);
-                }
+                Hud.DrawItemDurability(ae.Item, aRect);
             } else {
                 Fonts.DrawCentered(armorLabels[a], armorX + slot / 2f, ay + slot / 2f - 6f, 11f, new Color(130, 140, 155, 130));
             }
@@ -1022,6 +1088,7 @@ public static partial class Screens {
             if (session.Player.OffhandEntry.Value.Quantity > 1) {
                 Fonts.DrawShadowed($"×{session.Player.OffhandEntry.Value.Quantity}", offhandX + 3f, offhandY + slot - 18f, 14f, Color.White);
             }
+            Hud.DrawItemDurability(session.Player.OffhandEntry.Value.Item, offhandRec);
         } else {
             Fonts.DrawCentered("2-я рука", offhandX + slot / 2f, offhandY + slot / 2f - 6f, 10f, new Color(130, 140, 155, 130));
         }
@@ -1139,6 +1206,7 @@ public static partial class Screens {
                 if (entry.Value.Quantity > 1) {
                     Fonts.DrawShadowed($"×{entry.Value.Quantity}", x + 4f, y + 32f, 15f, Color.White);
                 }
+                Hud.DrawItemDurability(entry.Value.Item, rect);
             }
         }
         _ = session;
@@ -1909,14 +1977,6 @@ public static partial class Screens {
             return;
         }
 
-        // Проверяем наличие ингредиентов
-        foreach (var (reqItem, reqCount) in recipe.Ingredients) {
-            if (inv.CountOf(reqItem) < reqCount) {
-                session.AddMessage($"Не хватает: {reqItem.Name} ({inv.CountOf(reqItem)}/{reqCount})");
-                return;
-            }
-        }
-
         // Возвращаем текущие предметы из сетки в инвентарь или выбрасываем
         for (int i = 0; i < grid.Length; i++) {
             if (grid[i].HasValue && grid[i]!.Value.Quantity > 0) {
@@ -1928,6 +1988,14 @@ public static partial class Screens {
                     });
                 }
                 grid[i] = null;
+            }
+        }
+
+        // Проверяем наличие ингредиентов
+        foreach (var (reqItem, reqCount) in recipe.Ingredients) {
+            if (inv.CountOf(reqItem) < reqCount) {
+                session.AddMessage($"Не хватает: {reqItem.Name} ({inv.CountOf(reqItem)}/{reqCount})");
+                return;
             }
         }
 
@@ -2307,20 +2375,20 @@ public static partial class Screens {
         Fonts.DrawCentered("Хранилище предметов · ЛКМ / ПКМ", w / 2f, py + 34f, 13f, new Color(90, 90, 90, 255));
 
         // Кнопки быстрой сортировки и быстрого складывания
-        float btnSortW = 108f, btnSortH = 22f;
+        float btnSortW = 104f, btnSortH = 22f;
         var sortBtnRect = new Rectangle(px + panelW - 16f - btnSortW, py + 28f, btnSortW, btnSortH);
-        var stackBtnRect = new Rectangle(sortBtnRect.X - 114f, py + 28f, 110f, btnSortH);
+        var stackBtnRect = new Rectangle(sortBtnRect.X - 110f, py + 28f, 106f, btnSortH);
 
         bool sortHov = Raylib.CheckCollisionPointRec(mouse, sortBtnRect);
         bool stackHov = Raylib.CheckCollisionPointRec(mouse, stackBtnRect);
 
         Raylib.DrawRectangleRounded(sortBtnRect, 0.2f, 4, sortHov ? new Color(60, 75, 95, 255) : new Color(40, 48, 62, 220));
         Raylib.DrawRectangleRoundedLinesEx(sortBtnRect, 0.2f, 4, 1f, sortHov ? new Color(120, 180, 255, 255) : new Color(70, 85, 110, 200));
-        Fonts.DrawCentered("⚡ Сортировка", sortBtnRect.X + btnSortW / 2f, sortBtnRect.Y + 4f, 11f, sortHov ? Color.White : new Color(200, 215, 235, 220));
+        Fonts.DrawCentered("Сортировка", sortBtnRect.X + btnSortW / 2f, sortBtnRect.Y + 4f, 12f, sortHov ? Color.White : new Color(200, 215, 235, 220));
 
         Raylib.DrawRectangleRounded(stackBtnRect, 0.2f, 4, stackHov ? new Color(50, 100, 70, 255) : new Color(32, 65, 45, 220));
         Raylib.DrawRectangleRoundedLinesEx(stackBtnRect, 0.2f, 4, 1f, stackHov ? new Color(100, 220, 130, 255) : new Color(60, 120, 80, 200));
-        Fonts.DrawCentered("📥 Сложить всё", stackBtnRect.X + 55f, stackBtnRect.Y + 4f, 11f, stackHov ? Color.White : new Color(200, 240, 210, 220));
+        Fonts.DrawCentered("Сложить всё", stackBtnRect.X + stackBtnRect.Width / 2f, stackBtnRect.Y + 4f, 12f, stackHov ? Color.White : new Color(200, 240, 210, 220));
 
         if (leftClick) {
             if (sortHov) {
@@ -2351,6 +2419,7 @@ public static partial class Screens {
                     Hud.DrawItemIcon(entry.Value.Item.Definition, new Rectangle(sx + 3f, sy + 3f, slotSz - 6f, slotSz - 6f), 1f);
                     if (entry.Value.Quantity > 1)
                         Fonts.DrawShadowed($"×{entry.Value.Quantity}", sx + 4f, sy + slotSz - 16f, 14f, Color.White);
+                    Hud.DrawItemDurability(entry.Value.Item, rect);
                 }
 
                 if ((leftClick || rightClick) && hov) {
@@ -2434,49 +2503,79 @@ public static partial class Screens {
 
     private static void SortContainer(VoxelFrame.Core.Inventory.Container container) {
         var items = new List<ItemEntry>();
-        for (int i = 0; i < container.Capacity; i++) {
+        int limit = Math.Min(27, container.Capacity);
+        for (int i = 0; i < limit; i++) {
             if (container.Slots[i] is { } entry && entry.Quantity > 0) {
                 items.Add(entry);
+                container.Slots[i] = null;
             }
         }
-        container.Clear();
-        items.Sort((a, b) => a.Item.Definition.Id.CompareTo(b.Item.Definition.Id));
-        foreach (var entry in items) {
-            container.TryInsert(entry.Item, entry.Quantity);
+        // Уплотняем одинаковые предметы до MaxStack
+        var merged = new List<ItemEntry>();
+        foreach (var entry in items.OrderBy(e => e.Item.Definition.Id)) {
+            int toAdd = entry.Quantity;
+            for (int j = 0; j < merged.Count && toAdd > 0; j++) {
+                if (merged[j].Item.Definition.Id == entry.Item.Definition.Id && merged[j].Quantity < merged[j].Item.Definition.MaxStack) {
+                    int space = merged[j].Item.Definition.MaxStack - merged[j].Quantity;
+                    int add = Math.Min(space, toAdd);
+                    merged[j] = merged[j] with { Quantity = merged[j].Quantity + add };
+                    toAdd -= add;
+                }
+            }
+            if (toAdd > 0) {
+                merged.Add(entry with { Quantity = toAdd });
+            }
+        }
+        for (int i = 0; i < merged.Count && i < limit; i++) {
+            container.InsertAt(i, merged[i]);
         }
         SoundSystem.PlayPop();
     }
 
     private static void QuickStackToChest(VoxelFrame.Core.Inventory.Container pInv, VoxelFrame.Core.Inventory.Container chestInv, GameSession session) {
-        var existingIds = new HashSet<ushort>();
-        for (int i = 0; i < chestInv.Capacity; i++) {
-            if (chestInv.Slots[i] is { } ce && ce.Quantity > 0) {
-                existingIds.Add(ce.Item.Definition.Id);
-            }
-        }
-
         int moved = 0;
-        for (int i = 9; i < pInv.Capacity; i++) {
-            if (pInv.Slots[i] is { } pe && pe.Quantity > 0 && existingIds.Contains(pe.Item.Definition.Id)) {
-                int qty = pe.Quantity;
-                if (chestInv.TryInsert(pe.Item, qty)) {
-                    moved += qty;
-                    pInv.Slots[i] = null;
-                } else {
-                    for (int q = qty - 1; q >= 1; q--) {
-                        if (chestInv.TryInsert(pe.Item, q)) {
-                            moved += q;
-                            pInv.Slots[i] = pe with { Quantity = qty - q };
-                            break;
-                        }
-                    }
+        bool shift = Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift);
+        int startSlot = shift ? 0 : 9; // без Shift не трогаем хотбар
+        int chestCapacity = Math.Min(27, chestInv.Capacity);
+
+        for (int i = startSlot; i < pInv.Capacity; i++) {
+            if (pInv.Slots[i] is not { } pe || pe.Quantity <= 0) continue;
+            var item = pe.Item;
+            int remaining = pe.Quantity;
+
+            // 1. Сначала объединяем с существующими стаками в сундуке (0..26)
+            for (int ci = 0; ci < chestCapacity && remaining > 0; ci++) {
+                if (chestInv.Slots[ci] is { } cs && cs.Item.Definition.Id == item.Definition.Id && cs.Quantity < cs.Item.Definition.MaxStack) {
+                    int space = cs.Item.Definition.MaxStack - cs.Quantity;
+                    int add = Math.Min(space, remaining);
+                    chestInv.InsertAt(ci, cs with { Quantity = cs.Quantity + add });
+                    remaining -= add;
+                    moved += add;
                 }
+            }
+
+            // 2. Затем кладем остаток в первые свободные пустые слоты сундука (0..26)
+            for (int ci = 0; ci < chestCapacity && remaining > 0; ci++) {
+                if (chestInv.Slots[ci] == null) {
+                    int add = Math.Min(item.Definition.MaxStack, remaining);
+                    chestInv.InsertAt(ci, new ItemEntry(item, add));
+                    remaining -= add;
+                    moved += add;
+                }
+            }
+
+            if (remaining <= 0) {
+                pInv.RemoveAt(i);
+            } else if (remaining < pe.Quantity) {
+                pInv.InsertAt(i, pe with { Quantity = remaining });
             }
         }
 
         if (moved > 0) {
             SoundSystem.PlayPop();
             session.AddMessage($"Сложено в сундук: {moved} предм.");
+        } else {
+            session.AddMessage("Нет предметов для перемещения!");
         }
     }
 
@@ -2644,12 +2743,18 @@ public static partial class Screens {
         if (!Held.HasValue || Held.Value.Quantity <= 0) return;
         var held = Held.Value;
         var mouse = Ui.Mouse();
-        Hud.DrawItemIcon(held.Item.Definition, new Rectangle(mouse.X - 14f, mouse.Y - 14f, 28f, 28f), 1f);
+        var heldRec = new Rectangle(mouse.X - 14f, mouse.Y - 14f, 28f, 28f);
+        Hud.DrawItemIcon(held.Item.Definition, heldRec, 1f);
         if (held.Quantity > 1)
             Fonts.Draw($"×{held.Quantity}", mouse.X - 14f, mouse.Y + 8f, 15f, Color.White);
+        Hud.DrawItemDurability(held.Item, heldRec);
     }
 
-    public static void DrawItemTooltip(ItemDefinition def, System.Numerics.Vector2 mouse) {
+    public static void DrawItemTooltip(ItemInstance item, System.Numerics.Vector2 mouse) {
+        DrawItemTooltip(item.Definition, mouse, item.Durability);
+    }
+
+    public static void DrawItemTooltip(ItemDefinition def, System.Numerics.Vector2 mouse, int currentDurability = -1) {
         string title = def.Name;
         ushort itemId = def.Id;
 
@@ -2661,15 +2766,17 @@ public static partial class Screens {
         } else if (GameData.GetArmorPoints(itemId) > 0) {
             int pts = GameData.GetArmorPoints(itemId);
             int maxDur = GameData.GetMaxArmorDurability(itemId);
+            int cur = currentDurability >= 0 ? currentDurability : maxDur;
             subtext1 = $"+{pts} Очков брони";
-            subtext2 = $"Прочность: {maxDur} / {maxDur}";
+            subtext2 = $"Прочность: {cur} / {maxDur}";
         } else if (GameData.GetToolTier(itemId) > 0) {
             float dmg = GameData.GetWeaponDamage(itemId);
             float cd = GameData.GetWeaponCooldown(itemId);
             float spd = cd > 0 ? 1f / cd : 4f;
             int maxDur = GameData.GetMaxToolDurability(itemId);
+            int cur = currentDurability >= 0 ? currentDurability : maxDur;
             subtext1 = $"Урон: {dmg} HP · Скорость: {spd:0.#}";
-            subtext2 = $"Прочность: {maxDur} / {maxDur}";
+            subtext2 = $"Прочность: {cur} / {maxDur}";
         } else if (GameData.TryGetBlockByItem(itemId, out var blk) && blk != null) {
             subtext1 = blk.IsSolid ? "Твёрдый строительный блок" : "Декоративный объект";
         }
@@ -2679,7 +2786,7 @@ public static partial class Screens {
             var id when id == GameData.GoldenAppleItem.Id || id == GameData.TotemItem.Id || id == GameData.GoldSwordItem.Id => new Color(255, 220, 70, 255),
             var id when id == GameData.DiamondSwordItem.Id || id == GameData.DiamondPickaxeItem.Id || id == GameData.DiamondAxeItem.Id || id == GameData.DiamondShovelItem.Id || id == GameData.DiamondHoeItem.Id ||
                         id == GameData.DiamondHelmetItem.Id || id == GameData.DiamondChestplateItem.Id || id == GameData.DiamondLeggingsItem.Id || id == GameData.DiamondBootsItem.Id => new Color(100, 235, 255, 255),
-            var id when id == GameData.EnchantedBookItem.Id || id == GameData.MusicDiscItem.Id || id == GameData.DesertArtifactItem.Id || id == GameData.SwampArtifactItem.Id || id == GameData.NetherArtifactItem.Id || id == GameData.VoidKeyItem.Id || id == GameData.NetherTotemItem.Id || id == GameData.DesertTotemItem.Id || id == GameData.SwampTotemItem.Id => new Color(220, 130, 255, 255),
+            var id when id == GameData.MusicDiscItem.Id || id == GameData.DesertArtifactItem.Id || id == GameData.SwampArtifactItem.Id || id == GameData.NetherArtifactItem.Id || id == GameData.VoidKeyItem.Id || id == GameData.NetherTotemItem.Id || id == GameData.DesertTotemItem.Id || id == GameData.SwampTotemItem.Id => new Color(220, 130, 255, 255),
             var id when id == GameData.IronSwordItem.Id || id == GameData.IronPickaxeItem.Id || id == GameData.IronAxeItem.Id || id == GameData.IronShovelItem.Id || id == GameData.IronHoeItem.Id ||
                         id == GameData.IronHelmetItem.Id || id == GameData.IronChestplateItem.Id || id == GameData.IronLeggingsItem.Id || id == GameData.IronBootsItem.Id => new Color(220, 230, 240, 255),
             _ => new Color(255, 255, 255, 255)
