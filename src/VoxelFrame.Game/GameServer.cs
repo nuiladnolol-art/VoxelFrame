@@ -31,6 +31,7 @@ public sealed class ConnectedClient {
     public float ArmSwingTimer { get; set; }
     public float HurtTimer { get; set; }
     public string SkinName { get; set; } = "steve";
+    public Dimension Dimension { get; set; } = Dimension.Overworld;
     public Player PlayerData { get; set; } = new();
 
     private readonly object _sendLock = new();
@@ -176,14 +177,15 @@ public sealed class GameServer : IDisposable {
                 _session.Player.Name,
                 _session.Player.Position,
                 _session.Player.Yaw,
-                _session.Player.Pitch
+                _session.Player.Pitch,
+                (byte)_session.World.Dimension
             );
             client.Send(hostJoin);
 
             // Inform about other connected clients
             foreach (var other in _clients.Values) {
                 if (other.Id != clientId) {
-                    var otherJoin = NetworkProtocol.WritePlayerJoin(other.Id, other.Name, other.Position, other.Yaw, other.Pitch);
+                    var otherJoin = NetworkProtocol.WritePlayerJoin(other.Id, other.Name, other.Position, other.Yaw, other.Pitch, (byte)other.Dimension);
                     client.Send(otherJoin);
                 }
             }
@@ -209,8 +211,9 @@ public sealed class GameServer : IDisposable {
                                 client.Pitch = client.PlayerData.Pitch;
                                 client.TargetPitch = client.PlayerData.Pitch;
                                 client.Health = client.PlayerData.Health;
+                                client.Dimension = client.PlayerData.Dimension;
 
-                                var pDataSync = NetworkProtocol.WritePlayerDataSync(client.PlayerData);
+                                var pDataSync = NetworkProtocol.WritePlayerDataSync(client.PlayerData, (byte)client.Dimension);
                                 client.Send(pDataSync);
                             }
                         }
@@ -218,7 +221,7 @@ public sealed class GameServer : IDisposable {
                         _session.AddChatMessage($"Игрок {name} присоединился к игре!", Raylib_cs.Color.Yellow);
                         _session.AddMessage($"Игрок {name} вошел в мир");
                         // Broadcast new player to all clients
-                        var joinPacket = NetworkProtocol.WritePlayerJoin(clientId, name, client.Position, client.Yaw, client.Pitch);
+                        var joinPacket = NetworkProtocol.WritePlayerJoin(clientId, name, client.Position, client.Yaw, client.Pitch, (byte)client.Dimension);
                         Broadcast(joinPacket, exceptClientId: clientId);
                         break;
                     }
@@ -237,6 +240,9 @@ public sealed class GameServer : IDisposable {
                         float hunger = reader.ReadSingle();
                         float sat = reader.ReadSingle();
                         int slot = reader.ReadInt32();
+                        byte invDim = reader.ReadByte();
+                        client.Dimension = (Dimension)invDim;
+                        client.PlayerData.Dimension = (Dimension)invDim;
 
                         client.PlayerData.Position = new Vector3(px, py, pz);
                         client.PlayerData.Yaw = yaw;
@@ -301,6 +307,8 @@ public sealed class GameServer : IDisposable {
                         float pitch = reader.ReadSingle();
                         byte flags = reader.ReadByte();
                         float hp = reader.ReadSingle();
+                        byte dim = reader.ReadByte();
+                        client.Dimension = (Dimension)dim;
 
                         var newPos = new Vector3(x, y, z);
                         if (Vector3.DistanceSquared(client.Position, newPos) > 400f || client.Position == Vector3.Zero) {
@@ -315,7 +323,7 @@ public sealed class GameServer : IDisposable {
                         client.Health = hp;
 
                         // Broadcast movement to all other clients
-                        var moveP = NetworkProtocol.WritePlayerMovement(id, client.Position, yaw, pitch, client.IsMoving, client.IsSneaking, client.IsFlying, hp);
+                        var moveP = NetworkProtocol.WritePlayerMovement(id, client.Position, yaw, pitch, client.IsMoving, client.IsSneaking, client.IsFlying, hp, dim);
                         Broadcast(moveP, exceptClientId: clientId);
                         break;
                     }
@@ -360,18 +368,20 @@ public sealed class GameServer : IDisposable {
                         ushort typeId = reader.ReadUInt16();
                         byte mask = reader.ReadByte();
                         bool isBreak = reader.ReadBoolean();
+                        byte dim = reader.ReadByte();
 
                         EnqueueMainThreadAction(() => {
+                            var targetWorld = _session.GetWorld((Dimension)dim);
                             var cell = new Vec3i(bx, by, bz);
                             if (isBreak) {
-                                _session.World.RemoveBlock(cell);
+                                targetWorld.RemoveBlock(cell);
                             } else {
-                                _session.World.PlacePlacedBlock(cell, GameData.GetBlock(typeId), mask);
+                                targetWorld.PlacePlacedBlock(cell, GameData.GetBlock(typeId), mask);
                             }
                         });
 
                         // Broadcast to other clients
-                        var blockP = NetworkProtocol.WriteBlockChange(bx, by, bz, typeId, mask, isBreak);
+                        var blockP = NetworkProtocol.WriteBlockChange(bx, by, bz, typeId, mask, isBreak, dim);
                         Broadcast(blockP, exceptClientId: clientId);
                         break;
                     }
@@ -379,6 +389,7 @@ public sealed class GameServer : IDisposable {
                         int cx = reader.ReadInt32();
                         int cy = reader.ReadInt32();
                         int cz = reader.ReadInt32();
+                        byte dim = reader.ReadByte();
                         int cCount = reader.ReadInt32();
                         var items = new List<(int idx, ushort id, int qty, int dur)>();
                         for (int i = 0; i < cCount; i++) {
@@ -386,8 +397,9 @@ public sealed class GameServer : IDisposable {
                         }
 
                         EnqueueMainThreadAction(() => {
+                            var targetWorld = _session.GetWorld((Dimension)dim);
                             var cPos = new Vec3i(cx, cy, cz);
-                            var chest = _session.World.GetOrCreateChest(cPos);
+                            var chest = targetWorld.GetOrCreateChest(cPos);
                             for (int i = 0; i < chest.Capacity; i++) chest.RemoveAt(i);
                             foreach (var item in items) {
                                 if (GameData.Items.TryGetValue(item.id, out var def)) {
@@ -403,6 +415,7 @@ public sealed class GameServer : IDisposable {
                         using var w = new BinaryWriter(ms, Encoding.UTF8);
                         w.Write((byte)PacketType.ChestSync);
                         w.Write(cx); w.Write(cy); w.Write(cz);
+                        w.Write(dim);
                         w.Write(items.Count);
                         foreach (var item in items) {
                             w.Write(item.idx); w.Write(item.id); w.Write(item.qty); w.Write(item.dur);
@@ -473,7 +486,7 @@ public sealed class GameServer : IDisposable {
 
     public void BroadcastHostMovement(Vector3 pos, float yaw, float pitch, bool isMoving, bool isSneaking, bool isFlying, float health) {
         if (!IsRunning || ClientCount == 0) return;
-        var p = NetworkProtocol.WritePlayerMovement(1, pos, yaw, pitch, isMoving, isSneaking, isFlying, health);
+        var p = NetworkProtocol.WritePlayerMovement(1, pos, yaw, pitch, isMoving, isSneaking, isFlying, health, (byte)_session.World.Dimension);
         Broadcast(p);
     }
 
@@ -491,7 +504,7 @@ public sealed class GameServer : IDisposable {
 
     public void BroadcastHostBlockChange(int x, int y, int z, ushort blockTypeId, byte mask, bool isBreak) {
         if (!IsRunning || ClientCount == 0) return;
-        var p = NetworkProtocol.WriteBlockChange(x, y, z, blockTypeId, mask, isBreak);
+        var p = NetworkProtocol.WriteBlockChange(x, y, z, blockTypeId, mask, isBreak, (byte)_session.World.Dimension);
         Broadcast(p);
     }
 
@@ -503,7 +516,7 @@ public sealed class GameServer : IDisposable {
 
     public void BroadcastChestSync(Vec3i pos, VoxelFrame.Core.Inventory.Container container) {
         if (!IsRunning || ClientCount == 0) return;
-        var p = NetworkProtocol.WriteChestSync(pos.X, pos.Y, pos.Z, container);
+        var p = NetworkProtocol.WriteChestSync(pos.X, pos.Y, pos.Z, container, (byte)_session.World.Dimension);
         Broadcast(p);
     }
 

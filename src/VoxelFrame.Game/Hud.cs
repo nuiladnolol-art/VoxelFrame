@@ -396,20 +396,20 @@ public static class Hud {
 
         // ── СПИСОК ИГРОКОВ (TAB PLAYER LIST) В МУЛЬТИПЛЕЕРЕ ─────────────────
         if (Raylib.IsKeyDown(KeyboardKey.Tab) && (GameClient.Active != null || GameServer.Active != null)) {
-            var playerList = new System.Collections.Generic.List<(string name, float hp, bool isHost)>();
-            playerList.Add((session.Player.Name, session.Player.Health, GameServer.Active != null));
+            var playerList = new System.Collections.Generic.List<(string name, float hp, bool isHost, Dimension dim)>();
+            playerList.Add((session.Player.Name, session.Player.Health, GameServer.Active != null, session.World.Dimension));
 
             if (GameClient.Active != null) {
                 foreach (var rp in GameClient.Active.RemotePlayers) {
-                    playerList.Add((rp.Name, rp.Health, rp.Id == 1));
+                    playerList.Add((rp.Name, rp.Health, rp.Id == 1, rp.Dimension));
                 }
             } else if (GameServer.Active != null) {
                 foreach (var cl in GameServer.Active.Clients) {
-                    playerList.Add((cl.Name, cl.Health, false));
+                    playerList.Add((cl.Name, cl.Health, false, cl.Dimension));
                 }
             }
 
-            int tabW = Math.Min(400, w - 80);
+            int tabW = Math.Min(440, w - 80);
             int rowH = 26;
             int tabH = 34 + playerList.Count * rowH;
             int tabX = (w - tabW) / 2;
@@ -427,7 +427,9 @@ public static class Hud {
                 Raylib.DrawRectangleRounded(rowRect, 0.15f, 2, new Color(28, 34, 48, 180));
 
                 string prefix = p.isHost ? "👑 " : "👤 ";
-                Fonts.Draw(prefix + p.name, rowRect.X + 8f, curRowY + 4f, 14f, Color.White);
+                string dimTag = p.dim == Dimension.Nether ? " [Незер]" : (p.dim == Dimension.End ? " [Энд]" : (p.dim == Dimension.Void ? " [Бездна]" : ""));
+                Color nameCol = p.dim == Dimension.Nether ? new Color(255, 140, 100, 255) : (p.dim == Dimension.End ? new Color(200, 130, 255, 255) : Color.White);
+                Fonts.Draw(prefix + p.name + dimTag, rowRect.X + 8f, curRowY + 4f, 14f, nameCol);
 
                 float hpPct = Math.Clamp(p.hp / 20f, 0f, 1f);
                 int hpBarW = 70;

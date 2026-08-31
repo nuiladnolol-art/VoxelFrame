@@ -928,12 +928,14 @@ public sealed class WorldRenderer : IDisposable {
         // Если мы клиент — рисуем игроков, полученных от сервера
         if (GameClient.Active != null) {
             foreach (var rp in GameClient.Active.RemotePlayers) {
+                if (rp.Dimension != _session.World.Dimension) continue;
                 DrawSinglePlayerModel(camera, time, rp.Name, rp.Position, rp.Yaw, rp.Pitch, rp.IsMoving, rp.IsSneaking, rp.Health, rp.SelectedItemId, rp.ArmSwingTimer, rp.HurtTimer, rp.SkinName);
             }
         }
         // Если мы сервер/хост — рисуем подключившихся клиентов
         else if (GameServer.Active != null) {
             foreach (var cl in GameServer.Active.Clients) {
+                if (cl.Dimension != _session.World.Dimension) continue;
                 DrawSinglePlayerModel(camera, time, cl.Name, cl.Position, cl.Yaw, cl.Pitch, cl.IsMoving, cl.IsSneaking, cl.Health, cl.SelectedItemId, cl.ArmSwingTimer, cl.HurtTimer, cl.SkinName);
             }
         }
@@ -1035,10 +1037,12 @@ public sealed class WorldRenderer : IDisposable {
     public void DrawRemotePlayerNameTags(Camera3D camera) {
         if (GameClient.Active != null) {
             foreach (var rp in GameClient.Active.RemotePlayers) {
+                if (rp.Dimension != _session.World.Dimension) continue;
                 DrawPlayerNameTag2D(camera, rp.Name, rp.Position, rp.IsSneaking, rp.Health);
             }
         } else if (GameServer.Active != null) {
             foreach (var cl in GameServer.Active.Clients) {
+                if (cl.Dimension != _session.World.Dimension) continue;
                 DrawPlayerNameTag2D(camera, cl.Name, cl.Position, cl.IsSneaking, cl.Health);
             }
         }

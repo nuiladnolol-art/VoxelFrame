@@ -344,6 +344,24 @@ public sealed class GameSession {
                 AddMessage("Вы вернулись в Обычный мир!");
             }
         }
+        Player.Dimension = World.Dimension;
+    }
+
+    public GameWorld GetWorld(Dimension dim) {
+        if (dim == Dimension.Nether) {
+            if (NetherWorld == null) NetherWorld = new GameWorld(MasterSeed ^ 0x1337BEEF) { Dimension = Dimension.Nether };
+            return NetherWorld;
+        }
+        if (dim == Dimension.End) {
+            if (EndWorld == null) EndWorld = new GameWorld(MasterSeed ^ 0x2E1D0FF) { Dimension = Dimension.End };
+            return EndWorld;
+        }
+        if (dim == Dimension.Void) {
+            if (VoidWorld == null) VoidWorld = new GameWorld(MasterSeed ^ 0x4E19D2B) { Dimension = Dimension.Void };
+            return VoidWorld;
+        }
+        if (OverworldWorld == null && World.Dimension == Dimension.Overworld) return World;
+        return OverworldWorld ?? World;
     }
 
     /// <summary>Открыт ли древний обелиск знаний на побочном острове Энда.</summary>
@@ -355,6 +373,7 @@ public sealed class GameSession {
             VoidWorld = new GameWorld(World.Seed ^ 0x4E19D2B) { Dimension = Dimension.Void };
         }
         World = VoidWorld;
+        Player.Dimension = Dimension.Void;
         const int bedrockFloorY = 12;
         World.EnsureLoadedAroundSync(new Vector3(0.5f, bedrockFloorY, -14f), 2);
         Player.Position = new Vector3(0.5f, bedrockFloorY + 0.5f, -14f);

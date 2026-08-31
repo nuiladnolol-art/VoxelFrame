@@ -29,8 +29,9 @@ public sealed class RemotePlayer {
     public float ArmSwingTimer { get; set; }
     public float HurtTimer { get; set; }
     public string SkinName { get; set; } = "steve";
+    public Dimension Dimension { get; set; } = Dimension.Overworld;
 
-    public RemotePlayer(int id, string name, Vector3 pos, float yaw, float pitch) {
+    public RemotePlayer(int id, string name, Vector3 pos, float yaw, float pitch, Dimension dimension = Dimension.Overworld) {
         Id = id;
         Name = name;
         Position = pos;
@@ -39,6 +40,7 @@ public sealed class RemotePlayer {
         TargetYaw = yaw;
         Pitch = pitch;
         TargetPitch = pitch;
+        Dimension = dimension;
     }
 
     public void Update(float dt) {
@@ -163,9 +165,10 @@ public sealed class GameClient : IDisposable {
                         float z = reader.ReadSingle();
                         float yaw = reader.ReadSingle();
                         float pitch = reader.ReadSingle();
+                        byte dim = reader.ReadByte();
 
                         if (id != LocalClientId) {
-                            _remotePlayers[id] = new RemotePlayer(id, name, new Vector3(x, y, z), yaw, pitch);
+                            _remotePlayers[id] = new RemotePlayer(id, name, new Vector3(x, y, z), yaw, pitch, (Dimension)dim);
                             _session?.AddChatMessage($"Игрок {name} вошёл в мир.", Raylib_cs.Color.Yellow);
                             _session?.AddMessage($"Игрок {name} вошёл в мир");
                         }
@@ -188,6 +191,7 @@ public sealed class GameClient : IDisposable {
                         float pitch = reader.ReadSingle();
                         byte flags = reader.ReadByte();
                         float hp = reader.ReadSingle();
+                        byte dim = reader.ReadByte();
 
                         if (id != LocalClientId && _remotePlayers.TryGetValue(id, out var rp)) {
                             var newPos = new Vector3(x, y, z);
@@ -201,6 +205,7 @@ public sealed class GameClient : IDisposable {
                             rp.IsSneaking = (flags & 2) != 0;
                             rp.IsFlying = (flags & 4) != 0;
                             rp.Health = hp;
+                            rp.Dimension = (Dimension)dim;
                         }
                         break;
                     }
@@ -242,16 +247,18 @@ public sealed class GameClient : IDisposable {
                         ushort typeId = reader.ReadUInt16();
                         byte mask = reader.ReadByte();
                         bool isBreak = reader.ReadBoolean();
+                        byte dim = reader.ReadByte();
 
                         if (_session != null) {
+                            var targetWorld = _session.GetWorld((Dimension)dim);
                             var cell = new Vec3i(bx, by, bz);
                             var cellPos = new Vector3(bx + 0.5f, by + 0.5f, bz + 0.5f);
                             if (isBreak) {
-                                _session.World.RemoveBlock(cell);
-                                SoundSystem.PlayDigAt(cellPos, typeId);
+                                targetWorld.RemoveBlock(cell);
+                                if (_session.World.Dimension == (Dimension)dim) SoundSystem.PlayDigAt(cellPos, typeId);
                             } else {
-                                _session.World.PlacePlacedBlock(cell, GameData.GetBlock(typeId), mask);
-                                SoundSystem.PlayPlaceAt(cellPos);
+                                targetWorld.PlacePlacedBlock(cell, GameData.GetBlock(typeId), mask);
+                                if (_session.World.Dimension == (Dimension)dim) SoundSystem.PlayPlaceAt(cellPos);
                             }
                         }
                         break;
@@ -275,6 +282,7 @@ public sealed class GameClient : IDisposable {
                         float hunger = reader.ReadSingle();
                         float sat = reader.ReadSingle();
                         int slot = reader.ReadInt32();
+                        byte pDim = reader.ReadByte();
 
                         var pData = new Player {
                             Position = new Vector3(px, py, pz),
@@ -283,7 +291,8 @@ public sealed class GameClient : IDisposable {
                             Health = hp,
                             Hunger = hunger,
                             Saturation = sat,
-                            SelectedSlot = slot
+                            SelectedSlot = slot,
+                            Dimension = (Dimension)pDim
                         };
 
                         int invCount = reader.ReadInt32();
@@ -346,6 +355,7 @@ public sealed class GameClient : IDisposable {
                         int cx = reader.ReadInt32();
                         int cy = reader.ReadInt32();
                         int cz = reader.ReadInt32();
+                        byte dim = reader.ReadByte();
                         int cCount = reader.ReadInt32();
                         var items = new List<(int idx, ushort id, int qty, int dur)>();
                         for (int i = 0; i < cCount; i++) {
@@ -353,8 +363,9 @@ public sealed class GameClient : IDisposable {
                         }
 
                         if (_session != null) {
+                            var targetWorld = _session.GetWorld((Dimension)dim);
                             var cPos = new Vec3i(cx, cy, cz);
-                            var chest = _session.World.GetOrCreateChest(cPos);
+                            var chest = targetWorld.GetOrCreateChest(cPos);
                             for (int i = 0; i < chest.Capacity; i++) chest.RemoveAt(i);
                             foreach (var item in items) {
                                 if (GameData.Items.TryGetValue(item.id, out var def)) {
@@ -404,8 +415,8 @@ public sealed class GameClient : IDisposable {
         }
     }
 
-    public void SendMovement(Vector3 pos, float yaw, float pitch, bool isMoving, bool isSneaking, bool isFlying, float health) {
-        var data = NetworkProtocol.WritePlayerMovement(LocalClientId, pos, yaw, pitch, isMoving, isSneaking, isFlying, health);
+    public void SendMovement(Vector3 pos, float yaw, float pitch, bool isMoving, bool isSneaking, bool isFlying, float health, byte dimension = 0) {
+        var data = NetworkProtocol.WritePlayerMovement(LocalClientId, pos, yaw, pitch, isMoving, isSneaking, isFlying, health, dimension);
         SendPacket(data);
     }
 
@@ -419,8 +430,8 @@ public sealed class GameClient : IDisposable {
         SendPacket(data);
     }
 
-    public void SendBlockChange(int x, int y, int z, ushort blockTypeId, byte mask, bool isBreak) {
-        var data = NetworkProtocol.WriteBlockChange(x, y, z, blockTypeId, mask, isBreak);
+    public void SendBlockChange(int x, int y, int z, ushort blockTypeId, byte mask, bool isBreak, byte dimension = 0) {
+        var data = NetworkProtocol.WriteBlockChange(x, y, z, blockTypeId, mask, isBreak, dimension);
         SendPacket(data);
     }
 
@@ -429,17 +440,20 @@ public sealed class GameClient : IDisposable {
         SendPacket(data);
     }
 
-    public void SendInventoryUpdate(Player player) {
-        var data = NetworkProtocol.WritePlayerInventoryUpdate(player);
+    public void SendInventoryUpdate(Player player, byte dimension = 0) {
+        var data = NetworkProtocol.WritePlayerInventoryUpdate(player, dimension);
         SendPacket(data);
     }
 
-    public void SendChestSync(Vec3i pos, VoxelFrame.Core.Inventory.Container container) {
-        var data = NetworkProtocol.WriteChestSync(pos.X, pos.Y, pos.Z, container);
+    public void SendChestSync(Vec3i pos, VoxelFrame.Core.Inventory.Container container, byte dimension = 0) {
+        var data = NetworkProtocol.WriteChestSync(pos.X, pos.Y, pos.Z, container, dimension);
         SendPacket(data);
     }
 
     public static void ApplyPlayerDataToSession(GameSession session, Player data) {
+        if (data.Dimension != session.World.Dimension) {
+            session.SwitchDimension(data.Dimension);
+        }
         session.Player.Position = data.Position;
         session.Player.Yaw = data.Yaw;
         session.Player.Pitch = data.Pitch;
@@ -447,6 +461,7 @@ public sealed class GameClient : IDisposable {
         session.Player.Hunger = data.Hunger;
         session.Player.Saturation = data.Saturation;
         session.Player.SelectedSlot = data.SelectedSlot;
+        session.Player.Dimension = data.Dimension;
 
         for (int i = 0; i < session.Player.Inventory.Capacity; i++) session.Player.Inventory.RemoveAt(i);
         for (int i = 0; i < data.Inventory.Capacity; i++) {

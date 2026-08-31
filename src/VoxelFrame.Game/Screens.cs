@@ -2354,7 +2354,7 @@ public static partial class Screens {
     }
 
     private static void NotifyChestChanged(GameSession session, Container chest) {
-        if (GameClient.Active != null) GameClient.Active.SendChestSync(session.ActiveChestPos, chest);
+        if (GameClient.Active != null) GameClient.Active.SendChestSync(session.ActiveChestPos, chest, (byte)session.World.Dimension);
         if (GameServer.Active != null) GameServer.Active.BroadcastChestSync(session.ActiveChestPos, chest);
     }
 

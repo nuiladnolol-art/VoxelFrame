@@ -369,11 +369,11 @@ internal static class Program {
             GameClient.Active?.UpdateRemotePlayers(dt);
             GameServer.Active?.Update(dt);
             if (GameClient.Active != null) {
-                GameClient.Active.SendMovement(session.Player.Position, session.Player.Yaw, session.Player.Pitch, session.Player.IsMoving, session.Player.IsCrouching, session.Player.IsFlying, session.Player.Health);
+                GameClient.Active.SendMovement(session.Player.Position, session.Player.Yaw, session.Player.Pitch, session.Player.IsMoving, session.Player.IsCrouching, session.Player.IsFlying, session.Player.Health, (byte)session.World.Dimension);
                 clientInvSyncTimer += dt;
                 if (clientInvSyncTimer >= 2.0f) {
                     clientInvSyncTimer = 0f;
-                    GameClient.Active.SendInventoryUpdate(session.Player);
+                    GameClient.Active.SendInventoryUpdate(session.Player, (byte)session.World.Dimension);
                 }
             }
             if (GameServer.Active != null) {

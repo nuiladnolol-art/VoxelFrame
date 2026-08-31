@@ -59,7 +59,7 @@ public static class NetworkProtocol {
         return ms.ToArray();
     }
 
-    public static byte[] WritePlayerJoin(int clientId, string playerName, Vector3 pos, float yaw, float pitch) {
+    public static byte[] WritePlayerJoin(int clientId, string playerName, Vector3 pos, float yaw, float pitch, byte dimension = 0) {
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms, Encoding.UTF8);
         w.Write((byte)PacketType.PlayerJoin);
@@ -67,6 +67,7 @@ public static class NetworkProtocol {
         w.Write(playerName);
         w.Write(pos.X); w.Write(pos.Y); w.Write(pos.Z);
         w.Write(yaw); w.Write(pitch);
+        w.Write(dimension);
         return ms.ToArray();
     }
 
@@ -78,7 +79,7 @@ public static class NetworkProtocol {
         return ms.ToArray();
     }
 
-    public static byte[] WritePlayerMovement(int clientId, Vector3 pos, float yaw, float pitch, bool isMoving, bool isSneaking, bool isFlying, float health) {
+    public static byte[] WritePlayerMovement(int clientId, Vector3 pos, float yaw, float pitch, bool isMoving, bool isSneaking, bool isFlying, float health, byte dimension = 0) {
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms, Encoding.UTF8);
         w.Write((byte)PacketType.PlayerMovement);
@@ -91,6 +92,7 @@ public static class NetworkProtocol {
         if (isFlying) flags |= 4;
         w.Write(flags);
         w.Write(health);
+        w.Write(dimension);
         return ms.ToArray();
     }
 
@@ -114,7 +116,7 @@ public static class NetworkProtocol {
         return ms.ToArray();
     }
 
-    public static byte[] WriteBlockChange(int x, int y, int z, ushort blockTypeId, byte subGridMask, bool isBreak) {
+    public static byte[] WriteBlockChange(int x, int y, int z, ushort blockTypeId, byte subGridMask, bool isBreak, byte dimension = 0) {
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms, Encoding.UTF8);
         w.Write((byte)PacketType.BlockChange);
@@ -122,6 +124,7 @@ public static class NetworkProtocol {
         w.Write(blockTypeId);
         w.Write(subGridMask);
         w.Write(isBreak);
+        w.Write(dimension);
         return ms.ToArray();
     }
 
@@ -154,7 +157,7 @@ public static class NetworkProtocol {
         return ms.ToArray();
     }
 
-    public static byte[] WritePlayerDataSync(Player player) {
+    public static byte[] WritePlayerDataSync(Player player, byte dimension = 0) {
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms, Encoding.UTF8);
         w.Write((byte)PacketType.PlayerDataSync);
@@ -167,6 +170,7 @@ public static class NetworkProtocol {
         w.Write(player.Hunger);
         w.Write(player.Saturation);
         w.Write(player.SelectedSlot);
+        w.Write(dimension);
 
         // Инвентарь
         var nonNull = new List<(int idx, ushort id, int qty, int dur)>();
@@ -209,7 +213,7 @@ public static class NetworkProtocol {
         return ms.ToArray();
     }
 
-    public static byte[] WritePlayerInventoryUpdate(Player player) {
+    public static byte[] WritePlayerInventoryUpdate(Player player, byte dimension = 0) {
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms, Encoding.UTF8);
         w.Write((byte)PacketType.PlayerInventoryUpdate);
@@ -222,6 +226,7 @@ public static class NetworkProtocol {
         w.Write(player.Hunger);
         w.Write(player.Saturation);
         w.Write(player.SelectedSlot);
+        w.Write(dimension);
 
         // Инвентарь
         var nonNull = new List<(int idx, ushort id, int qty, int dur)>();
@@ -272,13 +277,14 @@ public static class NetworkProtocol {
         return ms.ToArray();
     }
 
-    public static byte[] WriteChestSync(int x, int y, int z, VoxelFrame.Core.Inventory.Container container) {
+    public static byte[] WriteChestSync(int x, int y, int z, VoxelFrame.Core.Inventory.Container container, byte dimension = 0) {
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms, Encoding.UTF8);
         w.Write((byte)PacketType.ChestSync);
         w.Write(x);
         w.Write(y);
         w.Write(z);
+        w.Write(dimension);
 
         var nonNull = new List<(int idx, ushort id, int qty, int dur)>();
         for (int i = 0; i < container.Capacity; i++) {

@@ -26,6 +26,7 @@ public sealed partial class Player {
     public float Yaw;
     public float Pitch;
     public bool OnGround;
+    public Dimension Dimension = Dimension.Overworld;
     public float Health = 20f;           // макс. 20
     public float MaxHealth = 20f;
     public readonly Container Inventory = new();
@@ -706,6 +707,7 @@ public sealed partial class Player {
         // PvP: Проверка попадания по другим игрокам в сетевой игре
         if (GameClient.Active != null) {
             foreach (var rp in GameClient.Active.RemotePlayers) {
+                if (rp.Dimension != session.World.Dimension) continue;
                 var pMin = rp.Position - new Vector3(0.35f, 0.9f, 0.35f);
                 var pMax = rp.Position + new Vector3(0.35f, 0.9f, 0.35f);
                 if (RayAabb(Eye, Forward, pMin, pMax, out float pt) && pt < bestEntityDist && pt <= EntityAttackReach) {
@@ -719,6 +721,7 @@ public sealed partial class Player {
             }
         } else if (GameServer.Active != null) {
             foreach (var cl in GameServer.Active.Clients) {
+                if (cl.Dimension != session.World.Dimension) continue;
                 var pMin = cl.Position - new Vector3(0.35f, 0.9f, 0.35f);
                 var pMax = cl.Position + new Vector3(0.35f, 0.9f, 0.35f);
                 if (RayAabb(Eye, Forward, pMin, pMax, out float pt) && pt < bestEntityDist && pt <= EntityAttackReach) {
@@ -1043,8 +1046,8 @@ public sealed partial class Player {
                     uVox.SubGridLayerMask = newMask;
                     world.SetVoxelRaw(lowerPos, in lVox);
                     world.SetVoxelRaw(upperPos, in uVox);
-                    GameClient.Active?.SendBlockChange(lowerPos.X, lowerPos.Y, lowerPos.Z, lVox.TypeId, newMask, isBreak: false);
-                    GameClient.Active?.SendBlockChange(upperPos.X, upperPos.Y, upperPos.Z, uVox.TypeId, newMask, isBreak: false);
+                    GameClient.Active?.SendBlockChange(lowerPos.X, lowerPos.Y, lowerPos.Z, lVox.TypeId, newMask, isBreak: false, (byte)session.World.Dimension);
+                    GameClient.Active?.SendBlockChange(upperPos.X, upperPos.Y, upperPos.Z, uVox.TypeId, newMask, isBreak: false, (byte)session.World.Dimension);
                     GameServer.Active?.BroadcastHostBlockChange(lowerPos.X, lowerPos.Y, lowerPos.Z, lVox.TypeId, newMask, isBreak: false);
                     GameServer.Active?.BroadcastHostBlockChange(upperPos.X, upperPos.Y, upperPos.Z, uVox.TypeId, newMask, isBreak: false);
                     if (isOpen) SoundSystem.PlayDoorClose();
@@ -1636,7 +1639,7 @@ public sealed partial class Player {
         }
         world.RemoveBlock(pos);
         SoundSystem.PlayDig(block.Id);
-        GameClient.Active?.SendBlockChange(pos.X, pos.Y, pos.Z, 0, 0, isBreak: true);
+        GameClient.Active?.SendBlockChange(pos.X, pos.Y, pos.Z, 0, 0, isBreak: true, (byte)session.World.Dimension);
         GameServer.Active?.BroadcastHostBlockChange(pos.X, pos.Y, pos.Z, 0, 0, isBreak: true);
 
         // Проверка песка/гравия выше — каскадное падение от гравитации!
@@ -1815,8 +1818,8 @@ public sealed partial class Player {
                 world.PlacePlacedBlock(cell, GameData.BDoorLower, facing);
                 world.PlacePlacedBlock(above, GameData.BDoorUpper, facing);
                 SoundSystem.PlayPlace();
-                GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, GameData.BDoorLower.Id, facing, isBreak: false);
-                GameClient.Active?.SendBlockChange(above.X, above.Y, above.Z, GameData.BDoorUpper.Id, facing, isBreak: false);
+                GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, GameData.BDoorLower.Id, facing, isBreak: false, (byte)session.World.Dimension);
+                GameClient.Active?.SendBlockChange(above.X, above.Y, above.Z, GameData.BDoorUpper.Id, facing, isBreak: false, (byte)session.World.Dimension);
                 GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, GameData.BDoorLower.Id, facing, isBreak: false);
                 GameServer.Active?.BroadcastHostBlockChange(above.X, above.Y, above.Z, GameData.BDoorUpper.Id, facing, isBreak: false);
                 return true;
@@ -1849,8 +1852,8 @@ public sealed partial class Player {
                 world.PlacePlacedBlock(cell, GameData.BBed, facing);
                 world.PlacePlacedBlock(headCell, GameData.BBedHead, facing);
                 SoundSystem.PlayPlace();
-                GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, GameData.BBed.Id, facing, isBreak: false);
-                GameClient.Active?.SendBlockChange(headCell.X, headCell.Y, headCell.Z, GameData.BBedHead.Id, facing, isBreak: false);
+                GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, GameData.BBed.Id, facing, isBreak: false, (byte)session.World.Dimension);
+                GameClient.Active?.SendBlockChange(headCell.X, headCell.Y, headCell.Z, GameData.BBedHead.Id, facing, isBreak: false, (byte)session.World.Dimension);
                 GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, GameData.BBed.Id, facing, isBreak: false);
                 GameServer.Active?.BroadcastHostBlockChange(headCell.X, headCell.Y, headCell.Z, GameData.BBedHead.Id, facing, isBreak: false);
                 return true;
@@ -1870,7 +1873,7 @@ public sealed partial class Player {
             if (TryConsumeSelected(item, 1, session)) {
                 world.PlacePlacedBlock(cell, block, torchFacing);
                 SoundSystem.PlayPlace();
-                GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, block.Id, torchFacing, isBreak: false);
+                GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, block.Id, torchFacing, isBreak: false, (byte)session.World.Dimension);
                 GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, block.Id, torchFacing, isBreak: false);
                 return true;
             }
@@ -1897,7 +1900,7 @@ public sealed partial class Player {
         if (TryConsumeSelected(item, 1, session)) {
             world.PlacePlacedBlock(cell, block, facing);
             SoundSystem.PlayPlace();
-            GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, block.Id, facing, isBreak: false);
+            GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, block.Id, facing, isBreak: false, (byte)session.World.Dimension);
             GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, block.Id, facing, isBreak: false);
             return true;
         }

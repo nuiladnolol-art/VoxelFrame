@@ -903,6 +903,7 @@ public static class SaveSystem {
                 bw.Write(player.Saturation);
                 bw.Write(player.HighestYInAir);
                 bw.Write(player.SelectedSlot);
+                bw.Write((byte)player.Dimension);
 
                 // Инвентарь
                 var nonNullSlots = player.Inventory.Slots
@@ -963,6 +964,13 @@ public static class SaveSystem {
             player.Saturation = br.ReadSingle();
             player.HighestYInAir = br.ReadSingle();
             player.SelectedSlot = br.ReadInt32();
+            if (version >= 2 || gz.CanRead) {
+                try {
+                    player.Dimension = (Dimension)br.ReadByte();
+                } catch {
+                    player.Dimension = Dimension.Overworld;
+                }
+            }
 
             // Очищаем и загружаем инвентарь
             for (int i = 0; i < player.Inventory.Capacity; i++) player.Inventory.RemoveAt(i);
