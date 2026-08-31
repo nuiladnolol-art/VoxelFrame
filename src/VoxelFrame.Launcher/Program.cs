@@ -86,13 +86,13 @@ public class LauncherForm : Form {
         headerPanel.Controls.Add(lblTitle);
 
         Label lblBadge = new Label {
-            Text = "1.0.0-pre3-fix",
+            Text = "1.0.0-pre3 fix",
             Font = new Font("Segoe UI", 9, FontStyle.Bold),
             ForeColor = Color.FromArgb(100, 220, 120),
             BackColor = Color.FromArgb(30, 60, 40),
             TextAlign = ContentAlignment.MiddleCenter,
             Location = new Point(245, 22),
-            Size = new Size(125, 24)
+            Size = new Size(130, 24)
         };
         headerPanel.Controls.Add(lblBadge);
 
