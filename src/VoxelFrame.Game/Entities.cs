@@ -69,9 +69,14 @@ public static class Collision {
     }
 
     public static bool HasGroundBelow(GameWorld world, Vector3 pos, Vector3 half, bool ignoreDoors = false) {
-        var min = new Vector3(pos.X - half.X, pos.Y - 0.5f, pos.Z - half.Z);
-        var max = new Vector3(pos.X + half.X, pos.Y - 0.01f, pos.Z + half.Z);
-        return IntersectsSolid(world, min, max, ignoreDoors);
+        float feetY = pos.Y - half.Y;
+        var min = new Vector3(pos.X - half.X, feetY - 0.5f, pos.Z - half.Z);
+        var max = new Vector3(pos.X + half.X, feetY + 0.05f, pos.Z + half.Z);
+        if (IntersectsSolid(world, min, max, ignoreDoors)) return true;
+        // Запасная проверка: если передан pos как стопы (pos.Y вместо центра)
+        var minAlt = new Vector3(pos.X - half.X, pos.Y - 0.5f, pos.Z - half.Z);
+        var maxAlt = new Vector3(pos.X + half.X, pos.Y + 0.05f, pos.Z + half.Z);
+        return IntersectsSolid(world, minAlt, maxAlt, ignoreDoors);
     }
 
     /// <summary>Сдвигает тело с учётом коллизий; возвращает признак «стоит на земле».</summary>
@@ -89,7 +94,7 @@ public static class Collision {
                         float safeStepX = 0f;
                         float signX = MathF.Sign(stepX);
                         float absX = MathF.Abs(stepX);
-                        for (float s = 0.01f; s < absX; s += 0.01f) {
+                        for (float s = 0.005f; s < absX; s += 0.005f) {
                             if (HasGroundBelow(world, new Vector3(pos.X + signX * s, pos.Y, pos.Z), half, ignoreDoors)) {
                                 safeStepX = signX * s;
                             } else {
@@ -107,7 +112,7 @@ public static class Collision {
                         float safeStepZ = 0f;
                         float signZ = MathF.Sign(stepZ);
                         float absZ = MathF.Abs(stepZ);
-                        for (float s = 0.01f; s < absZ; s += 0.01f) {
+                        for (float s = 0.005f; s < absZ; s += 0.005f) {
                             if (HasGroundBelow(world, new Vector3(pos.X, pos.Y, pos.Z + signZ * s), half, ignoreDoors)) {
                                 safeStepZ = signZ * s;
                             } else {
@@ -123,10 +128,18 @@ public static class Collision {
                     float stepX = vel.X * dt;
                     float stepZ = vel.Z * dt;
                     if (!HasGroundBelow(world, new Vector3(pos.X + stepX, pos.Y, pos.Z + stepZ), half, ignoreDoors)) {
-                        if (MathF.Abs(stepX) > MathF.Abs(stepZ)) {
+                        bool safeX = HasGroundBelow(world, new Vector3(pos.X + stepX, pos.Y, pos.Z), half, ignoreDoors);
+                        bool safeZ = HasGroundBelow(world, new Vector3(pos.X, pos.Y, pos.Z + stepZ), half, ignoreDoors);
+                        if (safeX && !safeZ) {
+                            vel.Z = 0f;
+                        } else if (safeZ && !safeX) {
+                            vel.X = 0f;
+                        } else if (!safeX && !safeZ) {
+                            vel.X = 0f;
                             vel.Z = 0f;
                         } else {
-                            vel.X = 0f;
+                            if (MathF.Abs(stepX) >= MathF.Abs(stepZ)) vel.Z = 0f;
+                            else vel.X = 0f;
                         }
                     }
                 }
@@ -138,7 +151,7 @@ public static class Collision {
             pos.X += vel.X * dt;
             if (IntersectsSolid(world, pos - half, pos + half, ignoreDoors)) {
                 bool stepped = false;
-                if (stepHeight > 0f && vel.Y <= 0.05f) {
+                if (stepHeight > 0f && vel.Y <= 0.05f && !sneaking) {
                     for (float dy = 0.1f; dy <= stepHeight; dy += 0.1f) {
                         var steppedPos = new Vector3(pos.X, pos.Y + dy, pos.Z);
                         if (!IntersectsSolid(world, steppedPos - half, steppedPos + half, ignoreDoors)) {
@@ -162,7 +175,7 @@ public static class Collision {
             pos.Z += vel.Z * dt;
             if (IntersectsSolid(world, pos - half, pos + half, ignoreDoors)) {
                 bool stepped = false;
-                if (stepHeight > 0f && vel.Y <= 0.05f) {
+                if (stepHeight > 0f && vel.Y <= 0.05f && !sneaking) {
                     for (float dy = 0.1f; dy <= stepHeight; dy += 0.1f) {
                         var steppedPos = new Vector3(pos.X, pos.Y + dy, pos.Z);
                         if (!IntersectsSolid(world, steppedPos - half, steppedPos + half, ignoreDoors)) {

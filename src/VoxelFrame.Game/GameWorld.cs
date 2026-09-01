@@ -1189,6 +1189,11 @@ public sealed partial class GameWorld : IDisposable {
 
     private void PushEntities(ref Vector3 posA, ref Vector3 velA, float hxA, float hyA, float hzA,
                               ref Vector3 posB, ref Vector3 velB, float hxB, float hyB, float hzB) {
+        // Проверка по высоте: сущности не должны расталкиваться сквозь перекрытия (пол/потолок/пещеры)
+        float dy = MathF.Abs(posA.Y - posB.Y);
+        float minDistY = hyA + hyB;
+        if (dy >= minDistY) return;
+
         float dx = posA.X - posB.X;
         float dz = posA.Z - posB.Z;
         float minDistX = hxA + hxB;

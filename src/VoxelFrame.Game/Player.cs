@@ -455,8 +455,9 @@ public sealed partial class Player {
             FireTicks = MathF.Max(FireTicks, 5.0f);
         }
 
-        var forwardH = new Vector3(Forward.X, 0f, Forward.Z);
-        if (forwardH.LengthSquared() > 0.001f) forwardH = Vector3.Normalize(forwardH);
+        float sinYaw = MathF.Sin(Yaw);
+        float cosYaw = MathF.Cos(Yaw);
+        var forwardH = new Vector3(sinYaw, 0f, cosYaw);
         var right = Vector3.Cross(forwardH, Vector3.UnitY);
         var wish = right * inMoveX + forwardH * inMoveZ;
         if (wish.LengthSquared() > 1f) wish = Vector3.Normalize(wish);
