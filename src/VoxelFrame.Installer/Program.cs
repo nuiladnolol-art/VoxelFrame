@@ -90,22 +90,6 @@ public class InstallerForm : Form {
             if (File.Exists(ico)) this.Icon = new Icon(ico);
         } catch { }
 
-        // Панорама на фоне инсталлятора
-        try {
-            string[] candidates = {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "assets", "textures", "gui", "panorama.jpg"),
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "textures", "gui", "panorama.jpg"),
-                "panorama.jpg"
-            };
-            foreach (var bgPath in candidates) {
-                if (File.Exists(bgPath)) {
-                    this.BackgroundImage = Image.FromFile(bgPath);
-                    this.BackgroundImageLayout = ImageLayout.Stretch;
-                    break;
-                }
-            }
-        } catch { }
-
         Font titleFont = new Font("Segoe UI", 20, FontStyle.Bold);
         Font subTitleFont = new Font("Segoe UI", 10, FontStyle.Regular);
         Font labelFont = new Font("Segoe UI", 10, FontStyle.Bold);
@@ -115,7 +99,7 @@ public class InstallerForm : Form {
         headerPanel = new Panel {
             Dock = DockStyle.Top,
             Height = 85,
-            BackColor = Color.FromArgb(185, 18, 20, 26)
+            BackColor = Color.FromArgb(18, 20, 26)
         };
         this.Controls.Add(headerPanel);
 
@@ -132,7 +116,7 @@ public class InstallerForm : Form {
         Label lblSubTitle = new Label {
             Text = "Мастер установки VoxelFrame Launcher для Windows",
             Font = subTitleFont,
-            ForeColor = Color.FromArgb(220, 230, 245),
+            ForeColor = Color.FromArgb(160, 170, 185),
             BackColor = Color.Transparent,
             Location = new Point(22, 50),
             AutoSize = true
@@ -142,11 +126,11 @@ public class InstallerForm : Form {
         int contentX = 35;
         int contentW = 530;
 
-        // Тёмная полупрозрачная подложка для основного контента
+        // Тёмная подложка для основного контента
         Panel contentPanel = new Panel {
             Location = new Point(0, 85),
             Size = new Size(620, 515),
-            BackColor = Color.FromArgb(185, 18, 22, 30)
+            BackColor = Color.FromArgb(24, 26, 32)
         };
         this.Controls.Add(contentPanel);
 

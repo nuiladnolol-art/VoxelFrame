@@ -36,14 +36,23 @@ public class GameReleaseItem {
 }
 
 public class LauncherForm : Form {
+    public const string CurrentLauncherVersion = "1.0.0";
+
     private TextBox txtNickname;
     private ComboBox cbVersion;
     private ComboBox cbResolution;
     private ComboBox cbRam;
     private Button btnPlay;
     private Button btnRefresh;
+    private Button btnUpdateNotice;
     private Label lblStatus;
     private ProgressBar pbDownload;
+
+    private string _latestTag = "";
+    private string _latestName = "";
+    private string _latestSetupUrl = "";
+    private string _latestZipUrl = "";
+    private bool _hasPromptedUpdate = false;
 
     private readonly List<GameReleaseItem> _versions = new();
     private static readonly HttpClient _http = new();
@@ -63,22 +72,6 @@ public class LauncherForm : Form {
             this.Icon = IconHelper.GetLauncherIcon();
         } catch { }
 
-        // Панорама на фоне лаунчера
-        try {
-            string[] candidates = {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "assets", "textures", "gui", "panorama.jpg"),
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "textures", "gui", "panorama.jpg"),
-                "panorama.jpg"
-            };
-            foreach (var bgPath in candidates) {
-                if (File.Exists(bgPath)) {
-                    this.BackgroundImage = Image.FromFile(bgPath);
-                    this.BackgroundImageLayout = ImageLayout.Stretch;
-                    break;
-                }
-            }
-        } catch { }
-
         Font titleFont = new Font("Segoe UI", 22, FontStyle.Bold);
         Font subTitleFont = new Font("Segoe UI", 10, FontStyle.Regular);
         Font labelFont = new Font("Segoe UI", 10, FontStyle.Bold);
@@ -88,7 +81,7 @@ public class LauncherForm : Form {
         Panel headerPanel = new Panel {
             Dock = DockStyle.Top,
             Height = 85,
-            BackColor = Color.FromArgb(185, 18, 20, 26)
+            BackColor = Color.FromArgb(18, 20, 26)
         };
         this.Controls.Add(headerPanel);
 
@@ -106,28 +99,52 @@ public class LauncherForm : Form {
             Text = "1.0.0",
             Font = new Font("Segoe UI", 9, FontStyle.Bold),
             ForeColor = Color.FromArgb(100, 220, 120),
-            BackColor = Color.FromArgb(140, 30, 60, 40),
+            BackColor = Color.FromArgb(30, 60, 40),
             TextAlign = ContentAlignment.MiddleCenter,
             Location = new Point(245, 22),
-            Size = new Size(130, 24)
+            Size = new Size(60, 24)
         };
         headerPanel.Controls.Add(lblBadge);
 
         Label lblSubTitle = new Label {
             Text = "Официальный менеджер релизов · Поддержка GitHub Releases",
             Font = subTitleFont,
-            ForeColor = Color.FromArgb(220, 230, 245),
+            ForeColor = Color.FromArgb(160, 170, 185),
             BackColor = Color.Transparent,
             Location = new Point(22, 52),
             AutoSize = true
         };
         headerPanel.Controls.Add(lblSubTitle);
 
-        // Тёмная полупрозрачная подложка для основного контента
+        btnUpdateNotice = new Button {
+            Text = "🔔 Обновить лаунчер",
+            Font = new Font("Segoe UI", 9, FontStyle.Bold),
+            ForeColor = Color.White,
+            BackColor = Color.FromArgb(210, 110, 25),
+            FlatStyle = FlatStyle.Flat,
+            Cursor = Cursors.Hand,
+            Location = new Point(415, 18),
+            Size = new Size(195, 32),
+            Visible = false
+        };
+        btnUpdateNotice.FlatAppearance.BorderSize = 0;
+        btnUpdateNotice.Click += async (s, e) => {
+            var dr = MessageBox.Show(
+                $"Доступно обновление: {_latestName} ({_latestTag})\n\nЗапустить автоматическое обновление прямо сейчас?",
+                "Обновление лаунчера",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            if (dr == DialogResult.Yes) {
+                await AutoUpdateLauncherAsync(_latestTag, _latestSetupUrl, _latestZipUrl);
+            }
+        };
+        headerPanel.Controls.Add(btnUpdateNotice);
+
+        // Тёмная подложка для основного контента
         Panel contentPanel = new Panel {
             Location = new Point(0, 85),
             Size = new Size(640, 475),
-            BackColor = Color.FromArgb(185, 18, 22, 30)
+            BackColor = Color.FromArgb(24, 26, 32)
         };
         this.Controls.Add(contentPanel);
 
@@ -382,7 +399,7 @@ public class LauncherForm : Form {
 
         if (newestExe != null) {
             _versions.Add(new GameReleaseItem {
-                DisplayName = "⚡ VoxelFrame (Актуальная версия)",
+                DisplayName = "💾 v1.0.0 (Установлена)",
                 Tag = "v1.0.0",
                 IsInstalled = true,
                 InstallPath = Path.GetDirectoryName(newestExe)!,
@@ -390,7 +407,7 @@ public class LauncherForm : Form {
             });
         } else if (gameDir != null) {
             _versions.Add(new GameReleaseItem {
-                DisplayName = "⚡ VoxelFrame (Актуальная версия)",
+                DisplayName = "💾 v1.0.0 (Установлена)",
                 Tag = "v1.0.0",
                 IsLocalDev = true,
                 IsInstalled = true,
@@ -402,6 +419,7 @@ public class LauncherForm : Form {
         if (Directory.Exists(versionsDir)) {
             foreach (var dir in Directory.GetDirectories(versionsDir)) {
                 string name = Path.GetFileName(dir);
+                if (_versions.Any(v => v.Tag == name)) continue;
                 string exe = Path.Combine(dir, "VoxelFrame.Game.exe");
                 if (File.Exists(exe)) {
                     _versions.Add(new GameReleaseItem {
@@ -440,19 +458,34 @@ public class LauncherForm : Form {
                 if (root.ValueKind == JsonValueKind.Array) {
                     string versionsDir = GetVersionsDirectory();
                     int count = 0;
+                    _latestTag = "";
+                    _latestName = "";
+                    _latestSetupUrl = "";
+                    _latestZipUrl = "";
+
                     foreach (var rel in root.EnumerateArray()) {
                         string tag = rel.GetProperty("tag_name").GetString() ?? "";
                         string name = rel.TryGetProperty("name", out var np) ? np.GetString() ?? tag : tag;
                         string zipUrl = "";
+                        string setupUrl = "";
 
                         if (rel.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array) {
                             foreach (var asset in assets.EnumerateArray()) {
                                 string aName = asset.GetProperty("name").GetString() ?? "";
+                                string dUrl = asset.GetProperty("browser_download_url").GetString() ?? "";
                                 if (aName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) {
-                                    zipUrl = asset.GetProperty("browser_download_url").GetString() ?? "";
-                                    break;
+                                    zipUrl = dUrl;
+                                } else if (aName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) {
+                                    setupUrl = dUrl;
                                 }
                             }
+                        }
+
+                        if (count == 0) {
+                            _latestTag = tag;
+                            _latestName = name;
+                            _latestSetupUrl = setupUrl;
+                            _latestZipUrl = zipUrl;
                         }
 
                         string instDir = Path.Combine(versionsDir, tag);
@@ -467,7 +500,7 @@ public class LauncherForm : Form {
                             existing.ExePath = exePath;
                         } else {
                             _versions.Add(new GameReleaseItem {
-                                DisplayName = $"🌐 {name} ({tag}) {(installed ? "✓" : "")}",
+                                DisplayName = $"🌐 {tag} {(installed ? "(Установлена)" : "")}",
                                 Tag = tag,
                                 DownloadUrl = zipUrl,
                                 IsInstalled = installed,
@@ -482,12 +515,33 @@ public class LauncherForm : Form {
                     foreach (var v in _versions) cbVersion.Items.Add(v);
                     if (cbVersion.Items.Count > 0) cbVersion.SelectedIndex = 0;
 
-                    if (count > 0) {
-                        lblStatus.Text = $"Найдено релизов на GitHub: {count}. Готово к игре";
-                        lblStatus.ForeColor = Color.FromArgb(100, 220, 120);
+                    bool hasUpdate = IsNewerVersion(_latestTag, CurrentLauncherVersion);
+                    if (hasUpdate && !string.IsNullOrEmpty(_latestTag)) {
+                        btnUpdateNotice.Text = $"🔔 Обновить до {_latestTag}";
+                        btnUpdateNotice.Visible = true;
+                        lblStatus.Text = $"🔔 Доступна новая версия: {_latestTag}! Нажмите «Обновить» вверху";
+                        lblStatus.ForeColor = Color.FromArgb(255, 205, 70);
+
+                        if (!_hasPromptedUpdate) {
+                            _hasPromptedUpdate = true;
+                            var dr = MessageBox.Show(
+                                $"Вышла новая версия VoxelFrame {_latestTag}!\n\nХотите запустить авто-обновление прямо сейчас?",
+                                "Доступно обновление VoxelFrame",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Information);
+                            if (dr == DialogResult.Yes) {
+                                _ = AutoUpdateLauncherAsync(_latestTag, _latestSetupUrl, _latestZipUrl);
+                            }
+                        }
                     } else {
-                        lblStatus.Text = "На GitHub пока нет релизов. Доступна локальная сборка";
-                        lblStatus.ForeColor = Color.FromArgb(180, 200, 235);
+                        btnUpdateNotice.Visible = false;
+                        if (count > 0) {
+                            lblStatus.Text = $"Найдено релизов на GitHub: {count}. Версия актуальна";
+                            lblStatus.ForeColor = Color.FromArgb(100, 220, 120);
+                        } else {
+                            lblStatus.Text = "На GitHub пока нет релизов. Доступна локальная сборка";
+                            lblStatus.ForeColor = Color.FromArgb(180, 200, 235);
+                        }
                     }
                 }
             } else if (response.StatusCode == System.Net.HttpStatusCode.NotFound) {
@@ -503,6 +557,112 @@ public class LauncherForm : Form {
         } finally {
             btnRefresh.Enabled = true;
             UpdatePlayButtonState();
+        }
+    }
+
+    private static bool IsNewerVersion(string remoteTag, string localTag) {
+        if (string.IsNullOrWhiteSpace(remoteTag)) return false;
+        if (string.Equals(remoteTag, localTag, StringComparison.OrdinalIgnoreCase)) return false;
+        string rClean = remoteTag.TrimStart('v', 'V').Split('-')[0];
+        string lClean = localTag.TrimStart('v', 'V').Split('-')[0];
+        if (Version.TryParse(rClean, out var vr) && Version.TryParse(lClean, out var vl)) {
+            if (vr > vl) return true;
+            if (vr < vl) return false;
+            if (!remoteTag.Contains("pre", StringComparison.OrdinalIgnoreCase) &&
+                localTag.Contains("pre", StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return !remoteTag.TrimStart('v', 'V').Equals(localTag.TrimStart('v', 'V'), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task AutoUpdateLauncherAsync(string targetTag, string setupUrl, string zipUrl) {
+        btnPlay.Enabled = false;
+        btnRefresh.Enabled = false;
+        btnUpdateNotice.Enabled = false;
+        pbDownload.Visible = true;
+        pbDownload.Value = 0;
+        lblStatus.Text = $"Загрузка обновления {targetTag}...";
+        lblStatus.ForeColor = Color.FromArgb(100, 200, 255);
+
+        string downloadUrl = !string.IsNullOrEmpty(setupUrl) ? setupUrl : zipUrl;
+        if (string.IsNullOrEmpty(downloadUrl)) {
+            MessageBox.Show("Не найден файл обновления в релизе GitHub.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            btnPlay.Enabled = true;
+            btnRefresh.Enabled = true;
+            btnUpdateNotice.Enabled = true;
+            pbDownload.Visible = false;
+            return;
+        }
+
+        bool isSetup = downloadUrl.EndsWith(".exe", StringComparison.OrdinalIgnoreCase);
+        string tempFile = Path.Combine(Path.GetTempPath(), isSetup ? $"VoxelFrame-Setup-{targetTag}.exe" : $"VoxelFrame-{targetTag}.zip");
+
+        try {
+            using var resp = await _http.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+            resp.EnsureSuccessStatusCode();
+
+            long totalBytes = resp.Content.Headers.ContentLength ?? -1;
+            using var stream = await resp.Content.ReadAsStreamAsync();
+            using var fs = new FileStream(tempFile, FileMode.Create, FileAccess.Write, FileShare.None);
+
+            byte[] buffer = new byte[81920];
+            long totalRead = 0;
+            int read;
+
+            while ((read = await stream.ReadAsync(buffer, 0, buffer.Length)) > 0) {
+                await fs.WriteAsync(buffer, 0, read);
+                totalRead += read;
+                if (totalBytes > 0) {
+                    int percent = (int)(totalRead * 100 / totalBytes);
+                    pbDownload.Value = Math.Clamp(percent, 0, 100);
+                    lblStatus.Text = $"Загрузка обновления: {totalRead / 1024 / 1024} МБ / {totalBytes / 1024 / 1024} МБ ({percent}%)";
+                }
+            }
+            fs.Close();
+
+            lblStatus.Text = "Запуск обновления...";
+            lblStatus.ForeColor = Color.FromArgb(100, 220, 120);
+
+            if (isSetup) {
+                Process.Start(new ProcessStartInfo(tempFile) { UseShellExecute = true });
+                Application.Exit();
+            } else {
+                string tempDir = Path.Combine(Path.GetTempPath(), $"VF_Extract_{Guid.NewGuid():N}");
+                ZipFile.ExtractToDirectory(tempFile, tempDir, true);
+
+                string newLauncherExe = Path.Combine(tempDir, "VoxelFrame.Launcher.exe");
+                if (!File.Exists(newLauncherExe)) {
+                    var found = Directory.GetFiles(tempDir, "VoxelFrame.Launcher.exe", SearchOption.AllDirectories);
+                    if (found.Length > 0) newLauncherExe = found[0];
+                }
+
+                string currentExe = Application.ExecutablePath;
+                if (File.Exists(newLauncherExe)) {
+                    string batScript = Path.Combine(Path.GetTempPath(), $"vf_update_{Guid.NewGuid():N}.cmd");
+                    string batContent = $@"@echo off
+timeout /t 1 /nobreak > nul
+copy /y ""{newLauncherExe}"" ""{currentExe}""
+start """" ""{currentExe}""
+del ""%~f0""
+";
+                    File.WriteAllText(batScript, batContent);
+                    Process.Start(new ProcessStartInfo("cmd.exe", $"/c \"{batScript}\"") {
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    });
+                    Application.Exit();
+                } else {
+                    MessageBox.Show("Лаунчер не найден в архиве обновления.", "Предупреждение", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+        } catch (Exception ex) {
+            MessageBox.Show($"Ошибка при авто-обновлении: {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            lblStatus.Text = "Ошибка обновления лаунчера";
+            lblStatus.ForeColor = Color.FromArgb(255, 100, 100);
+        } finally {
+            btnPlay.Enabled = true;
+            btnRefresh.Enabled = true;
+            btnUpdateNotice.Enabled = true;
+            pbDownload.Visible = false;
         }
     }
 

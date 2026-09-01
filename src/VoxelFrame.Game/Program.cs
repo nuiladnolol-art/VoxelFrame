@@ -48,75 +48,7 @@ internal static class Program {
         }
     }
 
-    /// <summary>
-    /// F10: сохраняет текущий кадр как панораму главного меню (assets/textures/gui/panorama.jpg).
-    /// После следующего запуска главное меню будет использовать этот скриншот как фон.
-    /// </summary>
-    private static void SaveMenuPanorama(GameSession session) {
-        try {
-            // Определяем путь к assets/ относительно exe или из дерева проекта
-            string[] candidates = {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "textures", "gui", "panorama.jpg"),
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "assets", "textures", "gui", "panorama.jpg")
-            };
-            string? panoPath = null;
-            foreach (var c in candidates) {
-                string dir2 = Path.GetDirectoryName(c)!;
-                if (Directory.Exists(dir2)) { panoPath = c; break; }
-            }
-            if (panoPath == null) {
-                // Попробуем создать путь у exe
-                panoPath = candidates[0];
-                Directory.CreateDirectory(Path.GetDirectoryName(panoPath)!);
-            }
 
-            // Raylib.TakeScreenshot сохраняет PNG; нам нужен JPG
-            // Сохраним сначала как PNG, потом конвертируем через Raylib Image API
-            string tmpPng = panoPath.Replace(".jpg", "_tmp.png");
-            Raylib.TakeScreenshot(tmpPng);
-
-            // Загружаем PNG, сохраняем как JPG
-            // Небольшая задержка нужна — TakeScreenshot асинхронный, файл пишется в конце кадра
-            // Помечаем флаг, который обработается в следующем кадре
-            _pendingPanoSave = tmpPng;
-            _pendingPanoOut  = panoPath;
-            _pendingPanoSession = session;
-
-            session.AddMessage("📸 Панорама будет сохранена как фон главного меню!");
-        } catch (Exception ex) {
-            session.AddMessage("Не удалось сохранить панораму: " + ex.Message);
-        }
-    }
-
-    // Отложенное сохранение панорамы (выполняется в следующем кадре после TakeScreenshot)
-    private static string? _pendingPanoSave;
-    private static string? _pendingPanoOut;
-    private static GameSession? _pendingPanoSession;
-
-    private static void ProcessPendingPanorama() {
-        if (_pendingPanoSave == null) return;
-        string tmp = _pendingPanoSave;
-        string? outPath = _pendingPanoOut;
-        var sess = _pendingPanoSession;
-        _pendingPanoSave = null;
-        _pendingPanoOut = null;
-        _pendingPanoSession = null;
-
-        if (!File.Exists(tmp)) return;
-        try {
-            var img = Raylib_cs.Raylib.LoadImage(tmp);
-            Raylib_cs.Raylib.ExportImage(img, outPath!);
-            Raylib_cs.Raylib.UnloadImage(img);
-            File.Delete(tmp);
-
-            // Сбрасываем кэш панорамы в Screens, чтобы она перезагрузилась
-            Screens.ReloadPanorama();
-
-            sess?.AddMessage("✅ Панорама главного меню обновлена!");
-        } catch (Exception ex) {
-            sess?.AddMessage("Ошибка сохранения панорамы: " + ex.Message);
-        }
-    }
 
     private static int Main(string[] args) {
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
@@ -533,8 +465,6 @@ internal static class Program {
                         if (cursorCaptured) { Raylib.EnableCursor(); cursorCaptured = false; }
                     } else if (Raylib.IsKeyPressed(KeyboardKey.F2)) {
                         TakeGameScreenshot(session);
-                    } else if (Raylib.IsKeyPressed(KeyboardKey.F10)) {
-                        SaveMenuPanorama(session);
                     }
 
                     // Курсор прячем только при фокусе окна: иначе он «зависает»
@@ -636,9 +566,6 @@ internal static class Program {
             }
             Ui.End();
             Raylib.EndDrawing();
-
-            // Обрабатываем отложенное сохранение панорамы (после TakeScreenshot)
-            ProcessPendingPanorama();
 
             frames++;
             if (autoshotFile != null && frames >= autoshotFrames) {

@@ -106,8 +106,6 @@ public static partial class Screens {
         }
     }
 
-    public static void ReloadPanorama() { }
-
     public static void DrawMenuBackground(float dt) {
         int w = Ui.Vw, h = Ui.Vh;
         InitMenuParticles();
