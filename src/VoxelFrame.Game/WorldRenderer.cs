@@ -66,12 +66,12 @@ public sealed class WorldRenderer : IDisposable {
             float block = fragColor.g;     // Блочный (факельный) свет [0..1]
             float faceDir = fragColor.b;   // Направленное затенение граней [0.55..1.0]
 
-            // Динамический свет от факела в руке игрока
+            // Динамический свет от факела в руке игрока (сила 14/15, как у настенного факела)
             if (playerLightRadius > 0.1) {
                 float d = distance(fragWorldPos, playerLightPos);
                 if (d < playerLightRadius) {
                     float handLight = clamp(1.0 - (d / playerLightRadius), 0.0, 1.0);
-                    block = max(block, handLight * 0.95);
+                    block = max(block, handLight * (14.0 / 15.0));
                 }
             }
 
@@ -860,12 +860,12 @@ public sealed class WorldRenderer : IDisposable {
         byte block = _world.GetBlockLight(cell);
         float skyFactor = _session.DayNight.SkyFactor;
 
-        // Динамический свет факела в руке игрока
+        // Динамический свет факела в руке игрока (радиус и сила 14, как у настенного факела)
         bool holdingTorch = _session.Player.SelectedEntry?.Item.Definition.Id == GameData.TorchItem.Id || _session.Player.OffhandItem?.Id == GameData.TorchItem.Id;
         if (holdingTorch) {
             float d = Vector3.Distance(pos, _session.Player.Eye);
-            if (d < 12.5f) {
-                byte dynBlock = (byte)(14 * (1.0f - d / 12.5f));
+            if (d < 14.0f) {
+                byte dynBlock = (byte)(14 * (1.0f - d / 14.0f));
                 if (dynBlock > block) block = dynBlock;
             }
         }
@@ -929,19 +929,30 @@ public sealed class WorldRenderer : IDisposable {
         if (GameClient.Active != null) {
             foreach (var rp in GameClient.Active.RemotePlayers) {
                 if (rp.Dimension != _session.World.Dimension) continue;
-                DrawSinglePlayerModel(camera, time, rp.Name, rp.Position, rp.Yaw, rp.Pitch, rp.IsMoving, rp.IsSneaking, rp.Health, rp.SelectedItemId, rp.ArmSwingTimer, rp.HurtTimer, rp.SkinName);
+                DrawSinglePlayerModel(camera, time, rp.Name, rp.Position, rp.Yaw, rp.Pitch, rp.IsMoving, rp.IsSneaking, rp.Health, rp.SelectedItemId, rp.OffhandItemId, rp.HelmetId, rp.ChestplateId, rp.LeggingsId, rp.BootsId, rp.ArmSwingTimer, rp.HurtTimer, rp.SkinName, rp.IsBlocking);
             }
         }
         // Если мы сервер/хост — рисуем подключившихся клиентов
         else if (GameServer.Active != null) {
             foreach (var cl in GameServer.Active.Clients) {
                 if (cl.Dimension != _session.World.Dimension) continue;
-                DrawSinglePlayerModel(camera, time, cl.Name, cl.Position, cl.Yaw, cl.Pitch, cl.IsMoving, cl.IsSneaking, cl.Health, cl.SelectedItemId, cl.ArmSwingTimer, cl.HurtTimer, cl.SkinName);
+                DrawSinglePlayerModel(camera, time, cl.Name, cl.Position, cl.Yaw, cl.Pitch, cl.IsMoving, cl.IsSneaking, cl.Health, cl.SelectedItemId, cl.OffhandItemId, cl.HelmetId, cl.ChestplateId, cl.LeggingsId, cl.BootsId, cl.ArmSwingTimer, cl.HurtTimer, cl.SkinName, cl.IsBlocking);
             }
         }
     }
 
-    private void DrawSinglePlayerModel(Camera3D camera, float time, string name, Vector3 pos, float yaw, float pitch, bool isMoving, bool isSneaking, float health, int selectedItemId, float armSwingTimer, float hurtTimer, string skinName) {
+    private static Color? GetArmorMaterialColor(int itemId) {
+        if (itemId <= 0) return null;
+        if (itemId == GameData.LeatherHelmetItem.Id || itemId == GameData.LeatherChestplateItem.Id || itemId == GameData.LeatherLeggingsItem.Id || itemId == GameData.LeatherBootsItem.Id)
+            return new Color(160, 95, 55, 255); // Кожа
+        if (itemId == GameData.IronHelmetItem.Id || itemId == GameData.IronChestplateItem.Id || itemId == GameData.IronLeggingsItem.Id || itemId == GameData.IronBootsItem.Id)
+            return new Color(220, 220, 225, 255); // Железо
+        if (itemId == GameData.DiamondHelmetItem.Id || itemId == GameData.DiamondChestplateItem.Id || itemId == GameData.DiamondLeggingsItem.Id || itemId == GameData.DiamondBootsItem.Id)
+            return new Color(75, 225, 235, 255); // Алмаз
+        return null;
+    }
+
+    private void DrawSinglePlayerModel(Camera3D camera, float time, string name, Vector3 pos, float yaw, float pitch, bool isMoving, bool isSneaking, float health, int selectedItemId, int offhandItemId, int helmetId, int chestId, int legsId, int bootsId, float armSwingTimer, float hurtTimer, string skinName, bool isBlocking = false) {
         DrawSoftShadow(pos - new Vector3(0f, 0.9f, 0f), 0.45f);
         var light = GetLightFactor(pos);
         var skinDef = SkinSystem.GetSkin(skinName);
@@ -968,10 +979,15 @@ public sealed class WorldRenderer : IDisposable {
 
         // 1. Туловище
         Raylib.DrawCube(new Vector3(0f, 0f, 0f), 0.45f, 0.65f, 0.24f, shirtColor);
-        // Вырез на шее (кожа)
-        Raylib.DrawCube(new Vector3(0f, 0.26f, 0.121f), 0.12f, 0.12f, 0.01f, skinColor);
-        // Детали одежды (пояс / ремень / эмблема)
-        Raylib.DrawCube(new Vector3(0f, -0.28f, 0.121f), 0.452f, 0.08f, 0.01f, detailColor);
+        // Нагрудник (броня)
+        if (GetArmorMaterialColor(chestId) is { } cColor) {
+            Raylib.DrawCube(new Vector3(0f, 0f, 0f), 0.48f, 0.67f, 0.27f, ShadeColor(cColor, light, pos));
+        } else {
+            // Вырез на шее (кожа)
+            Raylib.DrawCube(new Vector3(0f, 0.26f, 0.121f), 0.12f, 0.12f, 0.01f, skinColor);
+            // Детали одежды (пояс / ремень / эмблема)
+            Raylib.DrawCube(new Vector3(0f, -0.28f, 0.121f), 0.452f, 0.08f, 0.01f, detailColor);
+        }
 
         // 2. Голова с наклоном Pitch
         Rlgl.PushMatrix();
@@ -979,9 +995,14 @@ public sealed class WorldRenderer : IDisposable {
         Rlgl.Rotatef(-pitch * 180f / MathF.PI, 1f, 0f, 0f);
 
         Raylib.DrawCube(Vector3.Zero, 0.42f, 0.42f, 0.42f, skinColor);
-        // Волосы / Шлем
-        Raylib.DrawCube(new Vector3(0f, 0.16f, 0f), 0.43f, 0.12f, 0.43f, hairColor);
-        Raylib.DrawCube(new Vector3(0f, 0.05f, -0.16f), 0.43f, 0.22f, 0.12f, hairColor);
+        // Шлем (броня) или Волосы
+        if (GetArmorMaterialColor(helmetId) is { } hColor) {
+            Raylib.DrawCube(new Vector3(0f, 0.06f, 0f), 0.46f, 0.46f, 0.46f, ShadeColor(hColor, light, pos));
+        } else {
+            // Волосы
+            Raylib.DrawCube(new Vector3(0f, 0.16f, 0f), 0.43f, 0.12f, 0.43f, hairColor);
+            Raylib.DrawCube(new Vector3(0f, 0.05f, -0.16f), 0.43f, 0.22f, 0.12f, hairColor);
+        }
         // Глаза (белок + зрачок цвета скина)
         Raylib.DrawCube(new Vector3(-0.11f, 0.02f, 0.215f), 0.08f, 0.06f, 0.01f, eyeWhite);
         Raylib.DrawCube(new Vector3(0.11f, 0.02f, 0.215f), 0.08f, 0.06f, 0.01f, eyeWhite);
@@ -992,10 +1013,22 @@ public sealed class WorldRenderer : IDisposable {
         Rlgl.PopMatrix();
 
         // 3. Руки
-        // Левая рука (качается при ходьбе)
-        var lArmPos = new Vector3(-0.33f, 0.02f, walkSwing * 0.3f);
+        // Левая рука (качается при ходьбе или блокирует щитом)
+        var lArmPos = isBlocking ? new Vector3(-0.20f, 0.12f, 0.28f) : new Vector3(-0.33f, 0.02f, walkSwing * 0.3f);
         Raylib.DrawCube(lArmPos, 0.18f, 0.65f, 0.18f, skinColor);
         Raylib.DrawCube(lArmPos + new Vector3(0f, 0.18f, 0f), 0.182f, 0.30f, 0.182f, shirtColor);
+
+        // Предмет / Щит во второй руке (слева)
+        if (offhandItemId > 0) {
+            if (offhandItemId == GameData.ShieldItem.Id) {
+                var shieldPos = isBlocking ? new Vector3(-0.06f, 0.10f, 0.42f) : (lArmPos + new Vector3(0f, -0.05f, 0.16f));
+                Raylib.DrawCube(shieldPos, 0.36f, 0.48f, 0.06f, ShadeColor(new Color(155, 140, 115, 255), light, pos));
+                Raylib.DrawCube(shieldPos + new Vector3(0f, 0f, 0.035f), 0.10f, 0.10f, 0.02f, ShadeColor(new Color(200, 200, 205, 255), light, pos));
+            } else {
+                var offPos = lArmPos + new Vector3(0f, -0.22f, 0.20f);
+                Raylib.DrawCube(offPos, 0.14f, 0.14f, 0.14f, ShadeColor(new Color(140, 140, 150, 255), light, pos));
+            }
+        }
 
         // Правая рука (качается при ходьбе + наносит удар/копает)
         var rArmPos = new Vector3(0.33f, 0.02f + armPunch * 0.2f, -walkSwing * 0.3f + armPunch * 0.4f);
@@ -1027,9 +1060,21 @@ public sealed class WorldRenderer : IDisposable {
 
         Raylib.DrawCube(lLegPos, 0.20f, 0.65f, 0.20f, pantsColor);
         Raylib.DrawCube(rLegPos, 0.20f, 0.65f, 0.20f, pantsColor);
+
+        // Поножи (броня)
+        if (GetArmorMaterialColor(legsId) is { } lColor) {
+            Raylib.DrawCube(lLegPos, 0.22f, 0.55f, 0.22f, ShadeColor(lColor, light, pos));
+            Raylib.DrawCube(rLegPos, 0.22f, 0.55f, 0.22f, ShadeColor(lColor, light, pos));
+        }
+
         // Ботинки
-        Raylib.DrawCube(lLegPos - new Vector3(0f, 0.25f, -0.02f), 0.202f, 0.15f, 0.24f, shoeColor);
-        Raylib.DrawCube(rLegPos - new Vector3(0f, 0.25f, -0.02f), 0.202f, 0.15f, 0.24f, shoeColor);
+        if (GetArmorMaterialColor(bootsId) is { } bColor) {
+            Raylib.DrawCube(lLegPos - new Vector3(0f, 0.24f, -0.02f), 0.222f, 0.17f, 0.26f, ShadeColor(bColor, light, pos));
+            Raylib.DrawCube(rLegPos - new Vector3(0f, 0.24f, -0.02f), 0.222f, 0.17f, 0.26f, ShadeColor(bColor, light, pos));
+        } else {
+            Raylib.DrawCube(lLegPos - new Vector3(0f, 0.25f, -0.02f), 0.202f, 0.15f, 0.24f, shoeColor);
+            Raylib.DrawCube(rLegPos - new Vector3(0f, 0.25f, -0.02f), 0.202f, 0.15f, 0.24f, shoeColor);
+        }
 
         Rlgl.PopMatrix();
     }
@@ -1087,6 +1132,18 @@ public sealed class WorldRenderer : IDisposable {
 
         // 1. Draw Remote Players (Multiplayer: Steve 3D Model, Head Pitch/Yaw, Item in Hand, 3D Name Tag)
         DrawRemotePlayers(camera, time);
+
+        // Draw Local Player in 3rd person view (F5)
+        if (_session.CameraPerspective != 0 && _session.Player.Health > 0f) {
+            var p = _session.Player;
+            int selectedItemId = p.SelectedItem?.Id ?? 0;
+            int offhandItemId = p.OffhandItem?.Id ?? 0;
+            int helmetId = p.Armor[0]?.Item.Definition.Id ?? 0;
+            int chestId = p.Armor[1]?.Item.Definition.Id ?? 0;
+            int legsId = p.Armor[2]?.Item.Definition.Id ?? 0;
+            int bootsId = p.Armor[3]?.Item.Definition.Id ?? 0;
+            DrawSinglePlayerModel(camera, time, p.Name, p.Position, p.Yaw, p.Pitch, p.IsMoving, p.IsCrouching, p.Health, selectedItemId, offhandItemId, helmetId, chestId, legsId, bootsId, p.SwingMarker, p.HurtTimer, p.SkinName, p.IsBlocking);
+        }
 
         // 2. Draw Animals (Pig, Cow, Sheep) with 3D model, animations and fog
         foreach (var a in _world.Animals) {

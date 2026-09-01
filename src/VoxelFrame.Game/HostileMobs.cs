@@ -15,6 +15,8 @@ public enum HostileType { Zombie, Babakher, Skeleton, Spider, ZombiePigman, Blaz
 /// </summary>
 public sealed class HostileMob {
     public const float HalfSize = 0.45f;
+    private static uint _nextId = 1;
+    public uint Id = Interlocked.Increment(ref _nextId);
 
     public HostileType Type;
     public Vector3 Position;

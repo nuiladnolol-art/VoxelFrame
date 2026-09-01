@@ -16,6 +16,7 @@ internal static class SmokeTest {
     private const float Dt = 1f / 60f;
 
     public static int Run() {
+        try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
         Console.WriteLine("== VoxelFrame smoke test (headless) ==");
         Program.RegisterTiles();
         var swAll = System.Diagnostics.Stopwatch.StartNew();
@@ -142,6 +143,16 @@ internal static class SmokeTest {
 
         // Факел: 1 предмет ставит 1 факел, ломание возвращает 1 факел
         Check(BlockCycle(s, GameData.BTorch, GameData.TorchItem), "цикл «факел»: 1 предмет = 1 факел = 1 дроп");
+
+        // Проигрыватель: проверка отсутствия дюпа пластинок при ломании проигрывателя
+        var jPos = new Vec3i((int)MathF.Floor(s.Player.Position.X) + 3, (int)MathF.Floor(s.Player.Position.Y) + 1, (int)MathF.Floor(s.Player.Position.Z));
+        s.World.PlacePlacedBlock(jPos, GameData.BJukebox, facing: 1); // проигрыватель с пластинкой
+        int discPickupsBefore = s.World.Pickups.Count(p => p.Item.Definition.Id == GameData.MusicDiscItem.Id);
+        s.Player.BreakBlock(s.World, s, jPos, GameData.BJukebox);
+        Tick(s, 0.2f);
+        int discPickupsAfter = s.World.Pickups.Count(p => p.Item.Definition.Id == GameData.MusicDiscItem.Id);
+        Check(discPickupsAfter - discPickupsBefore == 1, "разрушение проигрывателя дропает ровно 1 пластинку (защита от дюпа)");
+        Check(GameData.BTorch.LightLevel == 14, "сила света настенного факела равна 14");
     }
 
     private static bool BlockCycle(GameSession s, BlockType block, ItemDefinition item) {
@@ -348,6 +359,18 @@ internal static class SmokeTest {
         fn.Output = new ItemEntry(GameData.NewItem(GameData.IronIngotItem), 1);
         fn.FuelTimer = 35f;
 
+        var ironPick = GameData.NewItem(GameData.IronPickaxeItem);
+        ironPick.Durability = 142;
+        s.Player.Inventory.TryInsert(ironPick, 1);
+
+        var diaChest = GameData.NewItem(GameData.DiamondChestplateItem);
+        diaChest.Durability = 480;
+        s.Player.Armor[1] = new ItemEntry(diaChest, 1);
+
+        var bow = GameData.NewItem(GameData.BowItem);
+        bow.Durability = 210;
+        s.Player.OffhandEntry = new ItemEntry(bow, 1);
+
         s.World.SpawnPickup(GameData.AppleItem.Id, 1, new Vec3i(1, s.World.SpawnBlock.Y + 2, 1));
         var pig = new Animal { Position = s.Player.Position + new Vector3(0f, 0f, 3f) };
         s.World.Animals.Add(pig);
@@ -365,6 +388,16 @@ internal static class SmokeTest {
         Check(Vector3.Distance(loaded.Player.Position, s.Player.Position) < 0.1f, "позиция игрока сохранена");
         Check(loaded.Player.Inventory.CountOf(GameData.LogItem) == 1 &&
               loaded.Player.Inventory.CountOf(GameData.CookedPorkItem) == 2, "инвентарь сохранён");
+
+        var loadedPick = loaded.Player.Inventory.Slots.FirstOrDefault(sl => sl?.Item.Definition.Id == GameData.IronPickaxeItem.Id)?.Item;
+        Check(loadedPick != null && loadedPick.Durability == 142, "прочность кирки сохранена корректно");
+
+        var loadedChest = loaded.Player.Armor[1]?.Item;
+        Check(loadedChest != null && loadedChest.Durability == 480, "прочность надетого нагрудника сохранена корректно");
+
+        var loadedBow = loaded.Player.OffhandEntry?.Item;
+        Check(loadedBow != null && loadedBow.Durability == 210, "прочность лука во второй руке сохранена корректно");
+
         var chunkCoord = Chunk.CoordOf(new Vec3i(3, s.World.SpawnBlock.Y + 1, 0));
         Check(loaded.World.TryGetChunk(chunkCoord) != null, "чанк загружен");
         Check(loaded.World.Pickups.Count >= 1 && loaded.World.Pickups.Any(p => p.Item.Definition == GameData.AppleItem),

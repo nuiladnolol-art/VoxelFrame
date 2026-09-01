@@ -90,6 +90,22 @@ public class InstallerForm : Form {
             if (File.Exists(ico)) this.Icon = new Icon(ico);
         } catch { }
 
+        // Панорама на фоне инсталлятора
+        try {
+            string[] candidates = {
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "assets", "textures", "gui", "panorama.jpg"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "textures", "gui", "panorama.jpg"),
+                "panorama.jpg"
+            };
+            foreach (var bgPath in candidates) {
+                if (File.Exists(bgPath)) {
+                    this.BackgroundImage = Image.FromFile(bgPath);
+                    this.BackgroundImageLayout = ImageLayout.Stretch;
+                    break;
+                }
+            }
+        } catch { }
+
         Font titleFont = new Font("Segoe UI", 20, FontStyle.Bold);
         Font subTitleFont = new Font("Segoe UI", 10, FontStyle.Regular);
         Font labelFont = new Font("Segoe UI", 10, FontStyle.Bold);
@@ -99,7 +115,7 @@ public class InstallerForm : Form {
         headerPanel = new Panel {
             Dock = DockStyle.Top,
             Height = 85,
-            BackColor = Color.FromArgb(18, 20, 26)
+            BackColor = Color.FromArgb(185, 18, 20, 26)
         };
         this.Controls.Add(headerPanel);
 
@@ -107,6 +123,7 @@ public class InstallerForm : Form {
             Text = "VOXELFRAME SETUP",
             Font = titleFont,
             ForeColor = Color.FromArgb(255, 215, 90),
+            BackColor = Color.Transparent,
             Location = new Point(20, 14),
             AutoSize = true
         };
@@ -115,7 +132,8 @@ public class InstallerForm : Form {
         Label lblSubTitle = new Label {
             Text = "Мастер установки VoxelFrame Launcher для Windows",
             Font = subTitleFont,
-            ForeColor = Color.FromArgb(160, 170, 185),
+            ForeColor = Color.FromArgb(220, 230, 245),
+            BackColor = Color.Transparent,
             Location = new Point(22, 50),
             AutoSize = true
         };
@@ -124,15 +142,24 @@ public class InstallerForm : Form {
         int contentX = 35;
         int contentW = 530;
 
+        // Тёмная полупрозрачная подложка для основного контента
+        Panel contentPanel = new Panel {
+            Location = new Point(0, 85),
+            Size = new Size(620, 515),
+            BackColor = Color.FromArgb(185, 18, 22, 30)
+        };
+        this.Controls.Add(contentPanel);
+
         // Папка установки
         Label lblFolder = new Label {
             Text = "Папка для установки:",
             Font = labelFont,
             ForeColor = Color.FromArgb(220, 225, 235),
-            Location = new Point(contentX, 105),
+            BackColor = Color.Transparent,
+            Location = new Point(contentX, 20),
             Size = new Size(contentW, 22)
         };
-        this.Controls.Add(lblFolder);
+        contentPanel.Controls.Add(lblFolder);
 
         string defaultInstallDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -144,10 +171,10 @@ public class InstallerForm : Form {
             BackColor = Color.FromArgb(36, 40, 50),
             ForeColor = Color.White,
             BorderStyle = BorderStyle.FixedSingle,
-            Location = new Point(contentX, 130),
+            Location = new Point(contentX, 45),
             Size = new Size(contentW - 110, 28)
         };
-        this.Controls.Add(txtPath);
+        contentPanel.Controls.Add(txtPath);
 
         btnBrowse = new Button {
             Text = "Обзор...",
@@ -156,7 +183,7 @@ public class InstallerForm : Form {
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand,
-            Location = new Point(contentX + contentW - 100, 129),
+            Location = new Point(contentX + contentW - 100, 44),
             Size = new Size(100, 29)
         };
         btnBrowse.FlatAppearance.BorderSize = 0;
@@ -167,67 +194,72 @@ public class InstallerForm : Form {
                 txtPath.Text = fbd.SelectedPath;
             }
         };
-        this.Controls.Add(btnBrowse);
+        contentPanel.Controls.Add(btnBrowse);
 
         // Опции
         Label lblOptions = new Label {
             Text = "Дополнительные параметры:",
             Font = labelFont,
             ForeColor = Color.FromArgb(220, 225, 235),
-            Location = new Point(contentX, 180),
+            BackColor = Color.Transparent,
+            Location = new Point(contentX, 90),
             Size = new Size(contentW, 22)
         };
-        this.Controls.Add(lblOptions);
+        contentPanel.Controls.Add(lblOptions);
 
         chkDesktopShortcut = new CheckBox {
             Text = "Создать ярлык на Рабочем столе",
             Font = inputFont,
             ForeColor = Color.FromArgb(210, 220, 235),
+            BackColor = Color.Transparent,
             Checked = true,
-            Location = new Point(contentX + 10, 205),
+            Location = new Point(contentX + 10, 115),
             Size = new Size(contentW, 26)
         };
-        this.Controls.Add(chkDesktopShortcut);
+        contentPanel.Controls.Add(chkDesktopShortcut);
 
         chkStartMenuShortcut = new CheckBox {
             Text = "Создать ярлык в меню «Пуск»",
             Font = inputFont,
             ForeColor = Color.FromArgb(210, 220, 235),
+            BackColor = Color.Transparent,
             Checked = true,
-            Location = new Point(contentX + 10, 235),
+            Location = new Point(contentX + 10, 145),
             Size = new Size(contentW, 26)
         };
-        this.Controls.Add(chkStartMenuShortcut);
+        contentPanel.Controls.Add(chkStartMenuShortcut);
 
         chkLaunchAfter = new CheckBox {
             Text = "Запустить VoxelFrame Launcher после завершения",
             Font = inputFont,
             ForeColor = Color.FromArgb(210, 220, 235),
+            BackColor = Color.Transparent,
             Checked = true,
-            Location = new Point(contentX + 10, 265),
+            Location = new Point(contentX + 10, 175),
             Size = new Size(contentW, 26)
         };
-        this.Controls.Add(chkLaunchAfter);
+        contentPanel.Controls.Add(chkLaunchAfter);
 
         // Версия для установки (автопроверка GitHub)
         Label lblVersion = new Label {
             Text = "Версия для установки (GitHub):",
             Font = labelFont,
             ForeColor = Color.FromArgb(220, 225, 235),
-            Location = new Point(contentX, 300),
+            BackColor = Color.Transparent,
+            Location = new Point(contentX, 213),
             Size = new Size(contentW, 22)
         };
-        this.Controls.Add(lblVersion);
+        contentPanel.Controls.Add(lblVersion);
 
         cmbVersion = new ComboBox {
             DropDownStyle = ComboBoxStyle.DropDownList,
             Font = inputFont,
             BackColor = Color.FromArgb(36, 40, 50),
             ForeColor = Color.White,
-            Location = new Point(contentX, 325),
+            Location = new Point(contentX, 238),
             Size = new Size(contentW - 190, 26)
         };
-        this.Controls.Add(cmbVersion);
+        contentPanel.Controls.Add(cmbVersion);
 
         btnUpdateInstaller = new Button {
             Text = "Обновить установщик",
@@ -236,32 +268,33 @@ public class InstallerForm : Form {
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand,
-            Location = new Point(contentX + contentW - 185, 324),
+            Location = new Point(contentX + contentW - 185, 237),
             Size = new Size(185, 27),
             Visible = false
         };
         btnUpdateInstaller.FlatAppearance.BorderSize = 0;
         btnUpdateInstaller.Click += async (s, e) => await SelfUpdateAsync();
-        this.Controls.Add(btnUpdateInstaller);
+        contentPanel.Controls.Add(btnUpdateInstaller);
 
         // Прогресс-бар
         progressBar = new ProgressBar {
-            Location = new Point(contentX, 365),
+            Location = new Point(contentX, 278),
             Size = new Size(contentW, 18),
             Visible = false
         };
-        this.Controls.Add(progressBar);
+        contentPanel.Controls.Add(progressBar);
 
         // Статус
         lblStatus = new Label {
             Text = "Проверка обновлений на GitHub...",
             Font = new Font("Segoe UI", 9, FontStyle.Regular),
-            ForeColor = Color.FromArgb(140, 150, 165),
+            ForeColor = Color.FromArgb(160, 175, 195),
+            BackColor = Color.Transparent,
             TextAlign = ContentAlignment.MiddleCenter,
-            Location = new Point(contentX, 395),
+            Location = new Point(contentX, 308),
             Size = new Size(contentW, 22)
         };
-        this.Controls.Add(lblStatus);
+        contentPanel.Controls.Add(lblStatus);
 
         // Кнопка Установить
         btnInstall = new Button {
@@ -271,12 +304,12 @@ public class InstallerForm : Form {
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand,
-            Location = new Point(contentX, 430),
+            Location = new Point(contentX, 345),
             Size = new Size(contentW - 140, 50)
         };
         btnInstall.FlatAppearance.BorderSize = 0;
         btnInstall.Click += async (s, e) => await StartInstallationAsync();
-        this.Controls.Add(btnInstall);
+        contentPanel.Controls.Add(btnInstall);
 
         // Кнопка Отмена / Закрыть
         btnCancel = new Button {
@@ -286,12 +319,12 @@ public class InstallerForm : Form {
             ForeColor = Color.FromArgb(200, 210, 225),
             FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand,
-            Location = new Point(contentX + contentW - 130, 430),
+            Location = new Point(contentX + contentW - 130, 345),
             Size = new Size(130, 50)
         };
         btnCancel.FlatAppearance.BorderSize = 0;
         btnCancel.Click += (s, e) => this.Close();
-        this.Controls.Add(btnCancel);
+        contentPanel.Controls.Add(btnCancel);
 
         // Автопроверка обновлений при запуске
         this.Shown += async (s, e) => await CheckForUpdatesAsync();

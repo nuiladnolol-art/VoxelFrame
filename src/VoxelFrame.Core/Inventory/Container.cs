@@ -7,7 +7,15 @@ namespace VoxelFrame.Core.Inventory;
 public sealed class Container {
     private readonly ItemEntry?[] _slots = new ItemEntry?[36];
 
-    public IReadOnlyList<ItemEntry> Entries => _slots.Where(e => e != null).Select(e => e!.Value).ToList();
+    public IReadOnlyList<ItemEntry> Entries {
+        get {
+            var list = new List<ItemEntry>();
+            for (int i = 0; i < _slots.Length; i++) {
+                if (_slots[i] is { } e) list.Add(e);
+            }
+            return list;
+        }
+    }
     public ItemEntry?[] Slots => _slots;
     public int Capacity => _slots.Length;
 
@@ -79,8 +87,13 @@ public sealed class Container {
         _slots[index] = entry;
     }
 
-    public int CountOf(ItemDefinition def) =>
-        _slots.Where(e => e != null && e.Value.Item.Definition == def).Sum(e => e!.Value.Quantity);
+    public int CountOf(ItemDefinition def) {
+        int sum = 0;
+        for (int i = 0; i < _slots.Length; i++) {
+            if (_slots[i] is { } e && e.Item.Definition == def) sum += e.Quantity;
+        }
+        return sum;
+    }
 
     private void RemoveItems(ItemDefinition def, int quantity) {
         int remaining = quantity;

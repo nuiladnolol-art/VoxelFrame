@@ -30,6 +30,10 @@ public sealed partial class GameWorld : IDisposable {
     public readonly HashSet<Vec3i> LootedStructureChests = new();
     public Vec3i SpawnBlock;
 
+    [ThreadStatic] public static bool SuppressNetworkSync;
+    public static Action<Vec3i, ushort, byte, bool, Dimension>? OnNetworkBlockChangeBroadcast;
+    public static Action<Vec3i, FurnaceData, Dimension>? OnFurnaceChangedBroadcast;
+
     private readonly WorldGrid _grid = new();
     private readonly Dictionary<Vec3i, GameChunk> _chunks = new();
     private readonly Dictionary<Vec3i, List<Vec3i>> _decor = new();   // чанк → позиции факелов/костров
@@ -610,6 +614,10 @@ public sealed partial class GameWorld : IDisposable {
         _grid.SetVoxel(w, in voxel);   // событие VoxelChanged → уведомление слоя освещения/мешей
         OnBlockChanged(w, in voxel);
 
+        if (!SuppressNetworkSync) {
+            OnNetworkBlockChangeBroadcast?.Invoke(w, voxel.TypeId, voxel.SubGridLayerMask, voxel.TypeId == 0, Dimension);
+        }
+
         if (oldVoxel.TypeId == GameData.BLog.Id && voxel.TypeId != GameData.BLog.Id) {
             CheckLeavesDecay(w);
         }
@@ -824,10 +832,12 @@ public sealed partial class GameWorld : IDisposable {
         Fluids.Tick(dt);
 
         // Животные: спавн и тик.
-        _animalSpawnTimer -= dt;
-        if (_animalSpawnTimer <= 0f) {
-            _animalSpawnTimer = 4f;
-            TrySpawnAnimal();
+        if (GameClient.Active == null) {
+            _animalSpawnTimer -= dt;
+            if (_animalSpawnTimer <= 0f) {
+                _animalSpawnTimer = 4f;
+                TrySpawnAnimal();
+            }
         }
         for (int i = 0; i < Animals.Count; i++) {
             Animals[i].Tick(dt, this, player);
@@ -847,6 +857,7 @@ public sealed partial class GameWorld : IDisposable {
         }
 
         // Огонь.
+        Fire.Tick(dt);
 
         // Рост посевов пшеницы на грядках
         TickCrops(dt);
@@ -904,15 +915,24 @@ public sealed partial class GameWorld : IDisposable {
         _grassSpreadTimer = 0.20f;
 
         if (_chunks.Count == 0) return;
+        int chunksToPick = Math.Min(_chunks.Count, 12);
         _tempChunkList.Clear();
+        int count = 0;
         foreach (var chunk in _chunks.Values) {
-            _tempChunkList.Add(chunk);
+            if (count < chunksToPick) {
+                _tempChunkList.Add(chunk);
+            } else {
+                int j = _random.Next(count + 1);
+                if (j < chunksToPick) {
+                    _tempChunkList[j] = chunk;
+                }
+            }
+            count++;
         }
         if (_tempChunkList.Count == 0) return;
 
-        int chunksToTick = Math.Min(_tempChunkList.Count, 12);
-        for (int c = 0; c < chunksToTick; c++) {
-            var chunk = _tempChunkList[_random.Next(_tempChunkList.Count)];
+        for (int c = 0; c < _tempChunkList.Count; c++) {
+            var chunk = _tempChunkList[c];
             // Используем карту высот чанка для мгновенного попадания на поверхность
             for (int r = 0; r < 8; r++) {
                 int lx = _random.Next(Chunk.SizeX);
@@ -1070,25 +1090,27 @@ public sealed partial class GameWorld : IDisposable {
     }
 
     public void TickHostileMobs(float dt, Player player, GameSession session) {
-        _hostileSpawnTimer -= dt;
-        if (_hostileSpawnTimer <= 0f) {
-            // В Энде фоновый спавн в 2 раза реже (16с) — эндэрмены не должны раздражать в бою с боссом
-            _hostileSpawnTimer = Dimension == Dimension.End ? 16f : 8f;
-            int nearbyHostiles = 0;
-            foreach (var m in HostileMobs) {
-                if (m.Alive && Vector3.DistanceSquared(m.Position, player.Position) < 45f * 45f) {
-                    nearbyHostiles++;
+        if (GameClient.Active == null) {
+            _hostileSpawnTimer -= dt;
+            if (_hostileSpawnTimer <= 0f) {
+                // В Энде фоновый спавн в 2 раза реже (16с) — эндэрмены не должны раздражать в бою с боссом
+                _hostileSpawnTimer = Dimension == Dimension.End ? 16f : 8f;
+                int nearbyHostiles = 0;
+                foreach (var m in HostileMobs) {
+                    if (m.Alive && Vector3.DistanceSquared(m.Position, player.Position) < 45f * 45f) {
+                        nearbyHostiles++;
+                    }
+                }
+                // В Энде лимит фоновых мобов ниже (3 вместо 8)
+                if (nearbyHostiles < (Dimension == Dimension.End ? 3 : 8)) {
+                    TrySpawnHostileNearPlayer(player, session);
                 }
             }
-            // В Энде лимит фоновых мобов ниже (3 вместо 8)
-            if (nearbyHostiles < (Dimension == Dimension.End ? 3 : 8)) {
-                TrySpawnHostileNearPlayer(player, session);
+            _spawnerTimer -= dt;
+            if (_spawnerTimer <= 0f) {
+                _spawnerTimer = 4.0f + (float)_random.NextDouble() * 3.0f;
+                TickNearbySpawners(player);
             }
-        }
-        _spawnerTimer -= dt;
-        if (_spawnerTimer <= 0f) {
-            _spawnerTimer = 4.0f + (float)_random.NextDouble() * 3.0f;
-            TickNearbySpawners(player);
         }
 
         foreach (var h in HostileMobs) h.Tick(dt, this, player, session);

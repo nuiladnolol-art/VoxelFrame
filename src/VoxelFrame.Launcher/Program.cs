@@ -63,6 +63,22 @@ public class LauncherForm : Form {
             this.Icon = IconHelper.GetLauncherIcon();
         } catch { }
 
+        // Панорама на фоне лаунчера
+        try {
+            string[] candidates = {
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "assets", "textures", "gui", "panorama.jpg"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "textures", "gui", "panorama.jpg"),
+                "panorama.jpg"
+            };
+            foreach (var bgPath in candidates) {
+                if (File.Exists(bgPath)) {
+                    this.BackgroundImage = Image.FromFile(bgPath);
+                    this.BackgroundImageLayout = ImageLayout.Stretch;
+                    break;
+                }
+            }
+        } catch { }
+
         Font titleFont = new Font("Segoe UI", 22, FontStyle.Bold);
         Font subTitleFont = new Font("Segoe UI", 10, FontStyle.Regular);
         Font labelFont = new Font("Segoe UI", 10, FontStyle.Bold);
@@ -72,7 +88,7 @@ public class LauncherForm : Form {
         Panel headerPanel = new Panel {
             Dock = DockStyle.Top,
             Height = 85,
-            BackColor = Color.FromArgb(18, 20, 26)
+            BackColor = Color.FromArgb(185, 18, 20, 26)
         };
         this.Controls.Add(headerPanel);
 
@@ -80,16 +96,17 @@ public class LauncherForm : Form {
             Text = "VOXELFRAME",
             Font = titleFont,
             ForeColor = Color.FromArgb(255, 215, 90),
+            BackColor = Color.Transparent,
             Location = new Point(20, 12),
             AutoSize = true
         };
         headerPanel.Controls.Add(lblTitle);
 
         Label lblBadge = new Label {
-            Text = "1.0.0-pre3 fix",
+            Text = "1.0.0",
             Font = new Font("Segoe UI", 9, FontStyle.Bold),
             ForeColor = Color.FromArgb(100, 220, 120),
-            BackColor = Color.FromArgb(30, 60, 40),
+            BackColor = Color.FromArgb(140, 30, 60, 40),
             TextAlign = ContentAlignment.MiddleCenter,
             Location = new Point(245, 22),
             Size = new Size(130, 24)
@@ -99,11 +116,20 @@ public class LauncherForm : Form {
         Label lblSubTitle = new Label {
             Text = "Официальный менеджер релизов · Поддержка GitHub Releases",
             Font = subTitleFont,
-            ForeColor = Color.FromArgb(160, 170, 185),
+            ForeColor = Color.FromArgb(220, 230, 245),
+            BackColor = Color.Transparent,
             Location = new Point(22, 52),
             AutoSize = true
         };
         headerPanel.Controls.Add(lblSubTitle);
+
+        // Тёмная полупрозрачная подложка для основного контента
+        Panel contentPanel = new Panel {
+            Location = new Point(0, 85),
+            Size = new Size(640, 475),
+            BackColor = Color.FromArgb(185, 18, 22, 30)
+        };
+        this.Controls.Add(contentPanel);
 
         int contentX = 35;
         int contentW = 550;
@@ -113,24 +139,25 @@ public class LauncherForm : Form {
             Text = "Версия игры:",
             Font = labelFont,
             ForeColor = Color.FromArgb(220, 225, 235),
-            Location = new Point(contentX, 100),
+            BackColor = Color.Transparent,
+            Location = new Point(contentX, 15),
             Size = new Size(contentW - 130, 22)
         };
-        this.Controls.Add(lblVer);
+        contentPanel.Controls.Add(lblVer);
 
         btnRefresh = new Button {
-            Text = "🔄 Проверить GitHub",
+            Text = "🔄 GitHub",
             Font = new Font("Segoe UI", 8, FontStyle.Bold),
             BackColor = Color.FromArgb(45, 52, 68),
             ForeColor = Color.FromArgb(210, 220, 240),
             FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand,
-            Location = new Point(contentX + contentW - 145, 96),
-            Size = new Size(145, 26)
+            Location = new Point(contentX + contentW - 115, 11),
+            Size = new Size(115, 26)
         };
         btnRefresh.FlatAppearance.BorderSize = 0;
         btnRefresh.Click += async (s, e) => await CheckGitHubReleasesAsync();
-        this.Controls.Add(btnRefresh);
+        contentPanel.Controls.Add(btnRefresh);
 
         cbVersion = new ComboBox {
             DropDownStyle = ComboBoxStyle.DropDownList,
@@ -138,21 +165,22 @@ public class LauncherForm : Form {
             BackColor = Color.FromArgb(36, 40, 50),
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
-            Location = new Point(contentX, 126),
+            Location = new Point(contentX, 41),
             Size = new Size(contentW, 30)
         };
         cbVersion.SelectedIndexChanged += (s, e) => UpdatePlayButtonState();
-        this.Controls.Add(cbVersion);
+        contentPanel.Controls.Add(cbVersion);
 
         // 2. Имя игрока (Никнейм)
         Label lblNickname = new Label {
             Text = "Имя игрока (Никнейм):",
             Font = labelFont,
             ForeColor = Color.FromArgb(220, 225, 235),
-            Location = new Point(contentX, 170),
+            BackColor = Color.Transparent,
+            Location = new Point(contentX, 85),
             Size = new Size(contentW, 22)
         };
-        this.Controls.Add(lblNickname);
+        contentPanel.Controls.Add(lblNickname);
 
         txtNickname = new TextBox {
             Text = LoadSavedNickname(),
@@ -160,20 +188,21 @@ public class LauncherForm : Form {
             BackColor = Color.FromArgb(36, 40, 50),
             ForeColor = Color.White,
             BorderStyle = BorderStyle.FixedSingle,
-            Location = new Point(contentX, 195),
+            Location = new Point(contentX, 110),
             Size = new Size(contentW, 30)
         };
-        this.Controls.Add(txtNickname);
+        contentPanel.Controls.Add(txtNickname);
 
         // 3. Режим и разрешение
         Label lblResolution = new Label {
             Text = "Режим экрана и разрешение:",
             Font = labelFont,
             ForeColor = Color.FromArgb(220, 225, 235),
-            Location = new Point(contentX, 240),
+            BackColor = Color.Transparent,
+            Location = new Point(contentX, 155),
             Size = new Size(265, 22)
         };
-        this.Controls.Add(lblResolution);
+        contentPanel.Controls.Add(lblResolution);
 
         cbResolution = new ComboBox {
             DropDownStyle = ComboBoxStyle.DropDownList,
@@ -181,7 +210,7 @@ public class LauncherForm : Form {
             BackColor = Color.FromArgb(36, 40, 50),
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
-            Location = new Point(contentX, 265),
+            Location = new Point(contentX, 180),
             Size = new Size(265, 30)
         };
         cbResolution.Items.AddRange(new object[] {
@@ -193,17 +222,18 @@ public class LauncherForm : Form {
             "Полный экран 2560×1440"
         });
         cbResolution.SelectedIndex = LoadSavedScreenMode();
-        this.Controls.Add(cbResolution);
+        contentPanel.Controls.Add(cbResolution);
 
         // 4. Память (RAM)
         Label lblRamTitle = new Label {
             Text = "Выделение памяти:",
             Font = labelFont,
             ForeColor = Color.FromArgb(220, 225, 235),
-            Location = new Point(contentX + 285, 240),
+            BackColor = Color.Transparent,
+            Location = new Point(contentX + 285, 155),
             Size = new Size(265, 22)
         };
-        this.Controls.Add(lblRamTitle);
+        contentPanel.Controls.Add(lblRamTitle);
 
         cbRam = new ComboBox {
             DropDownStyle = ComboBoxStyle.DropDownList,
@@ -211,7 +241,7 @@ public class LauncherForm : Form {
             BackColor = Color.FromArgb(36, 40, 50),
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
-            Location = new Point(contentX + 285, 265),
+            Location = new Point(contentX + 285, 180),
             Size = new Size(265, 30)
         };
         cbRam.Items.AddRange(new object[] {
@@ -220,26 +250,27 @@ public class LauncherForm : Form {
             "8 ГБ RAM (Максимум)"
         });
         cbRam.SelectedIndex = 1;
-        this.Controls.Add(cbRam);
+        contentPanel.Controls.Add(cbRam);
 
         // Прогресс бар скачивания
         pbDownload = new ProgressBar {
-            Location = new Point(contentX, 315),
+            Location = new Point(contentX, 228),
             Size = new Size(contentW, 14),
             Visible = false
         };
-        this.Controls.Add(pbDownload);
+        contentPanel.Controls.Add(pbDownload);
 
         // Статус
         lblStatus = new Label {
-            Text = "Готов к запуску без открытия терминалов",
+            Text = "Готов к запуску",
             Font = new Font("Segoe UI", 9, FontStyle.Regular),
-            ForeColor = Color.FromArgb(140, 150, 165),
+            ForeColor = Color.FromArgb(160, 175, 195),
+            BackColor = Color.Transparent,
             TextAlign = ContentAlignment.MiddleCenter,
-            Location = new Point(contentX, 335),
+            Location = new Point(contentX, 248),
             Size = new Size(contentW, 22)
         };
-        this.Controls.Add(lblStatus);
+        contentPanel.Controls.Add(lblStatus);
 
         // Кнопка Запуска
         btnPlay = new Button {
@@ -249,7 +280,7 @@ public class LauncherForm : Form {
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand,
-            Location = new Point(contentX, 365),
+            Location = new Point(contentX, 278),
             Size = new Size(contentW, 52)
         };
         btnPlay.FlatAppearance.BorderSize = 0;
@@ -260,7 +291,7 @@ public class LauncherForm : Form {
             if (btnPlay.Enabled) btnPlay.BackColor = Color.FromArgb(50, 160, 75);
         };
         btnPlay.Click += async (s, e) => await HandlePlayClickAsync();
-        this.Controls.Add(btnPlay);
+        contentPanel.Controls.Add(btnPlay);
 
         // Дополнительные кнопки быстрого доступа (папка сохранений, скриншоты)
         Button btnOpenSaves = new Button {
@@ -270,7 +301,7 @@ public class LauncherForm : Form {
             ForeColor = Color.FromArgb(200, 215, 235),
             FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand,
-            Location = new Point(contentX, 426),
+            Location = new Point(contentX, 340),
             Size = new Size(265, 32)
         };
         btnOpenSaves.FlatAppearance.BorderSize = 0;
@@ -281,7 +312,7 @@ public class LauncherForm : Form {
                 Process.Start(new ProcessStartInfo { FileName = sDir, UseShellExecute = true });
             } catch { }
         };
-        this.Controls.Add(btnOpenSaves);
+        contentPanel.Controls.Add(btnOpenSaves);
 
         Button btnOpenScreenshots = new Button {
             Text = "📸 Скриншоты",
@@ -290,7 +321,7 @@ public class LauncherForm : Form {
             ForeColor = Color.FromArgb(200, 215, 235),
             FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand,
-            Location = new Point(contentX + 285, 426),
+            Location = new Point(contentX + 285, 340),
             Size = new Size(265, 32)
         };
         btnOpenScreenshots.FlatAppearance.BorderSize = 0;
@@ -303,18 +334,19 @@ public class LauncherForm : Form {
                 Process.Start(new ProcessStartInfo { FileName = scrDir, UseShellExecute = true });
             } catch { }
         };
-        this.Controls.Add(btnOpenScreenshots);
+        contentPanel.Controls.Add(btnOpenScreenshots);
 
         // Панель подсказок по управлению
         Label lblControlsHint = new Label {
-            Text = "Управление: WASD — ходьба | Пробел — прыжок | Shift — красться | Ctrl — бег | E — инвентарь | F5 — вид | F2 — скриншот",
+            Text = "WASD — движение  |  E — инвентарь  |  F5 — вид  |  F2 — скриншот  |  Пробел — прыжок",
             Font = new Font("Segoe UI", 8, FontStyle.Regular),
-            ForeColor = Color.FromArgb(115, 125, 140),
+            ForeColor = Color.FromArgb(100, 115, 135),
+            BackColor = Color.Transparent,
             TextAlign = ContentAlignment.MiddleCenter,
-            Location = new Point(contentX, 468),
-            Size = new Size(contentW, 35)
+            Location = new Point(contentX, 385),
+            Size = new Size(contentW, 28)
         };
-        this.Controls.Add(lblControlsHint);
+        contentPanel.Controls.Add(lblControlsHint);
 
         this.Size = new Size(640, 560);
 
@@ -351,7 +383,7 @@ public class LauncherForm : Form {
         if (newestExe != null) {
             _versions.Add(new GameReleaseItem {
                 DisplayName = "⚡ VoxelFrame (Актуальная версия)",
-                Tag = "v1.0.0-pre3-fix",
+                Tag = "v1.0.0",
                 IsInstalled = true,
                 InstallPath = Path.GetDirectoryName(newestExe)!,
                 ExePath = newestExe
@@ -359,7 +391,7 @@ public class LauncherForm : Form {
         } else if (gameDir != null) {
             _versions.Add(new GameReleaseItem {
                 DisplayName = "⚡ VoxelFrame (Актуальная версия)",
-                Tag = "v1.0.0-pre3-fix",
+                Tag = "v1.0.0",
                 IsLocalDev = true,
                 IsInstalled = true,
                 InstallPath = gameDir

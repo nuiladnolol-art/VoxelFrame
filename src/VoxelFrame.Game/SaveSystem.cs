@@ -105,23 +105,27 @@ public static class SaveSystem {
             bw.Write(p.SelectedSlot);
 
             var inv = p.Inventory;
-            var nonNullSlots = inv.Slots
-                .Select((e, idx) => (e, idx))
-                .Where(x => x.e != null)
-                .ToList();
-            bw.Write(nonNullSlots.Count);
-            foreach (var (e, idx) in nonNullSlots) {
-                bw.Write(idx);
-                bw.Write(e!.Value.Item.Definition.Id);
-                bw.Write(e.Value.Quantity);
-                if (GameData.GetToolTier(e!.Value.Item.Definition.Id) > 0) bw.Write(e.Value.Item.Durability);
+            int nonNullCount = 0;
+            for (int i = 0; i < inv.Capacity; i++) {
+                var s = inv.Slots[i];
+                if (s != null && s.Value.Quantity > 0) nonNullCount++;
+            }
+            bw.Write(nonNullCount);
+            for (int i = 0; i < inv.Capacity; i++) {
+                var s = inv.Slots[i];
+                if (s != null && s.Value.Quantity > 0) {
+                    bw.Write(i);
+                    bw.Write(s.Value.Item.Definition.Id);
+                    bw.Write(s.Value.Quantity);
+                    if (GameData.HasDurability(s.Value.Item.Definition.Id)) bw.Write(s.Value.Item.Durability);
+                }
             }
 
             if (p.OffhandEntry != null) {
                 bw.Write(true);
                 bw.Write(p.OffhandEntry.Value.Item.Definition.Id);
                 bw.Write(p.OffhandEntry.Value.Quantity);
-                if (GameData.GetToolTier(p.OffhandEntry.Value.Item.Definition.Id) > 0) bw.Write(p.OffhandEntry.Value.Item.Durability);
+                if (GameData.HasDurability(p.OffhandEntry.Value.Item.Definition.Id)) bw.Write(p.OffhandEntry.Value.Item.Durability);
             } else {
                 bw.Write(false);
             }
@@ -387,7 +391,7 @@ public static class SaveSystem {
             ushort defId = br.ReadUInt16();
             int qty = br.ReadInt32();
             if (version >= 5 && version < 13) br.ReadSingle(); // legacy condition (удалена в v13)
-            int dur = version >= 16 && GameData.GetToolTier(defId) > 0 ? br.ReadInt32() : 0;
+            int dur = version >= 16 && (version >= 20 ? GameData.HasDurability(defId) : GameData.GetToolTier(defId) > 0) ? br.ReadInt32() : 0;
             if (GameData.Items.TryGetValue(defId, out var def)) {
                 var item = GameData.NewItem(def);
                 if (dur > 0) item.Durability = dur;
@@ -401,7 +405,7 @@ public static class SaveSystem {
                 ushort defId = br.ReadUInt16();
                 int qty = br.ReadInt32();
                 if (version < 13) br.ReadSingle(); // legacy condition (удалена в v13)
-                int dur = version >= 16 && GameData.GetToolTier(defId) > 0 ? br.ReadInt32() : 0;
+                int dur = version >= 16 && (version >= 20 ? GameData.HasDurability(defId) : GameData.GetToolTier(defId) > 0) ? br.ReadInt32() : 0;
                 if (GameData.Items.TryGetValue(defId, out var def)) {
                     var item = GameData.NewItem(def);
                     if (dur > 0) item.Durability = dur;
@@ -629,7 +633,7 @@ public static class SaveSystem {
             int index = br.ReadInt32();
             ushort defId = br.ReadUInt16();
             int qty = br.ReadInt32();
-            int dur = version >= 16 && GameData.GetToolTier(defId) > 0 ? br.ReadInt32() : 0;
+            int dur = version >= 16 && (version >= 20 ? GameData.HasDurability(defId) : GameData.GetToolTier(defId) > 0) ? br.ReadInt32() : 0;
             if (GameData.Items.TryGetValue(defId, out var def)) {
                 var item = GameData.NewItem(def);
                 if (dur > 0) item.Durability = dur;
@@ -640,7 +644,7 @@ public static class SaveSystem {
         if (br.ReadBoolean()) {
             ushort defId = br.ReadUInt16();
             int qty = br.ReadInt32();
-            int dur = version >= 16 && GameData.GetToolTier(defId) > 0 ? br.ReadInt32() : 0;
+            int dur = version >= 16 && (version >= 20 ? GameData.HasDurability(defId) : GameData.GetToolTier(defId) > 0) ? br.ReadInt32() : 0;
             if (GameData.Items.TryGetValue(defId, out var def)) {
                 var item = GameData.NewItem(def);
                 if (dur > 0) item.Durability = dur;
@@ -870,9 +874,11 @@ public static class SaveSystem {
     private static Vector3 ReadVec3(BinaryReader br) => new(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
 
     public static string GetPlayerDataDirectory() {
-        string dir = Path.Combine(SaveDirectory, "playerdata");
-        Directory.CreateDirectory(dir);
-        return dir;
+        string baseDir = !string.IsNullOrEmpty(CurrentWorldPath)
+            ? Path.Combine(Path.GetDirectoryName(CurrentWorldPath)!, Path.GetFileNameWithoutExtension(CurrentWorldPath) + "_players")
+            : Path.Combine(SaveDirectory, "playerdata");
+        Directory.CreateDirectory(baseDir);
+        return baseDir;
     }
 
     public static string GetPlayerDataPath(string playerName) {
@@ -906,16 +912,20 @@ public static class SaveSystem {
                 bw.Write((byte)player.Dimension);
 
                 // Инвентарь
-                var nonNullSlots = player.Inventory.Slots
-                    .Select((e, idx) => (e, idx))
-                    .Where(x => x.e != null)
-                    .ToList();
-                bw.Write(nonNullSlots.Count);
-                foreach (var (e, idx) in nonNullSlots) {
-                    bw.Write(idx);
-                    bw.Write(e!.Value.Item.Definition.Id);
-                    bw.Write(e.Value.Quantity);
-                    bw.Write(e.Value.Item.Durability);
+                int nonNullCount = 0;
+                for (int i = 0; i < player.Inventory.Capacity; i++) {
+                    var s = player.Inventory.Slots[i];
+                    if (s != null && s.Value.Quantity > 0) nonNullCount++;
+                }
+                bw.Write(nonNullCount);
+                for (int i = 0; i < player.Inventory.Capacity; i++) {
+                    var s = player.Inventory.Slots[i];
+                    if (s != null && s.Value.Quantity > 0) {
+                        bw.Write(i);
+                        bw.Write(s.Value.Item.Definition.Id);
+                        bw.Write(s.Value.Quantity);
+                        bw.Write(s.Value.Item.Durability);
+                    }
                 }
 
                 // Оффхэнд
@@ -941,7 +951,9 @@ public static class SaveSystem {
                 }
             }
             File.Move(tmp, path, overwrite: true);
-        } catch { }
+        } catch (Exception ex) {
+            Console.WriteLine($"[SaveSystem] Ошибка сохранения данных игрока {playerName}: {ex.Message}");
+        }
     }
 
     public static bool LoadPlayerData(string playerName, Player player) {
@@ -1017,7 +1029,8 @@ public static class SaveSystem {
                 }
             }
             return true;
-        } catch {
+        } catch (Exception ex) {
+            Console.WriteLine($"[SaveSystem] Ошибка загрузки данных игрока {playerName}: {ex.Message}");
             return false;
         }
     }
@@ -1056,7 +1069,7 @@ public static class SaveSystem {
     public static bool PostFxGoldenHour = true;
     public static bool PostFxBloom = true;
 
-    public static string SelectedSkin = "steve";
+    public static string SelectedSkin = "cyan";
 
     public static void SaveSettings() {
         try {
@@ -1103,7 +1116,9 @@ public static class SaveSystem {
                 ["DirectConnectPort"] = Screens.DirectConnectPort,
             };
             File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(obj, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-        } catch { }
+        } catch (Exception ex) {
+            Console.WriteLine($"[SaveSystem] Ошибка сохранения настроек: {ex.Message}");
+        }
     }
 
     public static void LoadSettings() {
@@ -1160,6 +1175,9 @@ public static class SaveSystem {
             });
             S("DirectConnectIp", v => Screens.DirectConnectIp = v);
             S("DirectConnectPort", v => Screens.DirectConnectPort = v);
-        } catch { }
+        } catch (Exception ex) {
+            Console.WriteLine($"[SaveSystem] Ошибка загрузки настроек: {ex.Message}");
+        }
     }
 }
+

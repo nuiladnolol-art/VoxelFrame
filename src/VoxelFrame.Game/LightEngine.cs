@@ -20,9 +20,13 @@ public static class LightEngine {
     /// (клетка получает финальное значение с первого визита), кэш соседних
     /// секций и «крыша» колонки из готовых карт Surface вместо обхода мира.
     /// </summary>
-    private static readonly Queue<int>[] SunBuckets = CreateSunBuckets();
-    private static readonly GameChunk?[] FaceNeighbors = new GameChunk?[6];
-    private static readonly GameChunk?[] ColumnSections = new GameChunk?[6];
+    [ThreadStatic] private static Queue<int>[]? _tSunBuckets;
+    [ThreadStatic] private static GameChunk?[]? _tFaceNeighbors;
+    [ThreadStatic] private static GameChunk?[]? _tColumnSections;
+
+    private static Queue<int>[] SunBuckets => _tSunBuckets ??= CreateSunBuckets();
+    private static GameChunk?[] FaceNeighbors => _tFaceNeighbors ??= new GameChunk?[6];
+    private static GameChunk?[] ColumnSections => _tColumnSections ??= new GameChunk?[6];
 
     private static Queue<int>[] CreateSunBuckets() {
         var b = new Queue<int>[14];
@@ -128,13 +132,15 @@ public static class LightEngine {
 
         // 3. Спуск по корзинам: уровни обрабатываются от больших к меньшим,
         //    поэтому первое присвоение клетке — окончательное.
-        for (int level = 14; level >= 2; level--) {
+        for (int level = 14; level >= 1; level--) {
             var q = SunBuckets[level - 1];
             int next = level - 1;
             while (q.Count > 0) {
                 int idx = q.Dequeue();
                 if (gc.SunLight[idx] >= level) continue;
                 gc.SunLight[idx] = (byte)level;
+
+                if (next < 1) continue; // уровень 0 не распространяется дальше
 
                 // Index(x,y,z) = (x*32 + z)*32 + y ⇒ обратная распаковка сдвигами.
                 int x = idx >> 10, z = (idx >> 5) & 31, y = idx & 31;

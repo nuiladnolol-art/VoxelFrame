@@ -202,6 +202,8 @@ public static class Collision {
 
 /// <summary>Предмет в мире. Не исчезает — масса сохраняется.</summary>
 public sealed class ItemPickup {
+    private static uint _nextId = 1;
+    public uint Id = Interlocked.Increment(ref _nextId);
     public ItemInstance Item;
     public ItemDefinition Definition => Item.Definition;
     public int Quantity;
@@ -276,6 +278,8 @@ public sealed class ItemPickup {
 public enum AnimalType { Pig, Cow, Sheep, Chicken }
 
 public sealed class Animal {
+    private static uint _nextId = 1;
+    public uint Id = Interlocked.Increment(ref _nextId);
     public AnimalType Type;
     public Vector3 Position;
     public Vector3 Velocity;

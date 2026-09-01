@@ -94,7 +94,7 @@ public static class GameData {
         Id = 22, Name = "Шерсть", Category = MaterialCategory.Organic,
     };
     public static readonly Material WaterM = new() {
-        Id = 23, Name = "Вода", Category = MaterialCategory.Soil,
+        Id = 23, Name = "Вода", Category = MaterialCategory.Fluid,
     };
     public static readonly Material LavaM = new() {
         Id = 24, Name = "Лава", Category = MaterialCategory.Stone,
@@ -574,8 +574,14 @@ public static class GameData {
         if (itemId == IronPickaxeItem.Id || itemId == IronAxeItem.Id || itemId == IronShovelItem.Id || itemId == IronSwordItem.Id || itemId == IronHoeItem.Id) return 250;
         if (itemId == GoldPickaxeItem.Id || itemId == GoldAxeItem.Id || itemId == GoldShovelItem.Id || itemId == GoldSwordItem.Id || itemId == GoldHoeItem.Id) return 32;
         if (itemId == DiamondPickaxeItem.Id || itemId == DiamondAxeItem.Id || itemId == DiamondShovelItem.Id || itemId == DiamondSwordItem.Id || itemId == DiamondHoeItem.Id) return 1561;
+        if (itemId == BowItem.Id) return 384;
+        if (itemId == ShieldItem.Id) return 336;
+        if (itemId == FlintAndSteelItem.Id) return 64;
         return 0;
     }
+
+    /// <summary>Проверяет, имеет ли предмет запас прочности (инструменты, оружие, доспехи, щит, огниво).</summary>
+    public static bool HasDurability(ushort itemId) => GetMaxItemDurability(itemId) > 0;
 
     public static bool RequiresPickaxe(ushort blockId) =>
         blockId == BStone.Id || blockId == BCobblestone.Id || blockId == BCoalOre.Id ||

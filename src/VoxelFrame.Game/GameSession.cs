@@ -737,6 +737,7 @@ public sealed class GameSession {
                         Velocity = new Vector3(MathF.Cos(angle) * speed, 3.5f + rng.NextSingle() * 2.0f, MathF.Sin(angle) * speed)
                     };
                     World.Pickups.Add(pickup);
+                    GameClient.Active?.SendDropItem(slot.Value.Item.Definition.Id, slot.Value.Quantity, slot.Value.Item.Durability);
                 }
             }
             if (Player.OffhandEntry != null) {
@@ -747,6 +748,7 @@ public sealed class GameSession {
                     Velocity = new Vector3(MathF.Cos(angle) * speed, 3.5f + rng.NextSingle() * 2.0f, MathF.Sin(angle) * speed)
                 };
                 World.Pickups.Add(pickup);
+                GameClient.Active?.SendDropItem(Player.OffhandEntry.Value.Item.Definition.Id, Player.OffhandEntry.Value.Quantity, Player.OffhandEntry.Value.Item.Durability);
                 Player.OffhandEntry = null;
             }
             // Дроп брони
@@ -759,10 +761,12 @@ public sealed class GameSession {
                         Velocity = new Vector3(MathF.Cos(angle) * speed, 3.5f + rng.NextSingle() * 2.0f, MathF.Sin(angle) * speed)
                     };
                     World.Pickups.Add(pickup);
+                    GameClient.Active?.SendDropItem(ae.Item.Definition.Id, ae.Quantity, ae.Item.Durability);
                     Player.Armor[i] = null;
                 }
             }
             Player.Inventory.Clear();
+            GameClient.Active?.SendInventoryUpdate(Player, (byte)World.Dimension);
         }
         Player.Health = 0f;
         Player.Velocity = Vector3.Zero;

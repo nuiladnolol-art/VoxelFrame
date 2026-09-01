@@ -26,6 +26,7 @@ public sealed partial class Player {
     public float Yaw;
     public float Pitch;
     public bool OnGround;
+    public string SkinName { get; set; } = "cyan";
     public Dimension Dimension = Dimension.Overworld;
     public float Health = 20f;           // макс. 20
     public float MaxHealth = 20f;
@@ -301,11 +302,18 @@ public sealed partial class Player {
 
     /// <summary>Бросок Жемчуга Эндера: дуга вперёд, при падении на блок — телепорт.</summary>
     private void ThrowEnderPearl(GameWorld world, GameSession session) {
-        world.Arrows.Add(new ArrowProjectile(Eye + Forward * 0.4f, Forward * 20f, null) {
+        var pos = Eye + Forward * 0.4f;
+        var vel = Forward * 20f;
+        world.Arrows.Add(new ArrowProjectile(pos, vel, null) {
             IsEnderPearl = true,
             LifeTime = 20f
         });
         SoundSystem.PlayBowShoot();
+        GameClient.Active?.SendSpawnProjectile(pos, vel, 2, (byte)world.Dimension);
+        if (GameServer.Active != null) {
+            var spawnProjP = NetworkProtocol.WriteSpawnProjectile(1, pos, vel, 2, (byte)world.Dimension);
+            GameServer.Active.Broadcast(spawnProjP);
+        }
     }
 
     /// <summary>Бросок Ока Эндера: летит к ближайшей крепости, затем падает и возвращается пикапом.</summary>
@@ -320,8 +328,14 @@ public sealed partial class Player {
             vel = Forward * 12f + Vector3.UnitY * 6f;
             session.AddMessage("Око Эндера кружится... поблизости нет крепости.");
         }
-        world.Arrows.Add(new ArrowProjectile(Eye + Forward * 0.4f, vel, null) { IsEyeOfEnder = true, LifeTime = 12f });
+        var pos = Eye + Forward * 0.4f;
+        world.Arrows.Add(new ArrowProjectile(pos, vel, null) { IsEyeOfEnder = true, LifeTime = 12f });
         SoundSystem.PlayBowShoot();
+        GameClient.Active?.SendSpawnProjectile(pos, vel, 4, (byte)world.Dimension);
+        if (GameServer.Active != null) {
+            var spawnProjP = NetworkProtocol.WriteSpawnProjectile(1, pos, vel, 4, (byte)world.Dimension);
+            GameServer.Active.Broadcast(spawnProjP);
+        }
     }
 
     public void Update(float dt, in PlayerInput input, GameWorld world, GameSession session) {
@@ -892,6 +906,11 @@ public sealed partial class Player {
                     Velocity = Forward * 5.0f + new Vector3(0f, 2.0f, 0f)
                 };
                 world.Pickups.Add(pickup);
+                GameClient.Active?.SendDropItem(entry.Value.Item.Definition.Id, 1, entry.Value.Item.Durability);
+                if (GameServer.Active != null) {
+                    var actP = NetworkProtocol.WritePlayerDropItem(1, entry.Value.Item.Definition.Id, 1, entry.Value.Item.Durability);
+                    GameServer.Active.Broadcast(actP);
+                }
             }
         }
 
@@ -1012,9 +1031,11 @@ public sealed partial class Player {
                     session.ActiveChestPos = session.TargetBlock;
                     session.Ui = UiState.Chest;
                     SoundSystem.PlayChest();
+                    GameClient.Active?.SendRequestChest(session.ActiveChestPos, (byte)session.World.Dimension);
                     wantUse = false;
                 } else if (targetVox.TypeId == GameData.BJukebox.Id) {
                     wantUse = false;
+                    PlaceCooldown = 0.25f;
                     bool hasDiscInside = targetVox.SubGridLayerMask == 1;
                     if (hasDiscInside) {
                         // Извлекаем пластинку из проигрывателя
@@ -1022,6 +1043,8 @@ public sealed partial class Player {
                         world.SetVoxelRaw(session.TargetBlock, in targetVox);
                         SoundSystem.StopDisc();
                         world.SpawnPickup(GameData.MusicDiscItem.Id, 1, session.TargetBlock);
+                        GameClient.Active?.SendBlockChange(session.TargetBlock.X, session.TargetBlock.Y, session.TargetBlock.Z, GameData.BJukebox.Id, 0, false, (byte)session.World.Dimension);
+                        GameServer.Active?.BroadcastHostBlockChange(session.TargetBlock.X, session.TargetBlock.Y, session.TargetBlock.Z, GameData.BJukebox.Id, 0, false);
                         session.ShowActionbar("§7♪ Воспроизведение пластинки остановлено ♪", 3.5f);
                     } else {
                         // Если в руках пластинка — вставляем её в проигрыватель
@@ -1032,6 +1055,8 @@ public sealed partial class Player {
                                 world.SetVoxelRaw(session.TargetBlock, in targetVox);
                                 SoundSystem.PlayDisc("disc_circus");
                                 world.SpawnCrit(new Vector3(session.TargetBlock.X + 0.5f, session.TargetBlock.Y + 1.1f, session.TargetBlock.Z + 0.5f), 10);
+                                GameClient.Active?.SendBlockChange(session.TargetBlock.X, session.TargetBlock.Y, session.TargetBlock.Z, GameData.BJukebox.Id, 1, false, (byte)session.World.Dimension);
+                                GameServer.Active?.BroadcastHostBlockChange(session.TargetBlock.X, session.TargetBlock.Y, session.TargetBlock.Z, GameData.BJukebox.Id, 1, false);
                                 session.ShowActionbar("§e♪ Сейчас играет: The Amazing Digital Circus - The One Who's Running the Show [8-Bit Remix] ♪", 5.0f);
                             }
                         }
@@ -1079,6 +1104,11 @@ public sealed partial class Player {
                         session.AddMessage("Вы не можете спать: рядом бродят монстры!");
                     } else if (isNightOrStorm) {
                         session.StartSleep(session.TargetBlock);
+                        GameClient.Active?.SendBedSleep(true, session.TargetBlock);
+                        if (GameServer.Active != null) {
+                            var timePacket = NetworkProtocol.WriteTimeWeatherSync(0.25f, (int)WeatherType.Clear);
+                            GameServer.Active.Broadcast(timePacket);
+                        }
                     } else {
                         session.AddMessage("Вы можете спать только ночью или во время грозы");
                     }
@@ -1415,8 +1445,15 @@ public sealed partial class Player {
                     float charge = Math.Clamp(BowCharge, 0.2f, 1.0f);
                     float arrowSpeed = 14f + charge * 24f;
                     float dmg = 3f + charge * 8f;
-                    world.Arrows.Add(new ArrowProjectile(Eye + Forward * 0.4f, Forward * arrowSpeed, null) { FromPlayer = true, Damage = dmg });
+                    var shootPos = Eye + Forward * 0.4f;
+                    var shootVel = Forward * arrowSpeed;
+                    world.Arrows.Add(new ArrowProjectile(shootPos, shootVel, null) { FromPlayer = true, Damage = dmg });
                     SoundSystem.PlayBowShoot();
+                    GameClient.Active?.SendSpawnProjectile(shootPos, shootVel, 0, (byte)world.Dimension);
+                    if (GameServer.Active != null) {
+                        var spawnProjP = NetworkProtocol.WriteSpawnProjectile(1, shootPos, shootVel, 0, (byte)world.Dimension);
+                        GameServer.Active.Broadcast(spawnProjP);
+                    }
                 } else {
                     session.AddMessage("Нет стрел!");
                 }
@@ -1460,714 +1497,6 @@ public sealed partial class Player {
 
         TickVitals(dt, session);
     }
-
-    /// <summary>
-    /// Проверяет, пересекает ли хитбокс игрока блок портала.
-    /// </summary>
-    private static bool IsInAnyPortal(GameWorld world, Vector3 playerPos, ushort portalId) {
-        int minX = (int)MathF.Floor(playerPos.X - 0.3f);
-        int maxX = (int)MathF.Floor(playerPos.X + 0.3f);
-        int minY = (int)MathF.Floor(playerPos.Y);
-        int maxY = (int)MathF.Floor(playerPos.Y + 1.7f);
-        int minZ = (int)MathF.Floor(playerPos.Z - 0.3f);
-        int maxZ = (int)MathF.Floor(playerPos.Z + 0.3f);
-
-        for (int y = minY; y <= maxY; y++) {
-            for (int x = minX; x <= maxX; x++) {
-                for (int z = minZ; z <= maxZ; z++) {
-                    if (world.GetVoxel(new Vec3i(x, y, z)).TypeId == portalId) {
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
-    public static bool TryIgniteNetherPortal(GameWorld world, Vec3i targetBlock, Vec3i placeCell) {
-        for (int axis = 0; axis < 2; axis++) {
-            for (int dx = -2; dx <= 0; dx++) {
-                for (int dy = -3; dy <= 0; dy++) {
-                    int minX = axis == 0 ? placeCell.X + dx : placeCell.X;
-                    int minZ = axis == 1 ? placeCell.Z + dx : placeCell.Z;
-                    int minY = placeCell.Y + dy;
-
-                    bool validFrame = true;
-                    for (int step = 0; step < 4; step++) {
-                        int fx = axis == 0 ? minX + step : minX;
-                        int fz = axis == 1 ? minZ + step : minZ;
-                        if (world.GetVoxel(new Vec3i(fx, minY, fz)).TypeId != GameData.BObsidian.Id ||
-                            world.GetVoxel(new Vec3i(fx, minY + 4, fz)).TypeId != GameData.BObsidian.Id) {
-                            validFrame = false; break;
-                        }
-                    }
-                    if (!validFrame) continue;
-
-                    for (int y = 1; y <= 3; y++) {
-                        int lx = axis == 0 ? minX : minX;
-                        int lz = axis == 1 ? minZ : minZ;
-                        int rx = axis == 0 ? minX + 3 : minX;
-                        int rz = axis == 1 ? minZ + 3 : minZ;
-                        if (world.GetVoxel(new Vec3i(lx, minY + y, lz)).TypeId != GameData.BObsidian.Id ||
-                            world.GetVoxel(new Vec3i(rx, minY + y, rz)).TypeId != GameData.BObsidian.Id) {
-                            validFrame = false; break;
-                        }
-                    }
-                    if (!validFrame) continue;
-
-                    for (int innerStep = 1; innerStep <= 2; innerStep++) {
-                        for (int y = 1; y <= 3; y++) {
-                            int ix = axis == 0 ? minX + innerStep : minX;
-                            int iz = axis == 1 ? minZ + innerStep : minZ;
-                            var p = new Vec3i(ix, minY + y, iz);
-                            world.PlacePlacedBlock(p, GameData.BNetherPortal);
-                            GameClient.Active?.SendBlockChange(p.X, p.Y, p.Z, GameData.BNetherPortal.Id, 0, false, (byte)world.Dimension);
-                            GameServer.Active?.BroadcastHostBlockChange(p.X, p.Y, p.Z, GameData.BNetherPortal.Id, 0, false);
-                        }
-                    }
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    /// <summary>
-    /// Проверяет, собран ли портал Энда: 12 рамок по кольцу 4×4 с 2×2 проёмом,
-    /// в каждой вставлено око Эндера. При активации заполняет проём порталом.
-    /// </summary>
-    public static bool TryActivateEndPortal(GameWorld world, Vec3i framePos) {
-        int y = framePos.Y;
-        var frames = new List<Vec3i>();
-        for (int dx = -3; dx <= 3; dx++) {
-            for (int dz = -3; dz <= 3; dz++) {
-                var p = new Vec3i(framePos.X + dx, y, framePos.Z + dz);
-                if (world.GetVoxel(p).TypeId == GameData.BEndPortalFrame.Id) {
-                    frames.Add(p);
-                }
-            }
-        }
-        if (frames.Count != 12) return false;
-
-        int minX = int.MaxValue, maxX = int.MinValue, minZ = int.MaxValue, maxZ = int.MinValue;
-        foreach (var f in frames) {
-            if (f.X < minX) minX = f.X;
-            if (f.X > maxX) maxX = f.X;
-            if (f.Z < minZ) minZ = f.Z;
-            if (f.Z > maxZ) maxZ = f.Z;
-        }
-        // Кольцо 4×4 (12 рамок): охват 3 блока по каждой оси, проём 2×2 внутри
-        if (maxX - minX != 3 || maxZ - minZ != 3) return false;
-
-        // В каждой рамке должно быть око
-        foreach (var f in frames) {
-            if ((world.GetVoxel(f).SubGridLayerMask & 1) == 0) return false;
-        }
-
-        // Проём 2×2 должен быть пуст (или землёй), заполняем порталом
-        int ix = minX + 1, iz = minZ + 1;
-        for (int dx = 0; dx <= 1; dx++) {
-            for (int dz = 0; dz <= 1; dz++) {
-                var p = new Vec3i(ix + dx, y, iz + dz);
-                var vox = world.GetVoxel(p);
-                if (vox.TypeId != 0 && vox.TypeId != GameData.BEndPortal.Id && vox.TypeId != GameData.BWater.Id && vox.TypeId != GameData.BLava.Id) {
-                    return false;
-                }
-            }
-        }
-        for (int dx = 0; dx <= 1; dx++) {
-            for (int dz = 0; dz <= 1; dz++) {
-                var p = new Vec3i(ix + dx, y, iz + dz);
-                world.PlacePlacedBlock(p, GameData.BEndPortal);
-            }
-        }
-        return true;
-    }
-
-    private void TickVitals(float dt, GameSession session) {
-        // Фоновый расход сытости и голод
-        if (Exhaustion >= 4.0f) {
-            Exhaustion -= 4.0f;
-            if (Saturation > 0f) Saturation = MathF.Max(0f, Saturation - 1f);
-            else Hunger = MathF.Max(0f, Hunger - 1f);
-        }
-
-        // Естественная регенерация здоровья при высокой сытости
-        if (Hunger >= 20f && Saturation > 0f && Health < MaxHealth) {
-            HealthRegenTimer += dt;
-            if (HealthRegenTimer >= 0.5f) {
-                HealthRegenTimer = 0f;
-                Health = MathF.Min(MaxHealth, Health + 1f);
-                Exhaustion += 3.0f;
-            }
-        } else if (Hunger >= 18f && Health < MaxHealth) {
-            HealthRegenTimer += dt;
-            if (HealthRegenTimer >= 4.0f) {
-                HealthRegenTimer = 0f;
-                Health = MathF.Min(MaxHealth, Health + 1f);
-                Exhaustion += 3.0f;
-            }
-        } else {
-            HealthRegenTimer = 0f;
-        }
-
-        // Урон от голода при Hunger <= 0
-        if (Hunger <= 0f) {
-            StarveTimer += dt;
-            if (StarveTimer >= 4.0f) {
-                StarveTimer = 0f;
-                ApplyDamage(1f, session, cause: "Истощение от голода");
-                session.AddMessage("Вы умираете от голода!");
-            }
-        } else {
-            StarveTimer = 0f;
-        }
-
-        if (FireTicks > 0f) {
-            FireTicks = MathF.Max(0f, FireTicks - dt);
-            FireBurnTimer -= dt;
-            if (FireBurnTimer <= 0f) {
-                FireBurnTimer = 1.0f; // 1 HP горения в секунду
-                InvulnerabilityTimer = 0f;
-                ApplyDamage(1.0f, session);
-            }
-        } else {
-            FireBurnTimer = 0f;
-        }
-        if (Health <= 0f) session.DiePlayer();
-    }
-
-    // ── Ломание блоков ───────────────────────────────────────────────────────
-
-    private static readonly Random DropRng = new();
-
-    public void BreakBlock(GameWorld world, GameSession session, Vec3i pos, BlockType block) {
-        var oldVox = world.GetVoxel(pos);
-        if (block.Id == GameData.BJukebox.Id) {
-            SoundSystem.StopDisc();
-        }
-        world.RemoveBlock(pos);
-        SoundSystem.PlayDig(block.Id);
-        GameClient.Active?.SendBlockChange(pos.X, pos.Y, pos.Z, 0, 0, isBreak: true, (byte)session.World.Dimension);
-        GameServer.Active?.BroadcastHostBlockChange(pos.X, pos.Y, pos.Z, 0, 0, isBreak: true);
-
-        // Проверка песка/гравия выше — каскадное падение от гравитации!
-        var curAbove = pos + new Vec3i(0, 1, 0);
-        while (true) {
-            var aboveVoxel = world.GetVoxel(curAbove);
-            if (aboveVoxel.TypeId == GameData.BSand.Id || aboveVoxel.TypeId == GameData.BGravel.Id) {
-                var aboveBlock = GameData.GetBlock(aboveVoxel.TypeId);
-                world.RemoveBlock(curAbove);
-                world.FallingBlocks.Add(new FallingBlock(aboveBlock, new Vector3(curAbove.X + 0.5f, curAbove.Y + 0.5f, curAbove.Z + 0.5f)));
-                curAbove += new Vec3i(0, 1, 0);
-            } else {
-                break;
-            }
-        }
-
-        if (session.GameMode == GameMode.Creative) {
-            return; // В Творческом режиме блоки разрушаются без дропа и без износа инструмента
-        }
-
-        // Износ инструмента при ломании блока в Выживании
-        DamageSelectedTool(session);
-
-        // Проверяем, может ли текущий инструмент добыть этот блок
-        ushort toolId = SelectedEntry?.Item.Definition.Id ?? 0;
-        bool canHarvest = GameData.CanHarvestBlock(block, toolId);
-
-        if (canHarvest) {
-            int dropCount = block.DropItemCount;
-            if (block.Id == GameData.BWheatCrop.Id) {
-                int stage = oldVox.SubGridLayerMask; // 0..3
-                if (stage >= 3) {
-                    // Зрелая пшеница: 1 пшеница + 1..3 семян
-                    world.SpawnPickup(GameData.WheatItem.Id, 1, pos);
-                    int seedCount = DropRng.Next(1, 4);
-                    world.SpawnPickup(GameData.WheatSeedsItem.Id, seedCount, pos);
-                } else {
-                    // Недозрелая: только 1 семечко
-                    world.SpawnPickup(GameData.WheatSeedsItem.Id, 1, pos);
-                }
-            } else if (block.Id == GameData.BCarrotCrop.Id) {
-                int stage = oldVox.SubGridLayerMask;
-                if (stage >= 3) {
-                    int count = DropRng.Next(2, 5); // 2..4 моркови
-                    world.SpawnPickup(GameData.CarrotItem.Id, count, pos);
-                } else {
-                    world.SpawnPickup(GameData.CarrotItem.Id, 1, pos);
-                }
-            } else if (block.Id == GameData.BPotatoCrop.Id) {
-                int stage = oldVox.SubGridLayerMask;
-                if (stage >= 3) {
-                    int count = DropRng.Next(2, 5); // 2..4 картофеля
-                    world.SpawnPickup(GameData.PotatoItem.Id, count, pos);
-                } else {
-                    world.SpawnPickup(GameData.PotatoItem.Id, 1, pos);
-                }
-            } else if (block.Id == GameData.BTallGrass.Id) {
-                double roll = DropRng.NextDouble();
-                if (roll < 0.25) {
-                    world.SpawnPickup(GameData.WheatSeedsItem.Id, 1, pos);
-                } else if (roll < 0.33) {
-                    world.SpawnPickup(GameData.CarrotItem.Id, 1, pos);
-                } else if (roll < 0.41) {
-                    world.SpawnPickup(GameData.PotatoItem.Id, 1, pos);
-                }
-            } else if (block.Id == GameData.BLeaves.Id) {
-                double roll = DropRng.NextDouble();
-                if (roll < 0.15) {
-                    world.SpawnPickup(GameData.OakSaplingItem.Id, 1, pos); // Саженец дуба (15%)!
-                } else if (roll < 0.20) {
-                    world.SpawnPickup(GameData.AppleItem.Id, 1, pos);
-                } else if (roll < 0.35) {
-                    world.SpawnPickup(GameData.StickItem.Id, 1, pos);
-                }
-            } else if (block.DropItemId != 0 && GameData.Items.TryGetValue(block.DropItemId, out var drop)) {
-                if (block.Id == GameData.BGravel.Id && DropRng.NextDouble() < 0.25) {
-                    world.SpawnPickup(GameData.FlintItem.Id, 1, pos);
-                } else {
-                    world.SpawnPickup(drop.Id, dropCount, pos);
-                }
-                // При рубке бревна иногда высыпаются древесные опилки
-                if (block.Id == GameData.BLog.Id && DropRng.NextDouble() < 0.35) {
-                    world.SpawnPickup(GameData.SawdustItem.Id, 1, pos);
-                }
-            }
-
-            // При разрушении проигрывателя с пластинкой — извлекаем пластинку и останавливаем трек
-            if (block.Id == GameData.BJukebox.Id && oldVox.SubGridLayerMask == 1) {
-                world.SpawnPickup(GameData.MusicDiscItem.Id, 1, pos);
-                SoundSystem.StopDisc();
-            }
-        }
-    }
-
-    // ── Установка блоков ─────────────────────────────────────────────────────
-
-    private bool TryConsumeSelected(ItemDefinition item, int qty = 1, GameSession? session = null) {
-        if (session != null && session.GameMode == GameMode.Creative) return true;
-        var entry = Inventory.Slots[SelectedSlot];
-        if (entry != null && entry.Value.Item.Definition == item && qty > 0) {
-            int currentQty = entry.Value.Quantity;
-            if (currentQty >= qty) {
-                if (currentQty == qty) {
-                    Inventory.RemoveAt(SelectedSlot);
-                } else {
-                    Inventory.InsertAt(SelectedSlot, entry.Value with { Quantity = currentQty - qty });
-                }
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /// <summary>Снимает 1 прочность с инструмента/оружия в выбранном слоте; ломает при нуле.</summary>
-    private void DamageSelectedTool(GameSession session) {
-        if (session.GameMode == GameMode.Creative) return;
-        var entry = Inventory.Slots[SelectedSlot];
-        if (entry == null) return;
-        var def = entry.Value.Item.Definition;
-        if (GameData.GetToolTier(def.Id) <= 0) return; // не инструмент
-        int dur = entry.Value.Item.Durability - 1;
-        if (dur <= 0) {
-            Inventory.RemoveAt(SelectedSlot);
-            session.AddMessage($"Инструмент «{def.Name}» сломался!");
-            SoundSystem.PlayBreakTool();
-        } else {
-            entry.Value.Item.Durability = dur;
-        }
-    }
-
-    public bool TryPlaceBlock(GameWorld world, GameSession session, Vec3i cell, BlockType block, ItemDefinition item) {
-        var existing = world.GetVoxel(cell);
-        if (existing.TypeId != 0) {
-            bool isFluid = existing.TypeId == GameData.BWater.Id || existing.TypeId == GameData.BLava.Id;
-            if (!isFluid) {
-                var eb = GameData.GetBlock(existing.TypeId);
-                if (eb.IsSolid || eb.IsOpaque) return false;
-            }
-        }
-        var pmin = Position - HalfExtents;
-        var pmax = Position + HalfExtents;
-
-        // Если блок твердый (или кровать, или дверь) — проверяем, чтобы он не ставился внутрь игрока
-        bool isSolidPlacement = block.IsSolid || block.Id == GameData.BBed.Id || item.Id == GameData.DoorItem.Id;
-        if (isSolidPlacement) {
-            var min = new Vector3(cell.X, cell.Y, cell.Z);
-            var max = new Vector3(cell.X + 1f, cell.Y + 1f, cell.Z + 1f);
-            if (min.X < pmax.X && max.X > pmin.X && min.Y < pmax.Y && max.Y > pmin.Y && min.Z < pmax.Z && max.Z > pmin.Z)
-                return false;
-        }
-
-        // Вычисляем ориентацию блока (facing: 0..3) по направлению взгляда игрока
-        byte facing = 0;
-        Vec3i forwardH;
-        if (MathF.Abs(Forward.X) > MathF.Abs(Forward.Z)) {
-            if (Forward.X > 0) { facing = 3; forwardH = new Vec3i(1, 0, 0); }
-            else { facing = 1; forwardH = new Vec3i(-1, 0, 0); }
-        } else {
-            if (Forward.Z > 0) { facing = 2; forwardH = new Vec3i(0, 0, 1); }
-            else { facing = 0; forwardH = new Vec3i(0, 0, -1); }
-        }
-
-        // Специальная установка 2-блочной двери (низ + верх)
-        if (item.Id == GameData.DoorItem.Id) {
-            var above = cell + new Vec3i(0, 1, 0);
-            if (world.IsSolidAt(above) || world.GetVoxel(above).TypeId != 0) return false;
-            if (!world.IsSolidAt(cell + new Vec3i(0, -1, 0))) return false;
-
-            // Проверка коллизии верхней половины двери с игроком
-            var aboveMin = new Vector3(above.X, above.Y, above.Z);
-            var aboveMax = new Vector3(above.X + 1f, above.Y + 1f, above.Z + 1f);
-            if (aboveMin.X < pmax.X && aboveMax.X > pmin.X && aboveMin.Y < pmax.Y && aboveMax.Y > pmin.Y && aboveMin.Z < pmax.Z && aboveMax.Z > pmin.Z)
-                return false;
-
-            if (TryConsumeSelected(item, 1, session)) {
-                world.PlacePlacedBlock(cell, GameData.BDoorLower, facing);
-                world.PlacePlacedBlock(above, GameData.BDoorUpper, facing);
-                SoundSystem.PlayPlace();
-                GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, GameData.BDoorLower.Id, facing, isBreak: false, (byte)session.World.Dimension);
-                GameClient.Active?.SendBlockChange(above.X, above.Y, above.Z, GameData.BDoorUpper.Id, facing, isBreak: false, (byte)session.World.Dimension);
-                GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, GameData.BDoorLower.Id, facing, isBreak: false);
-                GameServer.Active?.BroadcastHostBlockChange(above.X, above.Y, above.Z, GameData.BDoorUpper.Id, facing, isBreak: false);
-                return true;
-            }
-            return false;
-        }
-
-        // Специальная установка 2-блочной кровати (изножье + изголовье)
-        if (block.Id == GameData.BBed.Id) {
-            // Кровать ставится только на верхнюю грань блока (горизонтально)
-            if (session.TargetBlock.Y >= cell.Y) return false;
-
-            var headCell = cell + forwardH;
-            var exFoot = world.GetVoxel(cell);
-            var exHead = world.GetVoxel(headCell);
-            // Обе клетки кровати должны быть свободным воздухом
-            if (exFoot.TypeId != 0 || exHead.TypeId != 0)
-                return false;
-            // Оба опорных блока снизу должны быть твёрдыми
-            if (!world.IsSolidAt(cell + new Vec3i(0, -1, 0)) || !world.IsSolidAt(headCell + new Vec3i(0, -1, 0)))
-                return false;
-
-            // Проверка коллизии изголовья кровати с игроком
-            var headMin = new Vector3(headCell.X, headCell.Y, headCell.Z);
-            var headMax = new Vector3(headCell.X + 1f, headCell.Y + 1f, headCell.Z + 1f);
-            if (headMin.X < pmax.X && headMax.X > pmin.X && headMin.Y < pmax.Y && headMax.Y > pmin.Y && headMin.Z < pmax.Z && headMax.Z > pmin.Z)
-                return false;
-
-            if (TryConsumeSelected(item, 1, session)) {
-                world.PlacePlacedBlock(cell, GameData.BBed, facing);
-                world.PlacePlacedBlock(headCell, GameData.BBedHead, facing);
-                SoundSystem.PlayPlace();
-                GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, GameData.BBed.Id, facing, isBreak: false, (byte)session.World.Dimension);
-                GameClient.Active?.SendBlockChange(headCell.X, headCell.Y, headCell.Z, GameData.BBedHead.Id, facing, isBreak: false, (byte)session.World.Dimension);
-                GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, GameData.BBed.Id, facing, isBreak: false);
-                GameServer.Active?.BroadcastHostBlockChange(headCell.X, headCell.Y, headCell.Z, GameData.BBedHead.Id, facing, isBreak: false);
-                return true;
-            }
-            return false;
-        }
-
-        // 3D Факел: установка на пол (facing=0) или на стену (facing=1..4)
-        if (block.Id == GameData.BTorch.Id) {
-            var hitNormal = cell - session.TargetBlock;
-            byte torchFacing = 0;
-            if (hitNormal.X == 1) torchFacing = 2;      // Стена на -X от факела (клик по правой грани)
-            else if (hitNormal.X == -1) torchFacing = 1; // Стена на +X от факела (клик по левой грани)
-            else if (hitNormal.Z == 1) torchFacing = 4;  // Стена на -Z от факела (клик по дальней грани)
-            else if (hitNormal.Z == -1) torchFacing = 3; // Стена на +Z от факела (клик по ближней грани)
-
-            if (TryConsumeSelected(item, 1, session)) {
-                world.PlacePlacedBlock(cell, block, torchFacing);
-                SoundSystem.PlayPlace();
-                GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, block.Id, torchFacing, isBreak: false, (byte)session.World.Dimension);
-                GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, block.Id, torchFacing, isBreak: false);
-                return true;
-            }
-            return false;
-        }
-
-        // Гравитация песка и гравия при установке в воздухе
-        if (block.Id == GameData.BSand.Id || block.Id == GameData.BGravel.Id) {
-            var below = cell + new Vec3i(0, -1, 0);
-            if (!world.IsSolidAt(below)) {
-                if (TryConsumeSelected(item, 1, session)) {
-                    world.FallingBlocks.Add(new FallingBlock(block, new Vector3(cell.X + 0.5f, cell.Y + 0.5f, cell.Z + 0.5f)));
-                    SoundSystem.PlayPlace();
-                    return true;
-                }
-                return false;
-            }
-        }
-
-        // Рамка портала Энда: бит 0 (SubGridLayerMask & 1) — это «глаз», его нельзя
-        // ставить при установке блока, иначе в свежей рамке «сам появится глаз».
-        if (block.Id == GameData.BEndPortalFrame.Id) facing &= 0xFE;
-
-        if (TryConsumeSelected(item, 1, session)) {
-            world.PlacePlacedBlock(cell, block, facing);
-            SoundSystem.PlayPlace();
-            GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, block.Id, facing, isBreak: false, (byte)session.World.Dimension);
-            GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, block.Id, facing, isBreak: false);
-            return true;
-        }
-        return false;
-    }
-
-    // ── Бой ──────────────────────────────────────────────────────────────────
-
-    public void AttackRemotePlayer(int targetId, GameSession session) {
-        if (AttackTimer > 0f) return;
-        ushort toolId = SelectedItem?.Id ?? 0;
-        float weaponCd = GameData.GetWeaponCooldown(toolId);
-        float charge = Math.Clamp(AttackRechargeTimer / weaponCd, 0f, 1f);
-        AttackRechargeTimer = 0f;
-        AttackTimer = AttackCooldown;
-
-        bool isStrong = charge >= 0.85f;
-        bool isCrit = isStrong && !OnGround && Velocity.Y < -0.2f;
-
-        float baseDmg = GameData.GetWeaponDamage(toolId);
-        float dmg = baseDmg * (0.2f + 0.8f * charge * charge);
-
-        if (isCrit) {
-            dmg *= 1.5f;
-            session.AddMessage("Критический удар! ×1.5");
-        }
-
-        if (GameClient.Active != null) {
-            GameClient.Active.SendHit(targetId, dmg);
-        } else if (GameServer.Active != null) {
-            GameServer.Active.BroadcastHostHit(targetId, dmg);
-        }
-
-        if (isStrong) SoundSystem.PlayStrongAttack();
-        else SoundSystem.PlayWeakAttack();
-    }
-
-    public void AttackAnimal(GameWorld world, GameSession session) {
-        if (AttackTimer > 0f) return;
-        var origin = Eye;
-        var dir = Forward;
-        Animal? best = null;
-        float bestDist = float.MaxValue;
-        foreach (var a in world.Animals) {
-            if (!a.Alive) continue;
-            var min = a.Position - new Vector3(a.HalfSizeX, a.HalfSizeY, a.HalfSizeZ);
-            var max = a.Position + new Vector3(a.HalfSizeX, a.HalfSizeY, a.HalfSizeZ);
-            if (RayAabb(origin, dir, min, max, out float t) && t < bestDist) {
-                bestDist = t;
-                best = a;
-            }
-        }
-        if (best == null || bestDist > 3.0f) return;
-
-        ushort toolId = SelectedItem?.Id ?? 0;
-        float weaponCd = GameData.GetWeaponCooldown(toolId);
-        float charge = Math.Clamp(AttackRechargeTimer / weaponCd, 0f, 1f);
-        AttackRechargeTimer = 0f;
-        AttackTimer = AttackCooldown;
-
-        bool isStrong = charge >= 0.85f;
-        bool isCrit = isStrong && !OnGround && Velocity.Y < -0.2f;
-
-        float baseDmg = GameData.GetWeaponDamage(toolId);
-        float dmg = baseDmg * (0.2f + 0.8f * charge * charge);
-
-        if (isCrit) {
-            dmg *= 1.5f;
-            session.AddMessage("Критический удар! ×1.5");
-            world.SpawnCrit(best.Position + new Vector3(0f, 0.4f, 0f), 12);
-        }
-
-        best.Health -= dmg;
-        best.HurtTime = 0.5f;
-        best.FleeTimer = 2.0f;
-        var push = best.Position - Position;
-        if (push.LengthSquared() > 0.001f) {
-            var pushH = Vector2.Normalize(new Vector2(push.X, push.Z));
-            float knockback = isStrong ? 5.0f : 1.5f;
-            float vertKnock = isStrong ? 3.5f : 1.0f;
-            best.Velocity += new Vector3(pushH.X * knockback, vertKnock, pushH.Y * knockback);
-            best.WanderDir = pushH;
-        } else {
-            best.Velocity += new Vector3(0f, isStrong ? 3.5f : 1.0f, 0f);
-        }
-
-        if (isStrong) SoundSystem.PlayStrongAttack();
-        else SoundSystem.PlayWeakAttack();
-
-        if (best.Health <= 0f) {
-            best.Die(world, session);
-        }
-        DamageSelectedTool(session); // оружие изнашивается при ударе по животному
-    }
-
-    public void AttackHostile(HostileMob mob, GameWorld world, GameSession session) {
-        if (AttackTimer > 0f) return;
-
-        ushort toolId = SelectedItem?.Id ?? 0;
-        float weaponCd = GameData.GetWeaponCooldown(toolId);
-        float charge = Math.Clamp(AttackRechargeTimer / weaponCd, 0f, 1f);
-        AttackRechargeTimer = 0f;
-        AttackTimer = AttackCooldown;
-
-        bool isStrong = charge >= 0.85f;
-        bool isCrit = isStrong && !OnGround && Velocity.Y < -0.2f;
-
-        float baseDmg = GameData.GetWeaponDamage(toolId);
-        float dmg = baseDmg * (0.2f + 0.8f * charge * charge);
-
-        if (isCrit) {
-            dmg *= 1.5f;
-            session.AddMessage("Критический удар! ×1.5");
-            world.SpawnCrit(mob.Position + new Vector3(0f, 0.5f, 0f), 14);
-        }
-
-        mob.Health -= dmg;
-        mob.HurtTime = 0.4f;
-        var push = mob.Position - Position;
-        if (push.LengthSquared() > 0.001f) {
-            var pushH = Vector2.Normalize(new Vector2(push.X, push.Z));
-            float knockback = isStrong ? 6.0f : 2.0f;
-            float vertKnock = isStrong ? 3.0f : 1.0f;
-            mob.Velocity += new Vector3(pushH.X * knockback, vertKnock, pushH.Y * knockback);
-        }
-
-        if (isStrong) SoundSystem.PlayStrongAttack();
-        else SoundSystem.PlayWeakAttack();
-
-        // Круговой срез мечом (Sweeping Edge) при полном заряде атаки на земле
-        bool isSword = toolId == GameData.WoodSwordItem.Id || toolId == GameData.StoneSwordItem.Id ||
-                       toolId == GameData.IronSwordItem.Id || toolId == GameData.GoldSwordItem.Id ||
-                       toolId == GameData.DiamondSwordItem.Id;
-        if (isSword && isStrong && OnGround && !isCrit) {
-            float sweepRadius = 2.8f;
-            foreach (var other in world.HostileMobs) {
-                if (other == mob || other.Health <= 0f) continue;
-                float d = Vector3.Distance(Position, other.Position);
-                if (d <= sweepRadius) {
-                    var toOther = Vector3.Normalize(other.Position - Position);
-                    float dot = Vector3.Dot(Forward, toOther);
-                    if (dot > 0.25f) { // В конусе перед игроком
-                        other.Health -= dmg * 0.5f;
-                        other.HurtTime = 0.35f;
-                        var sPush = Vector2.Normalize(new Vector2(toOther.X, toOther.Z));
-                        other.Velocity += new Vector3(sPush.X * 4.0f, 1.5f, sPush.Y * 4.0f);
-                        world.SpawnCrit(other.Position + new Vector3(0f, 0.6f, 0f), 5);
-                        if (other.Health <= 0f) other.Die(world, session);
-                    }
-                }
-            }
-            world.SpawnCrit(Position + Forward * 1.5f + Vector3.UnitY * 0.6f, 8);
-        }
-
-        if (mob.Health <= 0f) {
-            mob.Die(world, session);
-        }
-        DamageSelectedTool(session); // оружие изнашивается при ударе по мобу
-    }
-
-    public void AttackBoss(EndSlime boss, GameWorld world, GameSession session) {
-        if (AttackTimer > 0f) return;
-
-        ushort toolId = SelectedItem?.Id ?? 0;
-        float weaponCd = GameData.GetWeaponCooldown(toolId);
-        float charge = Math.Clamp(AttackRechargeTimer / weaponCd, 0f, 1f);
-        AttackRechargeTimer = 0f;
-        AttackTimer = AttackCooldown;
-
-        bool isStrong = charge >= 0.85f;
-        bool isCrit = isStrong && !OnGround && Velocity.Y < -0.2f;
-
-        float baseDmg = GameData.GetWeaponDamage(toolId);
-        float dmg = baseDmg * (0.2f + 0.8f * charge * charge);
-
-        if (isCrit) {
-            dmg *= 1.5f;
-            session.AddMessage("Критический удар по Слизню Края! ×1.5");
-            world.SpawnCrit(boss.Position + new Vector3(0f, EndSlime.HalfSizeY, 0f), 16);
-        }
-
-        boss.TakeDamage(dmg, world, session);
-
-        if (isStrong) SoundSystem.PlayStrongAttack();
-        else SoundSystem.PlayWeakAttack();
-        DamageSelectedTool(session); // оружие изнашивается при ударе по боссу
-    }
-
-    public void AttackTrueBoss(TrueEndSlime boss, GameWorld world, GameSession session) {
-        if (AttackTimer > 0f) return;
-
-        ushort toolId = SelectedItem?.Id ?? 0;
-        float weaponCd = GameData.GetWeaponCooldown(toolId);
-        float charge = Math.Clamp(AttackRechargeTimer / weaponCd, 0f, 1f);
-        AttackRechargeTimer = 0f;
-        AttackTimer = AttackCooldown;
-
-        bool isStrong = charge >= 0.85f;
-        bool isCrit = isStrong && !OnGround && Velocity.Y < -0.2f;
-
-        float baseDmg = GameData.GetWeaponDamage(toolId);
-        float dmg = baseDmg * (0.2f + 0.8f * charge * charge);
-
-        if (isCrit) {
-            dmg *= 1.5f;
-            session.AddMessage("Критический удар по Истинному Слизню! ×1.5");
-            world.SpawnCrit(boss.Position + new Vector3(0f, TrueEndSlime.HalfSizeY, 0f), 22);
-        }
-
-        boss.TakeDamage(dmg, world, session);
-
-        if (isStrong) SoundSystem.PlayStrongAttack();
-        else SoundSystem.PlayWeakAttack();
-        DamageSelectedTool(session);
-    }
-
-    /// <summary>Пересечение луча с AABB (метод слэбов).</summary>
-    public static bool RayAabb(Vector3 o, Vector3 d, Vector3 min, Vector3 max, out float t) {
-        t = 0f;
-        float tmin = 0f, tmax = float.MaxValue;
-        for (int axis = 0; axis < 3; axis++) {
-            float od = axis == 0 ? d.X : axis == 1 ? d.Y : d.Z;
-            float oo = axis == 0 ? o.X : axis == 1 ? o.Y : o.Z;
-            float mn = axis == 0 ? min.X : axis == 1 ? min.Y : min.Z;
-            float mx = axis == 0 ? max.X : axis == 1 ? max.Y : max.Z;
-            if (MathF.Abs(od) < 1e-9f) {
-                if (oo < mn || oo > mx) return false;
-                continue;
-            }
-            float inv = 1f / od;
-            float t1 = (mn - oo) * inv, t2 = (mx - oo) * inv;
-            if (t1 > t2) (t1, t2) = (t2, t1);
-            tmin = MathF.Max(tmin, t1);
-            tmax = MathF.Min(tmax, t2);
-            if (tmin > tmax) return false;
-        }
-        t = tmin;
-        return true;
-    }
-    /// <summary>Цвет частиц поедания под конкретный вид еды.</summary>
-    public static Color GetFoodParticleColor(ItemDefinition item) => item.Id switch {
-        var id when id == GameData.AppleItem.Id => new Color(220, 35, 35, 255),
-        var id when id == GameData.GoldenAppleItem.Id => new Color(255, 215, 30, 255),
-        var id when id == GameData.BreadItem.Id => new Color(196, 150, 70, 255),
-        var id when id == GameData.RawPorkItem.Id => new Color(230, 140, 140, 255),
-        var id when id == GameData.CookedPorkItem.Id => new Color(160, 95, 60, 255),
-        var id when id == GameData.RawBeefItem.Id => new Color(190, 45, 45, 255),
-        var id when id == GameData.CookedBeefItem.Id => new Color(115, 60, 35, 255),
-        var id when id == GameData.RawMuttonItem.Id => new Color(215, 65, 75, 255),
-        var id when id == GameData.CookedMuttonItem.Id => new Color(145, 75, 40, 255),
-        var id when id == GameData.RawChickenItem.Id => new Color(235, 175, 160, 255),
-        var id when id == GameData.CookedChickenItem.Id => new Color(185, 110, 40, 255),
-        var id when id == GameData.CarrotItem.Id => new Color(245, 120, 20, 255),
-        var id when id == GameData.PotatoItem.Id => new Color(200, 165, 95, 255),
-        var id when id == GameData.BakedPotatoItem.Id => new Color(185, 120, 50, 255),
-        var id when id == GameData.RottenFleshItem.Id => new Color(125, 85, 40, 255),
-        var id when id == GameData.ChorusFruitItem.Id => new Color(185, 100, 210, 255),
-        var id when id == GameData.SawdustPorridgeItem.Id => new Color(210, 170, 95, 255),
-        _ => new Color(200, 170, 100, 255)
-    };
 }
+
+

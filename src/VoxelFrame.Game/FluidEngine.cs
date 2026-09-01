@@ -99,6 +99,11 @@ public sealed class FluidEngine {
         new(0, 1, 0), new(0, -1, 0), new(1, 0, 0), new(-1, 0, 0), new(0, 0, 1), new(0, 0, -1),
     };
 
+    private static readonly Vec3i[] HorizontalDirs = {
+        new(1, 0, 0), new(-1, 0, 0),
+        new(0, 0, 1), new(0, 0, -1)
+    };
+
     private void CheckEmptyCellForFluids(Vec3i pos) {
         // Проверяем 6 соседей вокруг изменившейся ячейки
         foreach (var off in FluidNeighborOffsets) {
@@ -148,10 +153,7 @@ public sealed class FluidEngine {
             }
 
             // Лава поджигает соседние деревянные / горючие блоки
-            var lavaDirs = new Vec3i[] {
-                new(1, 0, 0), new(-1, 0, 0), new(0, 1, 0), new(0, -1, 0), new(0, 0, 1), new(0, 0, -1)
-            };
-            foreach (var d in lavaDirs) {
+            foreach (var d in FluidNeighborOffsets) {
                 var np = pos + d;
                 var nb = _world.GetBlockType(np);
                 if (nb != null && nb.IsFlammable) {
@@ -239,12 +241,8 @@ public sealed class FluidEngine {
 
         if (spreadBaseLevel < maxDistance) {
             byte nextLevel = (byte)(spreadBaseLevel + 1);
-            var hDirs = new Vec3i[] {
-                new(1, 0, 0), new(-1, 0, 0),
-                new(0, 0, 1), new(0, 0, -1)
-            };
 
-            foreach (var dir in hDirs) {
+            foreach (var dir in HorizontalDirs) {
                 var targetPos = pos + dir;
                 var targetVox = _world.GetVoxel(targetPos);
 
@@ -282,13 +280,8 @@ public sealed class FluidEngine {
         byte currentLevel = _world.GetVoxel(pos).SubGridLayerMask;
 
         // Проверяем 4 горизонтальных соседа: ищем минимальный уровень родителя
-        var hDirs = new Vec3i[] {
-            new(1, 0, 0), new(-1, 0, 0),
-            new(0, 0, 1), new(0, 0, -1)
-        };
-
         int minParentLevel = int.MaxValue;
-        foreach (var dir in hDirs) {
+        foreach (var dir in HorizontalDirs) {
             var nPos = pos + dir;
             var nv = _world.GetVoxel(nPos);
             if (nv.TypeId == fluidId) {
@@ -326,13 +319,8 @@ public sealed class FluidEngine {
         if (!hasSolidOrSourceBase) return;
 
         // Считаем соседние полноценные горизонтальные источники воды (level == 0)
-        var hDirs = new Vec3i[] {
-            new(1, 0, 0), new(-1, 0, 0),
-            new(0, 0, 1), new(0, 0, -1)
-        };
-
         int sourceCount = 0;
-        foreach (var dir in hDirs) {
+        foreach (var dir in HorizontalDirs) {
             var nv = _world.GetVoxel(pos + dir);
             if (nv.TypeId == GameData.BWater.Id && nv.SubGridLayerMask == 0) {
                 sourceCount++;
@@ -384,16 +372,9 @@ public sealed class FluidEngine {
     private bool HasAdjacentFluid(Vec3i pos, ushort targetFluidId, out Vec3i neighborPos, out byte neighborLevel) {
         neighborPos = default;
         neighborLevel = 0;
-        var neighbors = new Vec3i[] {
-            pos + new Vec3i(0, 1, 0),
-            pos + new Vec3i(0, -1, 0),
-            pos + new Vec3i(1, 0, 0),
-            pos + new Vec3i(-1, 0, 0),
-            pos + new Vec3i(0, 0, 1),
-            pos + new Vec3i(0, 0, -1)
-        };
 
-        foreach (var n in neighbors) {
+        foreach (var off in FluidNeighborOffsets) {
+            var n = pos + off;
             var nv = _world.GetVoxel(n);
             if (nv.TypeId == targetFluidId) {
                 neighborPos = n;
@@ -408,16 +389,8 @@ public sealed class FluidEngine {
         HasAdjacentFluid(pos, targetFluidId, out _, out neighborLevel);
 
     private void NotifyNeighbors(Vec3i pos) {
-        var neighbors = new Vec3i[] {
-            pos + new Vec3i(0, 1, 0),
-            pos + new Vec3i(0, -1, 0),
-            pos + new Vec3i(1, 0, 0),
-            pos + new Vec3i(-1, 0, 0),
-            pos + new Vec3i(0, 0, 1),
-            pos + new Vec3i(0, 0, -1)
-        };
-
-        foreach (var n in neighbors) {
+        foreach (var off in FluidNeighborOffsets) {
+            var n = pos + off;
             var nv = _world.GetVoxel(n);
             if (nv.TypeId == GameData.BWater.Id) _activeWater.Add(n);
             else if (nv.TypeId == GameData.BLava.Id) _activeLava.Add(n);

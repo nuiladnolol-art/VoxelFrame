@@ -258,27 +258,27 @@ public static class Hud {
         // Предмет во второй руке (левый нижний угол, вид от первого лица)
         if (player.OffhandItem != null && player.OffhandCount > 0) {
             float offhandSize = player.IsBlocking ? 155f : 110f;
-            float bob = player.BobOffset * 50f;
+            float leftBob = player.BobOffset * 50f;
             float leftHandX = player.IsBlocking ? (w / 2f - offhandSize - 20f) : 35f;
-            float leftHandY = player.IsBlocking ? (h - offhandSize - 60f) : (h - offhandSize - 10f + bob);
+            float leftHandY = player.IsBlocking ? (h - offhandSize - 60f) : (h - offhandSize - 10f + leftBob);
             float offhandRot = player.IsBlocking ? 0.05f : -0.35f;
             var leftRect = new Rectangle(leftHandX, leftHandY, offhandSize, offhandSize);
             DrawHandHeldItem(player.OffhandItem, leftRect, 1f, offhandRot);
         }
 
-        // Предмет в правой руке (вид от первого лица)
+        // Предмет или рука в правой руке (вид от первого лица)
+        float handSize = 140f;
+        float bob = player.BobOffset * 70f;
+        float handX = w - handSize - 35f;
+        float handY = h - handSize - 10f + bob;
+
+        if (player.EatTimer > 0f) {
+            handY += MathF.Sin(player.EatTimer * 14f) * 8f;
+        }
+
+        float swing = 0f;
+        float hStretch = 1f;
         if (player.SelectedEntry is { } held) {
-            float handSize = 140f;
-            float bob = player.BobOffset * 70f;
-            float handX = w - handSize - 35f;
-            float handY = h - handSize - 10f + bob;
-
-            if (player.EatTimer > 0f) {
-                handY += MathF.Sin(player.EatTimer * 14f) * 8f;
-            }
-
-            float swing = 0f;
-            float hStretch = 1f;
             if (held.Item.Definition.Id == GameData.BowItem.Id && player.BowCharge > 0f) {
                 // Лук не уезжает к центру экрана — приподнимается вверх-влево и тянется в ширину
                 float pull = player.BowCharge;
@@ -294,6 +294,14 @@ public static class Hud {
             }
             var handRect = new Rectangle(handX, handY, handSize, handSize);
             DrawHandHeldItem(held.Item.Definition, handRect, 1f, swing, hStretch);
+        } else {
+            // Отрисовка руки персонажа при пустом слоте
+            if (player.BreakProgress > 0f && player.BreakDuration > 0f) {
+                swing = MathF.Sin(player.BreakProgress / player.BreakDuration * MathF.PI) * 0.7f;
+            } else if (player.AttackTimer > 0f) {
+                swing = MathF.Sin((1f - player.AttackTimer / Player.AttackCooldown) * MathF.PI) * 0.9f;
+            }
+            DrawFirstPersonArm(handX, handY, handSize, swing, player.SkinName);
         }
 
         // Здоровье (сердечки слева), Сытость (окорочка справа) и Кислород (в режиме Выживания)
@@ -603,7 +611,7 @@ public static class Hud {
             y += 20f;
         }
 
-        LineL($"VoxelFrame 1.0.0-pre3 fix ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
+        LineL($"VoxelFrame 1.0.0 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
         LineL($"XYZ: {player.Position.X:F3} / {player.Position.Y:F5} / {player.Position.Z:F3}", new Color(255, 240, 120, 255));
         LineL($"Block: {px} {py} {pz} [{(px & 15)} {(py & 15)} {(pz & 15)} in sub-chunk]");
         LineL($"Chunk: {px >> 4} {py >> 4} {pz >> 4} in chunk [{px >> 4}, {pz >> 4}]");
@@ -634,5 +642,93 @@ public static class Hud {
         LineR($"Mobs: {session.World.HostileMobs.Count} hostile, {session.World.Animals.Count} passive");
         LineR($"Pickups: {session.World.Pickups.Count}");
         LineR($"Display: {w}x{h}");
+    }
+
+    private static void DrawFirstPersonArm(float x, float y, float size, float rotation, string skinName) {
+        var skinDef = SkinSystem.GetSkin(skinName);
+        Color baseCol = skinDef.ShirtColor;
+
+        float cx = x + size * 0.50f;
+        float cy = y + size * 0.65f;
+        float w = size * 0.38f;
+        float h = size * 0.95f;
+
+        Rlgl.PushMatrix();
+        Rlgl.Translatef(cx, cy, 0f);
+        Rlgl.Rotatef(rotation * (180f / MathF.PI) - 18f, 0f, 0f, 1f);
+
+        byte rTop = baseCol.R;
+        byte gTop = baseCol.G;
+        byte bTop = baseCol.B;
+
+        byte rLeft = (byte)(baseCol.R * 0.82f);
+        byte gLeft = (byte)(baseCol.G * 0.82f);
+        byte bLeft = (byte)(baseCol.B * 0.82f);
+
+        byte rRight = (byte)(baseCol.R * 0.68f);
+        byte gRight = (byte)(baseCol.G * 0.68f);
+        byte bRight = (byte)(baseCol.B * 0.68f);
+
+        Rlgl.Begin((int)DrawMode.Quads);
+
+        // 1. Верхний торец куба руки (+Y - светлый)
+        Rlgl.Color4ub(rTop, gTop, bTop, 255);
+        Rlgl.Vertex2f(0f, -h * 0.50f);
+        Rlgl.Vertex2f(-w * 0.50f, -h * 0.35f);
+        Rlgl.Vertex2f(0f, -h * 0.20f);
+        Rlgl.Vertex2f(w * 0.50f, -h * 0.35f);
+
+        // 2. Левая грань (+X - умеренное затенение 82%)
+        Rlgl.Color4ub(rLeft, gLeft, bLeft, 255);
+        Rlgl.Vertex2f(-w * 0.50f, -h * 0.35f);
+        Rlgl.Vertex2f(-w * 0.50f, h * 0.50f);
+        Rlgl.Vertex2f(0f, h * 0.65f);
+        Rlgl.Vertex2f(0f, -h * 0.20f);
+
+        // 3. Правая грань (+Z - затенение 68%)
+        Rlgl.Color4ub(rRight, gRight, bRight, 255);
+        Rlgl.Vertex2f(0f, -h * 0.20f);
+        Rlgl.Vertex2f(0f, h * 0.65f);
+        Rlgl.Vertex2f(w * 0.50f, h * 0.50f);
+        Rlgl.Vertex2f(w * 0.50f, -h * 0.35f);
+
+        Rlgl.End();
+
+        // Кулак / ладонь на конце (тон кожи)
+        Color fistCol = skinDef.SkinColor;
+        byte fLeftR = (byte)(fistCol.R * 0.82f);
+        byte fLeftG = (byte)(fistCol.G * 0.82f);
+        byte fLeftB = (byte)(fistCol.B * 0.82f);
+
+        byte fRightR = (byte)(fistCol.R * 0.68f);
+        byte fRightG = (byte)(fistCol.G * 0.68f);
+        byte fRightB = (byte)(fistCol.B * 0.68f);
+
+        Rlgl.Begin((int)DrawMode.Quads);
+
+        // Верхний торец кулака
+        Rlgl.Color4ub(fistCol.R, fistCol.G, fistCol.B, 255);
+        Rlgl.Vertex2f(0f, -h * 0.50f);
+        Rlgl.Vertex2f(-w * 0.48f, -h * 0.36f);
+        Rlgl.Vertex2f(0f, -h * 0.22f);
+        Rlgl.Vertex2f(w * 0.48f, -h * 0.36f);
+
+        // Левая грань кулака
+        Rlgl.Color4ub(fLeftR, fLeftG, fLeftB, 255);
+        Rlgl.Vertex2f(-w * 0.48f, -h * 0.36f);
+        Rlgl.Vertex2f(-w * 0.48f, -h * 0.16f);
+        Rlgl.Vertex2f(0f, -h * 0.02f);
+        Rlgl.Vertex2f(0f, -h * 0.22f);
+
+        // Правая грань кулака
+        Rlgl.Color4ub(fRightR, fRightG, fRightB, 255);
+        Rlgl.Vertex2f(0f, -h * 0.22f);
+        Rlgl.Vertex2f(0f, -h * 0.02f);
+        Rlgl.Vertex2f(w * 0.48f, -h * 0.16f);
+        Rlgl.Vertex2f(w * 0.48f, -h * 0.36f);
+
+        Rlgl.End();
+
+        Rlgl.PopMatrix();
     }
 }

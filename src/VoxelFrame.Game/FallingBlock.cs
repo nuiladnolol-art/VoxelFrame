@@ -43,7 +43,7 @@ public sealed class FallingBlock {
         if (world.IsSolidAt(below)) {
             // Нашли препятствие — ищем ближайшую свободную ячейку выше и устанавливаем блок обратно в мир
             int placeY = by + 1;
-            while (placeY < Chunk.SizeY * 3 && world.IsSolidAt(new Vec3i(bx, placeY, bz))) {
+            while (placeY < 256 && world.IsSolidAt(new Vec3i(bx, placeY, bz))) {
                 placeY++;
             }
             var land = new Vec3i(bx, placeY, bz);
