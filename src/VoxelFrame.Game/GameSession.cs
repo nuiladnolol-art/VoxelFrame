@@ -584,7 +584,8 @@ public sealed class GameSession {
         if (TitleTimer > 0f) TitleTimer = MathF.Max(0f, TitleTimer - dt);
         if (ActionbarTimer > 0f) ActionbarTimer = MathF.Max(0f, ActionbarTimer - dt);
 
-        if (Ui == UiState.Paused || Ui == UiState.Death || Ui == UiState.Credits) return;
+        bool isMultiplayer = GameServer.Active != null || GameClient.Active != null;
+        if (!isMultiplayer && (Ui == UiState.Paused || Ui == UiState.Death || Ui == UiState.Credits)) return;
 
         // Погодный цикл (дождь, гроза, ясная погода)
         if (World.Dimension == Dimension.Overworld) {

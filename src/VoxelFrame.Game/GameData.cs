@@ -414,6 +414,20 @@ public static class GameData {
         return false;
     }
 
+    private static readonly Dictionary<ushort, ushort> _itemByBlock = new();
+
+    public static bool TryGetItemByBlock(ushort blockId, out ushort itemId) {
+        if (_itemByBlock.TryGetValue(blockId, out itemId)) {
+            return true;
+        }
+        if (TryGetBlock(blockId, out var bDef) && bDef != null && bDef.DropItemId != 0) {
+            itemId = bDef.DropItemId;
+            return true;
+        }
+        itemId = blockId;
+        return Items.ContainsKey(blockId);
+    }
+
     /// <summary>Пища: сколько HP восстанавливает предмет.</summary>
     public static readonly Dictionary<ushort, float> FoodValue = new() {
         { AppleItem.Id, 4f },        // Яблоко: +4 HP
@@ -764,6 +778,12 @@ public static class GameData {
         _blockByItem[EndPortalFrameItem.Id] = BEndPortalFrame.Id;
         _blockByItem[EnderCrystalItem.Id] = BEnderCrystal.Id;
         _blockByItem[ChorusFruitItem.Id] = BChorusPlant.Id;
+
+        foreach (var (itId, bId) in _blockByItem) {
+            _itemByBlock[bId] = itId;
+        }
+        _itemByBlock[BDoorUpper.Id] = DoorItem.Id;
+        _itemByBlock[BBedHead.Id] = BedItem.Id;
 
         foreach (var item in new[] {
             DirtItem, StoneItem, LogItem, PlankItem, StickItem, CoalItem,

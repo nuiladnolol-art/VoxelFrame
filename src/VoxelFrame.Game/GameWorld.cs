@@ -60,6 +60,21 @@ public sealed partial class GameWorld : IDisposable {
     public Dimension Dimension { get; set; } = Dimension.Overworld;
     public IReadOnlyCollection<GameChunk> Chunks => _chunks.Values;
 
+    private readonly HashSet<Vec3i> _modifiedChunks = new();
+
+    /// <summary>
+    /// Возвращает потокобезопасный снимок только тех чанков, в которых были изменены блоки или которые загружены из сохранения.
+    /// </summary>
+    public List<GameChunk> GetModifiedChunksSnapshot() {
+        var list = new List<GameChunk>(_modifiedChunks.Count);
+        foreach (var cc in _modifiedChunks) {
+            if (_chunks.TryGetValue(cc, out var gc)) {
+                list.Add(gc);
+            }
+        }
+        return list;
+    }
+
     // ── Чанки ────────────────────────────────────────────────────────────────
 
     public GameChunk? TryGetChunk(Vec3i cc) => _chunks.TryGetValue(cc, out var gc) ? gc : null;
@@ -589,6 +604,7 @@ public sealed partial class GameWorld : IDisposable {
         var gc = new GameChunk(cc, core);
         gc.RecomputeAllSurfaces();
         _chunks[cc] = gc;
+        _modifiedChunks.Add(cc);
         ScanDecorations(gc);
         if (Dimension == Dimension.End) ScanEndCrystals(gc);
         // Как в GetOrCreateChunk: свет считаем только для нового чанка,
@@ -723,6 +739,7 @@ public sealed partial class GameWorld : IDisposable {
         var cc = Chunk.CoordOf(w);
         var gc = TryGetChunk(cc);
         if (gc == null) return;
+        _modifiedChunks.Add(cc);
         UpdateDecor(cc, w, in voxel);
         int lx = w.X & 31, lz = w.Z & 31;
         gc.RecomputeSurfaceColumn(lx, lz);

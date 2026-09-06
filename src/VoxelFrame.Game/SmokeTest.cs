@@ -41,6 +41,7 @@ internal static class SmokeTest {
             Timed("trueboss", () => TestTrueVoidBossAndLore(shared));
             Timed("endsave", TestEndSaveLoad);
             Timed("multi", TestMultiWorldSaveLoad);
+            Timed("network", TestMultiplayerConnectionAndSync);
         } catch (Exception ex) {
             Fail($"необработанное исключение: {ex}");
         }
@@ -905,6 +906,87 @@ internal static class SmokeTest {
         } finally {
             try { if (File.Exists(path)) File.Delete(path); } catch { }
             try { if (File.Exists(path + ".bak")) File.Delete(path + ".bak"); } catch { }
+        }
+    }
+
+    private static void TestMultiplayerConnectionAndSync() {
+        Console.WriteLine("[15] Мультиплеер: подключение, сид, синхронизация и установка блоков");
+        var serverSession = NewSession(54321);
+        int testPort = 25569;
+        var server = GameServer.Start(serverSession, testPort);
+        Check(server != null && GameServer.Active != null, "сервер успешно запущен");
+        string testPlayerName = $"Test_{Guid.NewGuid():N}";
+
+        try {
+            var client = GameClient.ConnectAsync("127.0.0.1", testPort, testPlayerName).GetAwaiter().GetResult();
+            Check(client != null && GameClient.Active != null, "клиент подключился к серверу");
+
+            int waitMs = 0;
+            while (!client!.HasReceivedWelcome && waitMs < 2000) {
+                Thread.Sleep(50);
+                waitMs += 50;
+            }
+
+            Check(client.HasReceivedWelcome, "клиент получил Welcome пакет");
+            Check(client.ReceivedSeed == serverSession.World.Generator.Seed, "сид мира синхронизирован");
+
+            var clientSession = NewSession(client.ReceivedSeed);
+            client.BindSession(clientSession);
+
+            // Устанавливаем позицию игрока рядом с целевым блоком (дистанция < 7.5 блоков)
+            var playerPos = new Vector3(5f, 60f, 4f);
+            clientSession.Player.Position = playerPos;
+            client.SendMovement(playerPos, 0f, 0f, false, false, false, false, 20f, 0);
+
+            // Добавляем клиенту грязь в инвентарь и шлем обновление на сервер
+            clientSession.Player.Inventory.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.DirtItem), 5));
+            client.SendInventoryUpdate(clientSession.Player);
+
+            var testPos = new Vec3i(5, 60, 5);
+            serverSession.World.SetBlock(new Vec3i(5, 59, 5), GameData.BStone.Id);
+
+            // Обрабатываем несколько кадров на сервере и клиенте
+            for (int i = 0; i < 15; i++) {
+                serverSession.Tick(Dt, PlayerInput.Idle);
+                GameServer.Active?.Update(Dt);
+                GameClient.Active?.UpdateRemotePlayers(Dt);
+                Thread.Sleep(10);
+            }
+
+            // Проверяем установку блока клиентом
+            client.SendBlockChange(testPos.X, testPos.Y, testPos.Z, GameData.BDirt.Id, 0, isBreak: false);
+
+            for (int i = 0; i < 15; i++) {
+                serverSession.Tick(Dt, PlayerInput.Idle);
+                GameServer.Active?.Update(Dt);
+                GameClient.Active?.UpdateRemotePlayers(Dt);
+                Thread.Sleep(10);
+            }
+
+            Check(serverSession.World.GetVoxel(testPos).TypeId == GameData.BDirt.Id, "сервер принял установку блока грязи без ложного отклонения");
+
+            // Проверяем ломание блока
+            client.SendBlockChange(testPos.X, testPos.Y, testPos.Z, GameData.BDirt.Id, 0, isBreak: true);
+            for (int i = 0; i < 15; i++) {
+                serverSession.Tick(Dt, PlayerInput.Idle);
+                GameServer.Active?.Update(Dt);
+                GameClient.Active?.UpdateRemotePlayers(Dt);
+                Thread.Sleep(10);
+            }
+
+            Check(serverSession.World.GetVoxel(testPos).TypeId == 0, "сервер принял разрушение блока");
+            Check(serverSession.World.Pickups.Count > 0, "дроп появился на сервере после разрушения блока");
+
+            GameClient.Disconnect(clientSession.Player);
+            GameServer.Stop();
+            Check(GameClient.Active == null && GameServer.Active == null, "корректное отключение клиента и остановка сервера");
+        } finally {
+            GameClient.Disconnect();
+            GameServer.Stop();
+            try {
+                string pPath = SaveSystem.GetPlayerDataPath(testPlayerName);
+                if (File.Exists(pPath)) File.Delete(pPath);
+            } catch { }
         }
     }
 }

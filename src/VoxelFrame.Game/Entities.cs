@@ -280,6 +280,7 @@ public sealed class ItemPickup {
                 if (player.Inventory.TryInsert(Item, fit)) {
                     Quantity -= fit;
                     SoundSystem.PlayPop();
+                    GameClient.Active?.SendPickupCollect(Id);
                     break;
                 }
                 fit--;

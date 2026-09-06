@@ -408,8 +408,16 @@ public sealed class GameClient : IDisposable {
                         for (int c = 0; c < chunkCount; c++) {
                             var cc = new Vec3i(brGz.ReadInt32(), brGz.ReadInt32(), brGz.ReadInt32());
                             var types = new ushort[Chunk.VoxelCount];
-                            byte[] chunkBytes = brGz.ReadBytes(Chunk.VoxelCount * sizeof(ushort));
-                            System.Runtime.InteropServices.MemoryMarshal.Cast<byte, ushort>(chunkBytes).CopyTo(types);
+                            int runCount = brGz.ReadInt32();
+                            int voxelIdx = 0;
+                            for (int r = 0; r < runCount; r++) {
+                                ushort t = brGz.ReadUInt16();
+                                int n = brGz.ReadInt32();
+                                if (n <= 0 || voxelIdx >= Chunk.VoxelCount) continue;
+                                int len = Math.Min(n, Chunk.VoxelCount - voxelIdx);
+                                for (int k = 0; k < len; k++) types[voxelIdx + k] = t;
+                                voxelIdx += len;
+                            }
                             int maskCount = brGz.ReadInt32();
                             Dictionary<int, byte>? masks = null;
                             if (maskCount > 0) {
@@ -490,7 +498,12 @@ public sealed class GameClient : IDisposable {
                                         world.Animals.Add(newAnim);
                                     }
                                 }
-                                world.Animals.RemoveAll(a => !aliveAnimIds.Contains(a.Id));
+                                // Гистерезис: не удаляем мобов на границе радиуса синка (128 м),
+                                // иначе они мигают — появляются/исчезают при движении игрока.
+                                const float DespawnDistSq = 160f * 160f;
+                                var localPos = _session.Player.Position;
+                                world.Animals.RemoveAll(a => !aliveAnimIds.Contains(a.Id) &&
+                                    Vector3.DistanceSquared(a.Position, localPos) > DespawnDistSq);
 
                                 // Update Hostiles smoothly without clearing
                                 var aliveHostIds = new HashSet<uint>();
@@ -514,7 +527,8 @@ public sealed class GameClient : IDisposable {
                                         world.HostileMobs.Add(newMob);
                                     }
                                 }
-                                world.HostileMobs.RemoveAll(m => !aliveHostIds.Contains(m.Id));
+                                world.HostileMobs.RemoveAll(m => !aliveHostIds.Contains(m.Id) &&
+                                    Vector3.DistanceSquared(m.Position, localPos) > DespawnDistSq);
                             }
                         });
                         break;
@@ -568,10 +582,11 @@ public sealed class GameClient : IDisposable {
                             if (_session != null) {
                                 var p = _session.World.Pickups.Find(x => x.Id == pickupId);
                                 if (p != null) {
-                                    _session.World.Pickups.Remove(p);
-                                    if (collectorId != LocalClientId) {
-                                        SoundSystem.PlayPop();
+                                    if (collectorId == LocalClientId) {
+                                        _session.Player.Inventory.TryInsert(p.Item, p.Quantity);
                                     }
+                                    _session.World.Pickups.Remove(p);
+                                    SoundSystem.PlayPop();
                                 }
                             }
                         });

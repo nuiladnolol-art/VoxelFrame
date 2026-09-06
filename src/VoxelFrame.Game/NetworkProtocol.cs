@@ -398,34 +398,66 @@ public static class NetworkProtocol {
         });
 
     /// <summary>
-    /// Синхронизация измененных / загруженных чанков мира хоста со сжатием GZip.
+    /// Синхронизация измененных / загруженных чанков мира хоста.
+    /// Воксели сжимаются RLE по типам, чанки группируются в батчи — вход в мир
+    /// передается несколькими небольшими фреймами вместо одного гигантского пакета.
     /// </summary>
-    public static byte[] WriteWorldChunksSync(byte dimension, IReadOnlyCollection<GameChunk> chunks) =>
+    public static List<byte[]> WriteWorldChunksSyncBatches(byte dimension, IReadOnlyCollection<GameChunk> chunks, int chunksPerBatch = 32) {
+        var packets = new List<byte[]>();
+        var batch = new List<GameChunk>(chunksPerBatch);
+        foreach (var gc in chunks) {
+            batch.Add(gc);
+            if (batch.Count >= chunksPerBatch) {
+                packets.Add(BuildChunkBatchPacket(dimension, batch));
+                batch.Clear();
+            }
+        }
+        if (batch.Count > 0) {
+            packets.Add(BuildChunkBatchPacket(dimension, batch));
+        }
+        if (packets.Count == 0) {
+            packets.Add(BuildChunkBatchPacket(dimension, batch));
+        }
+        return packets;
+    }
+
+    private static byte[] BuildChunkBatchPacket(byte dimension, IReadOnlyList<GameChunk> batch) =>
         BuildPacket(PacketType.WorldChunksSync, w => {
             w.Write(dimension);
 
             using var memGz = new MemoryStream();
             using (var gz = new GZipStream(memGz, CompressionLevel.Fastest, leaveOpen: true))
             using (var bwGz = new BinaryWriter(gz, Encoding.UTF8)) {
-                bwGz.Write(chunks.Count);
-                var chunkByteBuf = new byte[Chunk.VoxelCount * sizeof(ushort)];
-                var types = new ushort[Chunk.VoxelCount];
+                bwGz.Write(batch.Count);
 
-                foreach (var gc in chunks) {
+                foreach (var gc in batch) {
                     bwGz.Write(gc.Coord.X);
                     bwGz.Write(gc.Coord.Y);
                     bwGz.Write(gc.Coord.Z);
 
                     var masks = new List<(int Index, byte Mask)>();
+                    var runs = new List<(ushort Type, int Count)>();
+                    ushort runType = ushort.MaxValue;
+                    int runLen = 0;
                     for (int i = 0; i < Chunk.VoxelCount; i++) {
                         var v = gc.Chunk.Get(i);
-                        types[i] = v.TypeId;
                         if (v.TypeId != 0 && v.SubGridLayerMask != 0)
                             masks.Add((i, v.SubGridLayerMask));
+                        if (runLen > 0 && v.TypeId == runType) {
+                            runLen++;
+                        } else {
+                            if (runLen > 0) runs.Add((runType, runLen));
+                            runType = v.TypeId;
+                            runLen = 1;
+                        }
                     }
+                    if (runLen > 0) runs.Add((runType, runLen));
 
-                    System.Runtime.InteropServices.MemoryMarshal.AsBytes(types.AsSpan()).CopyTo(chunkByteBuf);
-                    bwGz.Write(chunkByteBuf);
+                    bwGz.Write(runs.Count);
+                    foreach (var (type, count) in runs) {
+                        bwGz.Write(type);
+                        bwGz.Write(count);
+                    }
 
                     bwGz.Write(masks.Count);
                     foreach (var (idx, mask) in masks) {

@@ -264,6 +264,14 @@ internal static class Program {
                     Raylib.EnableCursor();
                     cursorCaptured = false;
                 }
+
+                // В сетевой игре мир, сервер и клиенты продолжают обновляться в реальном времени даже в меню паузы/настроек
+                if (GameClient.Active != null || GameServer.Active != null) {
+                    session.Tick(dt, PlayerInput.Idle);
+                    GameServer.Active?.Update(dt);
+                    GameClient.Active?.UpdateRemotePlayers(dt);
+                }
+
                 if (!PostProcessing.BeginScene(session)) {
                     Raylib.BeginDrawing();
                 }
@@ -302,12 +310,6 @@ internal static class Program {
                         }
                         continue;
                     }
-                }
-
-                // В сетевой игре мир и другие игроки продолжают обновляться в реальном времени даже в меню паузы
-                if (GameClient.Active != null || GameServer.Active != null) {
-                    session.Tick(dt, PlayerInput.Idle);
-                    GameClient.Active?.UpdateRemotePlayers(dt);
                 }
                 
                 Raylib.ClearBackground(new Color(10, 12, 20, 255));
