@@ -158,7 +158,7 @@ public sealed class GameClient : IDisposable {
         var token = _cts.Token;
 
         // Отправка приветственного Handshake с передачей скина
-        var handshake = NetworkProtocol.WriteHandshake(PlayerName, "1.0.0", _session?.Player.SkinName ?? "cyan");
+        var handshake = NetworkProtocol.WriteHandshake(PlayerName, "1.0.1", _session?.Player.SkinName ?? "cyan");
         await _stream.WriteAsync(handshake, token);
 
         _ = Task.Run(() => ReceiveLoop(token), token);
@@ -303,8 +303,8 @@ public sealed class GameClient : IDisposable {
                                     if (isBreak) {
                                         targetWorld.RemoveBlock(cell);
                                         if (_session.World.Dimension == (Dimension)dim) SoundSystem.PlayDigAt(cellPos, typeId);
-                                    } else {
-                                        targetWorld.PlacePlacedBlock(cell, GameData.GetBlock(typeId), mask);
+                                    } else if (GameData.TryGetBlock(typeId, out var block)) {
+                                        targetWorld.PlacePlacedBlock(cell, block, mask);
                                         if (_session.World.Dimension == (Dimension)dim) SoundSystem.PlayPlaceAt(cellPos);
                                     }
                                 } finally {
@@ -582,9 +582,6 @@ public sealed class GameClient : IDisposable {
                             if (_session != null) {
                                 var p = _session.World.Pickups.Find(x => x.Id == pickupId);
                                 if (p != null) {
-                                    if (collectorId == LocalClientId) {
-                                        _session.Player.Inventory.TryInsert(p.Item, p.Quantity);
-                                    }
                                     _session.World.Pickups.Remove(p);
                                     SoundSystem.PlayPop();
                                 }
@@ -900,8 +897,8 @@ public sealed class GameClient : IDisposable {
                                 try {
                                     if (actualType == 0) {
                                         targetWorld.RemoveBlock(cell);
-                                    } else {
-                                        targetWorld.PlacePlacedBlock(cell, GameData.GetBlock(actualType), actualMask);
+                                    } else if (GameData.TryGetBlock(actualType, out var block)) {
+                                        targetWorld.PlacePlacedBlock(cell, block, actualMask);
                                     }
                                 } finally {
                                     GameWorld.SuppressNetworkSync = false;

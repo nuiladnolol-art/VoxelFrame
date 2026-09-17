@@ -36,7 +36,7 @@ public class GameReleaseItem {
 }
 
 public class LauncherForm : Form {
-    public const string CurrentLauncherVersion = "1.0.0";
+    public const string CurrentLauncherVersion = "1.0.1";
 
     private TextBox txtNickname;
     private ComboBox cbVersion;
@@ -96,7 +96,7 @@ public class LauncherForm : Form {
         headerPanel.Controls.Add(lblTitle);
 
         Label lblBadge = new Label {
-            Text = "1.0.0",
+            Text = "1.0.1",
             Font = new Font("Segoe UI", 9, FontStyle.Bold),
             ForeColor = Color.FromArgb(100, 220, 120),
             BackColor = Color.FromArgb(30, 60, 40),
@@ -399,16 +399,16 @@ public class LauncherForm : Form {
 
         if (newestExe != null) {
             _versions.Add(new GameReleaseItem {
-                DisplayName = "💾 v1.0.0 (Установлена)",
-                Tag = "v1.0.0",
+                DisplayName = "💾 v1.0.1 (Установлена)",
+                Tag = "v1.0.1",
                 IsInstalled = true,
                 InstallPath = Path.GetDirectoryName(newestExe)!,
                 ExePath = newestExe
             });
         } else if (gameDir != null) {
             _versions.Add(new GameReleaseItem {
-                DisplayName = "💾 v1.0.0 (Установлена)",
-                Tag = "v1.0.0",
+                DisplayName = "💾 v1.0.1 (Установлена)",
+                Tag = "v1.0.1",
                 IsLocalDev = true,
                 IsInstalled = true,
                 InstallPath = gameDir

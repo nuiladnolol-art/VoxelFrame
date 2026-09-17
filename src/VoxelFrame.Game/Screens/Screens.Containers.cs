@@ -91,23 +91,44 @@ public static partial class Screens {
 
         // Взаимодействие со слотом сырья
         if ((leftClick || rightClick) && inHov) {
-            HandleFurnaceSlotClick(ref furnace.Input, leftClick, rightClick, id => GameData.SmeltingRecipes.ContainsKey(id));
+            HandleFurnaceSlotClick(ref furnace.Input, leftClick, rightClick, id => GameData.SmeltingRecipes.ContainsKey(id), inv);
             NotifyFurnaceChanged(session, furnace);
         }
 
         // Взаимодействие со слотом топлива
         if ((leftClick || rightClick) && fuelHov) {
-            HandleFurnaceSlotClick(ref furnace.Fuel, leftClick, rightClick, id => GameData.IsFuel(id));
+            HandleFurnaceSlotClick(ref furnace.Fuel, leftClick, rightClick, id => GameData.IsFuel(id), inv);
             NotifyFurnaceChanged(session, furnace);
         }
 
         // Взаимодействие со слотом результата (только забирать)
         if (leftClick && outHov && furnace.Output.HasValue && furnace.Output.Value.Quantity > 0) {
+            bool shift = Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift);
             var outp = furnace.Output.Value;
-            if (!Held.HasValue || Held.Value.Quantity <= 0) {
+            if (shift) {
+                int rem = outp.Quantity;
+                for (int t = 0; t < 36 && rem > 0; t++) {
+                    var te = inv.Slots[t];
+                    if (te != null && te.Value.Item.Definition == outp.Item.Definition && te.Value.Quantity < te.Value.Item.Definition.MaxStack) {
+                        int add = Math.Min(te.Value.Item.Definition.MaxStack - te.Value.Quantity, rem);
+                        inv.InsertAt(t, te.Value with { Quantity = te.Value.Quantity + add });
+                        rem -= add;
+                    }
+                }
+                for (int t = 0; t < 36 && rem > 0; t++) {
+                    if (inv.Slots[t] == null) {
+                        int add = Math.Min(outp.Item.Definition.MaxStack, rem);
+                        inv.InsertAt(t, new ItemEntry(outp.Item, add));
+                        rem -= add;
+                    }
+                }
+                if (rem <= 0) furnace.Output = null;
+                else furnace.Output = outp with { Quantity = rem };
+                SoundSystem.PlayPop();
+            } else if (!Held.HasValue || Held.Value.Quantity <= 0) {
                 Held = outp;
                 furnace.Output = null;
-            } else if (Held.Value.Item.Definition.Id == outp.Item.Definition.Id && Held.Value.Quantity + outp.Quantity <= 64) {
+            } else if (Held.Value.Item.Definition.Id == outp.Item.Definition.Id && Held.Value.Quantity + outp.Quantity <= outp.Item.Definition.MaxStack) {
                 Held = Held.Value with { Quantity = Held.Value.Quantity + outp.Quantity };
                 furnace.Output = null;
             }
@@ -128,7 +149,7 @@ public static partial class Screens {
             DrawSlot(session, inv, invX + col * 56f, hotY, col, col == session.Player.SelectedSlot);
 
         DrawHeldItem();
-        HandleWorkbenchInput(session, inv, invX, invY, hotY);
+        HandleFurnaceInventoryInput(session, inv, furnace, invX, invY, hotY);
 
         if (!Held.HasValue || Held.Value.Quantity <= 0) {
             ItemDefinition? fDef = null;
@@ -155,7 +176,32 @@ public static partial class Screens {
         }
     }
 
-    private static void HandleFurnaceSlotClick(ref ItemEntry? slotItem, bool leftClick, bool rightClick, Func<ushort, bool> filter) {
+    private static void HandleFurnaceSlotClick(ref ItemEntry? slotItem, bool leftClick, bool rightClick, Func<ushort, bool> filter, Container? playerInv = null) {
+        bool shift = Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift);
+        if (shift && leftClick && slotItem.HasValue && playerInv != null) {
+            var item = slotItem.Value;
+            int rem = item.Quantity;
+            for (int t = 0; t < 36 && rem > 0; t++) {
+                var te = playerInv.Slots[t];
+                if (te != null && te.Value.Item.Definition == item.Item.Definition && te.Value.Quantity < te.Value.Item.Definition.MaxStack) {
+                    int add = Math.Min(te.Value.Item.Definition.MaxStack - te.Value.Quantity, rem);
+                    playerInv.InsertAt(t, te.Value with { Quantity = te.Value.Quantity + add });
+                    rem -= add;
+                }
+            }
+            for (int t = 0; t < 36 && rem > 0; t++) {
+                if (playerInv.Slots[t] == null) {
+                    int add = Math.Min(item.Item.Definition.MaxStack, rem);
+                    playerInv.InsertAt(t, new ItemEntry(item.Item, add));
+                    rem -= add;
+                }
+            }
+            if (rem <= 0) slotItem = null;
+            else slotItem = item with { Quantity = rem };
+            SoundSystem.PlayPop();
+            return;
+        }
+
         if (rightClick) {
             if (Held.HasValue && Held.Value.Quantity > 0) {
                 if (filter(Held.Value.Item.Definition.Id)) {
@@ -203,6 +249,76 @@ public static partial class Screens {
                 }
             }
         }
+    }
+
+    private static void HandleFurnaceInventoryInput(GameSession session, Container inv, FurnaceData furnace,
+                                                    float invX, float invY, float hotY) {
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left) && !Raylib.IsMouseButtonPressed(MouseButton.Right)) return;
+        bool right = Raylib.IsMouseButtonPressed(MouseButton.Right);
+        bool left = Raylib.IsMouseButtonPressed(MouseButton.Left);
+        bool shift = (Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift)) && left;
+        var mouse = Ui.Mouse();
+
+        void ProcessSlot(int slotIdx, float x, float y) {
+            var rect = new Rectangle(x, y, 52, 52);
+            if (!Raylib.CheckCollisionPointRec(mouse, rect)) return;
+
+            if (shift && inv.Slots[slotIdx] is { } entry && entry.Quantity > 0) {
+                ushort id = entry.Item.Definition.Id;
+                bool isSmeltable = GameData.SmeltingRecipes.ContainsKey(id);
+                bool isFuel = GameData.IsFuel(id);
+
+                if (isSmeltable || isFuel) {
+                    int rem = entry.Quantity;
+
+                    // 1. Попытка вставить в слот сырья (если плавится)
+                    if (isSmeltable) {
+                        if (!furnace.Input.HasValue) {
+                            furnace.Input = entry;
+                            rem = 0;
+                        } else if (furnace.Input.Value.Item.Definition.Id == id) {
+                            int space = furnace.Input.Value.Item.Definition.MaxStack - furnace.Input.Value.Quantity;
+                            int add = Math.Min(space, rem);
+                            if (add > 0) {
+                                furnace.Input = furnace.Input.Value with { Quantity = furnace.Input.Value.Quantity + add };
+                                rem -= add;
+                            }
+                        }
+                    }
+
+                    // 2. Попытка вставить в слот топлива (если топливо и ещё осталось)
+                    if (rem > 0 && isFuel) {
+                        if (!furnace.Fuel.HasValue) {
+                            furnace.Fuel = entry with { Quantity = rem };
+                            rem = 0;
+                        } else if (furnace.Fuel.Value.Item.Definition.Id == id) {
+                            int space = furnace.Fuel.Value.Item.Definition.MaxStack - furnace.Fuel.Value.Quantity;
+                            int add = Math.Min(space, rem);
+                            if (add > 0) {
+                                furnace.Fuel = furnace.Fuel.Value with { Quantity = furnace.Fuel.Value.Quantity + add };
+                                rem -= add;
+                            }
+                        }
+                    }
+
+                    if (rem < entry.Quantity) {
+                        if (rem <= 0) inv.RemoveAt(slotIdx);
+                        else inv.InsertAt(slotIdx, entry with { Quantity = rem });
+                        SoundSystem.PlayPop();
+                        NotifyFurnaceChanged(session, furnace);
+                        return;
+                    }
+                }
+            }
+
+            SlotClicked(session, inv, x, y, slotIdx, right);
+        }
+
+        for (int row = 0; row < 3; row++)
+            for (int col = 0; col < 9; col++)
+                ProcessSlot(9 + row * 9 + col, invX + col * 56f, invY + row * 56f);
+        for (int col = 0; col < 9; col++)
+            ProcessSlot(col, invX + col * 56f, hotY);
     }
 
     private static void NotifyFurnaceChanged(GameSession session, FurnaceData furnace) {
@@ -517,6 +633,9 @@ public static partial class Screens {
                         inv.InsertAt(slotIdx, slotItem.Value with { Quantity = current + add });
                         if (held.Quantity - add > 0) Held = held with { Quantity = held.Quantity - add };
                         else Held = null;
+                    } else {
+                        inv.InsertAt(slotIdx, held);
+                        Held = slotItem;
                     }
                 } else {
                     inv.InsertAt(slotIdx, held);

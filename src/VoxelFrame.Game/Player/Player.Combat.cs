@@ -37,6 +37,7 @@ public sealed partial class Player {
 
         if (isStrong) SoundSystem.PlayStrongAttack();
         else SoundSystem.PlayWeakAttack();
+        DamageSelectedTool(session);
     }
 
     public void AttackAnimal(GameWorld world, GameSession session) {
@@ -228,19 +229,35 @@ public sealed partial class Player {
     }
 
     /// <summary>Снимает 1 прочность с инструмента/оружия в выбранном слоте; ломает при нуле.</summary>
-    public void DamageSelectedTool(GameSession session) {
+    public void DamageSelectedTool(GameSession session, int damage = 1) {
         if (session.GameMode == GameMode.Creative) return;
         var entry = Inventory.Slots[SelectedSlot];
         if (entry == null) return;
         var def = entry.Value.Item.Definition;
-        if (GameData.GetToolTier(def.Id) <= 0) return;
-        int dur = entry.Value.Item.Durability - 1;
+        if (!GameData.HasDurability(def.Id)) return;
+        int dur = entry.Value.Item.Durability - damage;
         if (dur <= 0) {
             Inventory.RemoveAt(SelectedSlot);
             session.AddMessage($"Инструмент «{def.Name}» сломался!");
             SoundSystem.PlayBreakTool();
         } else {
             entry.Value.Item.Durability = dur;
+        }
+    }
+
+    /// <summary>Снимает прочность со щита или предмета во второй руке.</summary>
+    public void DamageOffhandTool(GameSession session, int damage = 1) {
+        if (session.GameMode == GameMode.Creative) return;
+        if (OffhandEntry == null) return;
+        var def = OffhandEntry.Value.Item.Definition;
+        if (!GameData.HasDurability(def.Id)) return;
+        int dur = OffhandEntry.Value.Item.Durability - damage;
+        if (dur <= 0) {
+            OffhandEntry = null;
+            session.AddMessage($"Предмет во второй руке «{def.Name}» сломался!");
+            SoundSystem.PlayBreakTool();
+        } else {
+            OffhandEntry.Value.Item.Durability = dur;
         }
     }
 

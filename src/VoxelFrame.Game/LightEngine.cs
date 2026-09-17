@@ -44,7 +44,7 @@ public static class LightEngine {
         if (v.TypeId == 0) return false;
         var t = _opaqueTable;
         if (t == null) {
-            t = new bool[256];
+            t = new bool[65536];
             foreach (var b in GameData.Blocks) t[b.Id] = b.IsOpaque;
             _opaqueTable = t;
         }
@@ -54,7 +54,7 @@ public static class LightEngine {
     private static byte EmittedLight(ushort typeId) {
         var t = _lightLevelTable;
         if (t == null) {
-            t = new byte[256];
+            t = new byte[65536];
             foreach (var b in GameData.Blocks) t[b.Id] = b.LightLevel;
             _lightLevelTable = t;
         }

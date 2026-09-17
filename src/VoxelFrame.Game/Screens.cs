@@ -24,6 +24,8 @@ public static partial class Screens {
     public static bool InWorldSelectScreen = false;
     public static bool InCreateWorldScreen = false;
     public static int SelectedWorldListIndex = 0;
+    public static int WorldListScrollOffset = 0;
+    public static bool ConfirmDeleteWorld = false;
     public static string WorldNameInput = "Новый мир";
     public static string WorldSeedInput = "";
     public static int ActiveTextInputField = 0; // 0 = none, 1 = name, 2 = seed
@@ -47,7 +49,12 @@ public static partial class Screens {
         "Бег (Спринт)",
         "Выбросить",
         "Инвентарь",
-        "Пауза"
+        "Пауза",
+        "Вторая рука",
+        "Вид камеры",
+        "Инфо F3",
+        "Чат",
+        "Список игроков"
     };
 
     private static KeyboardKey GetBindKey(int idx) => idx switch {
@@ -61,6 +68,11 @@ public static partial class Screens {
         7 => KeyBinds.Drop,
         8 => KeyBinds.Inventory,
         9 => KeyBinds.Pause,
+        10 => KeyBinds.SwapHands,
+        11 => KeyBinds.TogglePerspective,
+        12 => KeyBinds.ToggleDebug,
+        13 => KeyBinds.Chat,
+        14 => KeyBinds.PlayerList,
         _ => KeyboardKey.Null
     };
 
@@ -76,6 +88,11 @@ public static partial class Screens {
             case 7: KeyBinds.Drop = key; break;
             case 8: KeyBinds.Inventory = key; break;
             case 9: KeyBinds.Pause = key; break;
+            case 10: KeyBinds.SwapHands = key; break;
+            case 11: KeyBinds.TogglePerspective = key; break;
+            case 12: KeyBinds.ToggleDebug = key; break;
+            case 13: KeyBinds.Chat = key; break;
+            case 14: KeyBinds.PlayerList = key; break;
         }
     }
 
@@ -259,7 +276,7 @@ public static partial class Screens {
             // Обработка ввода с клавиатуры
             int key = Raylib.GetCharPressed();
             while (key > 0) {
-                if (key >= 32 && key <= 126 || key >= 1040 && key <= 1103) {
+                if (key >= 32 && key <= 126 || key >= 1040 && key <= 1103 || key == 1025 || key == 1105) {
                     if (ActiveTextInputField == 1 && WorldNameInput.Length < 24) WorldNameInput += (char)key;
                     else if (ActiveTextInputField == 2 && WorldSeedInput.Length < 32) WorldSeedInput += (char)key;
                 }
@@ -287,6 +304,14 @@ public static partial class Screens {
             Fonts.DrawTitle3D("ВЫБОР МИРА", w / 2f, h * 0.08f, 44f);
 
             var worlds = SaveSystem.GetAllWorlds();
+            if (worlds.Count > 0) {
+                float wheel = Raylib.GetMouseWheelMove();
+                if (wheel > 0) WorldListScrollOffset = Math.Max(0, WorldListScrollOffset - 1);
+                else if (wheel < 0) WorldListScrollOffset = Math.Min(Math.Max(0, worlds.Count - 5), WorldListScrollOffset + 1);
+                WorldListScrollOffset = Math.Clamp(WorldListScrollOffset, 0, Math.Max(0, worlds.Count - 5));
+            } else {
+                WorldListScrollOffset = 0;
+            }
             if (SelectedWorldListIndex >= worlds.Count) SelectedWorldListIndex = Math.Max(0, worlds.Count - 1);
 
             float listY = h * 0.16f;
@@ -297,14 +322,16 @@ public static partial class Screens {
             if (worlds.Count == 0) {
                 Fonts.DrawCenteredShadowed("Нет созданных миров. Нажмите 'Создать новый мир'", w / 2f, h * 0.40f, 20f, new Color(180, 190, 205, 255));
             } else {
-                for (int i = 0; i < worlds.Count && i < 5; i++) {
+                for (int slot = 0; slot < 5 && (slot + WorldListScrollOffset) < worlds.Count; slot++) {
+                    int i = slot + WorldListScrollOffset;
                     var wi = worlds[i];
-                    float cy = listY + i * (cardH + 10f);
+                    float cy = listY + slot * (cardH + 10f);
                     var cardRec = new Rectangle(cardX, cy, cardW, cardH);
                     bool isSelected = (i == SelectedWorldListIndex);
                     bool cardHover = Raylib.CheckCollisionPointRec(Ui.Mouse(), cardRec);
 
                     if (Raylib.IsMouseButtonPressed(MouseButton.Left) && cardHover) {
+                        if (SelectedWorldListIndex != i) ConfirmDeleteWorld = false;
                         SelectedWorldListIndex = i;
                     }
 
@@ -321,6 +348,10 @@ public static partial class Screens {
                     string seedStr = wi.Seed != 0 ? $" • Сид: {wi.Seed}" : "";
                     Fonts.Draw($"Выживание • {dateStr} • {sizeStr}{seedStr}", cardX + 16f, cy + 38f, 14f, new Color(160, 180, 210, 255));
                 }
+
+                if (worlds.Count > 5) {
+                    Fonts.DrawCentered($"Показаны {WorldListScrollOffset + 1}..{Math.Min(worlds.Count, WorldListScrollOffset + 5)} из {worlds.Count} (прокрутка колёсиком мыши)", w / 2f, listY + 5 * (cardH + 10f) + 6f, 14f, new Color(170, 195, 230, 220));
+                }
             }
 
             // Нижняя панель действий
@@ -330,22 +361,31 @@ public static partial class Screens {
 
             bool hasSelection = worlds.Count > 0 && SelectedWorldListIndex >= 0 && SelectedWorldListIndex < worlds.Count;
             if (Button(w / 2f - bW - 8f, bY1, bW, 46f, "Играть в мире", hasSelection)) {
+                ConfirmDeleteWorld = false;
                 SaveSystem.CurrentWorldPath = worlds[SelectedWorldListIndex].FilePath;
                 action = MenuAction.Continue;
                 InWorldSelectScreen = false;
             }
             if (Button(w / 2f + 8f, bY1, bW, 46f, "Создать новый мир", true)) {
+                ConfirmDeleteWorld = false;
                 InCreateWorldScreen = true;
                 WorldNameInput = "Новый мир";
                 WorldSeedInput = "";
                 ActiveTextInputField = 0;
             }
 
-            if (Button(w / 2f - bW - 8f, bY2, bW, 46f, "Удалить", hasSelection)) {
-                SaveSystem.DeleteSave(worlds[SelectedWorldListIndex].FilePath);
-                if (SelectedWorldListIndex >= worlds.Count - 1) SelectedWorldListIndex = Math.Max(0, worlds.Count - 2);
+            string deleteLabel = ConfirmDeleteWorld ? "Точно удалить?" : "Удалить";
+            if (Button(w / 2f - bW - 8f, bY2, bW, 46f, deleteLabel, hasSelection)) {
+                if (!ConfirmDeleteWorld) {
+                    ConfirmDeleteWorld = true;
+                } else {
+                    ConfirmDeleteWorld = false;
+                    SaveSystem.DeleteSave(worlds[SelectedWorldListIndex].FilePath);
+                    if (SelectedWorldListIndex >= worlds.Count - 1) SelectedWorldListIndex = Math.Max(0, worlds.Count - 2);
+                }
             }
             if (Button(w / 2f + 8f, bY2, bW, 46f, "Отмена", true)) {
+                ConfirmDeleteWorld = false;
                 InWorldSelectScreen = false;
             }
         } else {
@@ -383,7 +423,7 @@ public static partial class Screens {
             var verRec = new Rectangle(14f, h - 34f, 195f, 24f);
             Raylib.DrawRectangleRec(verRec, new Color(20, 24, 34, 180));
             Raylib.DrawRectangleLinesEx(verRec, 1f, new Color(50, 60, 80, 180));
-            Fonts.Draw("VoxelFrame 1.0.0", 22f, h - 30f, 14f, new Color(190, 205, 230, 220));
+            Fonts.Draw("VoxelFrame 1.0.1", 22f, h - 30f, 14f, new Color(190, 205, 230, 220));
 
             // Правый копирайт
             var copyRec = new Rectangle(w - 200f, h - 34f, 186f, 24f);
@@ -757,16 +797,19 @@ public static partial class Screens {
         if (ActiveRebindIndex != -1) {
             int pressed = Raylib.GetKeyPressed();
             if (pressed != 0) {
-                SetBindKey(ActiveRebindIndex, (KeyboardKey)pressed);
+                if ((KeyboardKey)pressed != KeyboardKey.Escape) {
+                    SetBindKey(ActiveRebindIndex, (KeyboardKey)pressed);
+                }
                 ActiveRebindIndex = -1;
                 while (Raylib.GetKeyPressed() != 0) {}
             }
         }
 
-        Fonts.DrawTitle3D("НАСТРОЙКИ УПРАВЛЕНИЯ", w / 2f, h * 0.10f, 44f);
+        Fonts.DrawTitle3D("НАСТРОЙКИ УПРАВЛЕНИЯ", w / 2f, h * 0.08f, 40f);
 
-        float startY = h * 0.18f;
-        float rowH = 42f;
+        float startY = h * 0.14f;
+        float rowH = 36f;
+        float rowGap = 6f;
         float colW = 340f;
         
         for (int i = 0; i < BindLabels.Length; i++) {
@@ -774,24 +817,25 @@ public static partial class Screens {
             int row = i / 2;
             
             float cx = (col == 0) ? (w / 2f - colW - 10f) : (w / 2f + 10f);
-            float cy = startY + row * (rowH + 8f);
+            float cy = startY + row * (rowH + rowGap);
             
-            Fonts.DrawShadowed($"{BindLabels[i]}:", cx, cy + 10f, 20f, Color.White);
+            Fonts.DrawShadowed($"{BindLabels[i]}:", cx, cy + 8f, 18f, Color.White);
             
             string keyName = (ActiveRebindIndex == i) ? "> ??? <" : KeyBinds.GetName(GetBindKey(i));
-            if (Button(cx + 160f, cy, 160f, rowH, keyName, true)) {
+            if (Button(cx + 170f, cy, 170f, rowH, keyName, true)) {
                 ActiveRebindIndex = i;
             }
         }
 
         // Слайдер чувствительности мыши
-        float sensY = startY + 6 * (rowH + 8f);
+        int totalRows = (BindLabels.Length + 1) / 2;
+        float sensY = startY + totalRows * (rowH + rowGap) + 8f;
         string sensText = $"Чувствительность мыши: {SaveSystem.MouseSensitivity}%";
         if (Slider(w / 2f - colW, sensY, colW * 2f + 20f, rowH, sensText, SaveSystem.MouseSensitivity, 20f, 200f, out float newSens)) {
             SaveSystem.MouseSensitivity = Math.Clamp((int)MathF.Round(newSens), 20, 200);
         }
 
-        float bottomY = h * 0.85f;
+        float bottomY = h * 0.88f;
         if (Button(w / 2f - 210f, bottomY, 200f, 44f, "Сбросить по умолч.", true)) {
             ActiveRebindIndex = -1;
             KeyBinds.ResetToDefaults();
@@ -986,6 +1030,7 @@ public static partial class Screens {
                     Velocity = session.Player.Forward * 2.0f + new System.Numerics.Vector3(0f, 1.5f, 0f)
                 };
                 session.World.Pickups.Add(pickup);
+                GameClient.Active?.SendDropItem(held.Item.Definition.Id, held.Quantity, held.Item.Durability);
             }
             Held = null;
         }
@@ -999,6 +1044,7 @@ public static partial class Screens {
                         Velocity = session.Player.Forward * 2.0f + new System.Numerics.Vector3(0f, 1.5f, 0f)
                     };
                     session.World.Pickups.Add(pickup);
+                    GameClient.Active?.SendDropItem(it.Item.Definition.Id, it.Quantity, it.Item.Durability);
                 }
                 PersonalGrid[i] = null;
             }
@@ -1013,6 +1059,7 @@ public static partial class Screens {
                         Velocity = session.Player.Forward * 2.0f + new System.Numerics.Vector3(0f, 1.5f, 0f)
                     };
                     session.World.Pickups.Add(pickup);
+                    GameClient.Active?.SendDropItem(it.Item.Definition.Id, it.Quantity, it.Item.Durability);
                 }
                 WorkbenchGrid[i] = null;
             }
@@ -1332,6 +1379,7 @@ public static partial class Screens {
                         Velocity = session.Player.Forward * 4.5f + new Vector3(0f, 2.0f, 0f)
                     };
                     session.World.Pickups.Add(pickup);
+                    GameClient.Active?.SendDropItem(Held.Value.Item.Definition.Id, dropCount, Held.Value.Item.Durability);
                     if (right && Held.Value.Quantity > 1) {
                         Held = Held.Value with { Quantity = Held.Value.Quantity - 1 };
                     } else {
@@ -1342,8 +1390,8 @@ public static partial class Screens {
             }
         }
 
-        // Выбрасывание предмета клавишей Q / Ctrl+Q при наведении на слот
-        if (Raylib.IsKeyPressed(KeyboardKey.Q)) {
+        // Выбрасывание предмета назначенной клавишей (KeyBinds.Drop) при наведении на слот
+        if (Raylib.IsKeyPressed(KeyBinds.Drop)) {
             bool ctrl = Raylib.IsKeyDown(KeyboardKey.LeftControl) || Raylib.IsKeyDown(KeyboardKey.RightControl);
             for (int row = 0; row < mainRows; row++) {
                 for (int col = 0; col < cols; col++) {
@@ -1517,7 +1565,7 @@ public static partial class Screens {
                 inv.InsertAt(idx, heldItem);
                 Held = null;
             } else if (entryInSlot.Value.Item.Definition == heldItem.Item.Definition) {
-                // Merge all up to 64
+                // Merge all up to MaxStack
                 int current = entryInSlot.Value.Quantity;
                 if (current < entryInSlot.Value.Item.Definition.MaxStack) {
                     int add = Math.Min(entryInSlot.Value.Item.Definition.MaxStack - current, heldItem.Quantity);
@@ -1527,6 +1575,11 @@ public static partial class Screens {
                     } else {
                         Held = null;
                     }
+                } else {
+                    // Swap items if stack is already full / max stack == 1
+                    inv.RemoveAt(idx);
+                    inv.InsertAt(idx, heldItem);
+                    Held = entryInSlot;
                 }
             } else {
                 // Swap items
@@ -1604,23 +1657,52 @@ public static partial class Screens {
                 Fonts.DrawShadowed($"×{craftResult2.Count}", resultX + 3f, resultY + slotSz - 16f, 14f, Color.White);
 
             if (leftClick && resultHovered) {
-                bool canTake = false;
-                if (!Held.HasValue || Held.Value.Quantity <= 0) {
-                    Held = new ItemEntry(GameData.NewItem(craftResult2.Item), craftResult2.Count);
-                    canTake = true;
-                } else if (Held.Value.Item.Definition.Id == craftResult2.Item.Id && Held.Value.Quantity + craftResult2.Count <= 64) {
-                    Held = Held.Value with { Quantity = Held.Value.Quantity + craftResult2.Count };
-                    canTake = true;
-                }
+                bool shift = Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift);
+                var inv = session.Player.Inventory;
+                if (shift) {
+                    int craftedCount = 0;
+                    while (true) {
+                        var g3 = new ItemDefinition?[9];
+                        g3[0] = PersonalGrid[0]?.Item.Definition; g3[1] = PersonalGrid[1]?.Item.Definition;
+                        g3[3] = PersonalGrid[2]?.Item.Definition; g3[4] = PersonalGrid[3]?.Item.Definition;
+                        string curKey = GameData.NormalizeGrid(g3);
+                        if (!GameData.ShapeRecipes.TryGetValue(curKey, out var currentRecipe) || currentRecipe.Item.Id != craftResult2.Item.Id) break;
 
-                if (canTake) {
-                    for (int i = 0; i < 4; i++) {
-                        if (PersonalGrid[i].HasValue && PersonalGrid[i]!.Value.Quantity > 0) {
-                            int rem = PersonalGrid[i]!.Value.Quantity - 1;
-                            PersonalGrid[i] = rem > 0 ? PersonalGrid[i]!.Value with { Quantity = rem } : null;
+                        var inst = GameData.NewItem(currentRecipe.Item);
+                        if (!inv.TryInsert(inst, currentRecipe.Count)) break;
+
+                        for (int i = 0; i < 4; i++) {
+                            if (PersonalGrid[i].HasValue && PersonalGrid[i]!.Value.Quantity > 0) {
+                                int rem = PersonalGrid[i]!.Value.Quantity - 1;
+                                PersonalGrid[i] = rem > 0 ? PersonalGrid[i]!.Value with { Quantity = rem } : null;
+                            }
                         }
+                        craftedCount += currentRecipe.Count;
                     }
-                    session.AddMessage($"Создано: {craftResult2.Item.Name}");
+                    if (craftedCount > 0) {
+                        session.AddMessage($"Создано: {craftResult2.Item.Name} ×{craftedCount}");
+                        SoundSystem.PlayPop();
+                    }
+                } else {
+                    bool canTake = false;
+                    if (!Held.HasValue || Held.Value.Quantity <= 0) {
+                        Held = new ItemEntry(GameData.NewItem(craftResult2.Item), craftResult2.Count);
+                        canTake = true;
+                    } else if (Held.Value.Item.Definition.Id == craftResult2.Item.Id && Held.Value.Quantity + craftResult2.Count <= craftResult2.Item.MaxStack) {
+                        Held = Held.Value with { Quantity = Held.Value.Quantity + craftResult2.Count };
+                        canTake = true;
+                    }
+
+                    if (canTake) {
+                        for (int i = 0; i < 4; i++) {
+                            if (PersonalGrid[i].HasValue && PersonalGrid[i]!.Value.Quantity > 0) {
+                                int rem = PersonalGrid[i]!.Value.Quantity - 1;
+                                PersonalGrid[i] = rem > 0 ? PersonalGrid[i]!.Value with { Quantity = rem } : null;
+                            }
+                        }
+                        session.AddMessage($"Создано: {craftResult2.Item.Name}");
+                        SoundSystem.PlayPop();
+                    }
                 }
             }
         }
@@ -2082,23 +2164,50 @@ public static partial class Screens {
                 Fonts.DrawShadowed($"×{craftResult3.Count}", resultX + 3f, resultY + slotSz - 16f, 14f, Color.White);
 
             if (leftClick && resultHov) {
-                bool canTake = false;
-                if (!Held.HasValue || Held.Value.Quantity <= 0) {
-                    Held = new ItemEntry(GameData.NewItem(craftResult3.Item), craftResult3.Count);
-                    canTake = true;
-                } else if (Held.Value.Item.Definition.Id == craftResult3.Item.Id && Held.Value.Quantity + craftResult3.Count <= 64) {
-                    Held = Held.Value with { Quantity = Held.Value.Quantity + craftResult3.Count };
-                    canTake = true;
-                }
+                bool shift = Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift);
+                if (shift) {
+                    int craftedCount = 0;
+                    while (true) {
+                        var g3 = new ItemDefinition?[9];
+                        for (int i = 0; i < 9; i++) g3[i] = WorkbenchGrid[i]?.Item.Definition;
+                        string curKey = GameData.NormalizeGrid(g3);
+                        if (!GameData.ShapeRecipes.TryGetValue(curKey, out var currentRecipe) || currentRecipe.Item.Id != craftResult3.Item.Id) break;
 
-                if (canTake) {
-                    for (int i = 0; i < 9; i++) {
-                        if (WorkbenchGrid[i].HasValue && WorkbenchGrid[i]!.Value.Quantity > 0) {
-                            int rem = WorkbenchGrid[i]!.Value.Quantity - 1;
-                            WorkbenchGrid[i] = rem > 0 ? WorkbenchGrid[i]!.Value with { Quantity = rem } : null;
+                        var inst = GameData.NewItem(currentRecipe.Item);
+                        if (!inv.TryInsert(inst, currentRecipe.Count)) break;
+
+                        for (int i = 0; i < 9; i++) {
+                            if (WorkbenchGrid[i].HasValue && WorkbenchGrid[i]!.Value.Quantity > 0) {
+                                int rem = WorkbenchGrid[i]!.Value.Quantity - 1;
+                                WorkbenchGrid[i] = rem > 0 ? WorkbenchGrid[i]!.Value with { Quantity = rem } : null;
+                            }
                         }
+                        craftedCount += currentRecipe.Count;
                     }
-                    session.AddMessage($"Создано: {craftResult3.Item.Name}");
+                    if (craftedCount > 0) {
+                        session.AddMessage($"Создано: {craftResult3.Item.Name} ×{craftedCount}");
+                        SoundSystem.PlayPop();
+                    }
+                } else {
+                    bool canTake = false;
+                    if (!Held.HasValue || Held.Value.Quantity <= 0) {
+                        Held = new ItemEntry(GameData.NewItem(craftResult3.Item), craftResult3.Count);
+                        canTake = true;
+                    } else if (Held.Value.Item.Definition.Id == craftResult3.Item.Id && Held.Value.Quantity + craftResult3.Count <= craftResult3.Item.MaxStack) {
+                        Held = Held.Value with { Quantity = Held.Value.Quantity + craftResult3.Count };
+                        canTake = true;
+                    }
+
+                    if (canTake) {
+                        for (int i = 0; i < 9; i++) {
+                            if (WorkbenchGrid[i].HasValue && WorkbenchGrid[i]!.Value.Quantity > 0) {
+                                int rem = WorkbenchGrid[i]!.Value.Quantity - 1;
+                                WorkbenchGrid[i] = rem > 0 ? WorkbenchGrid[i]!.Value with { Quantity = rem } : null;
+                            }
+                        }
+                        session.AddMessage($"Создано: {craftResult3.Item.Name}");
+                        SoundSystem.PlayPop();
+                    }
                 }
             }
         }

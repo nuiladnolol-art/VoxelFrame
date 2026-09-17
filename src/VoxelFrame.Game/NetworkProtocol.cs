@@ -166,22 +166,19 @@ public static class NetworkProtocol {
             int payloadLength = BitConverter.ToInt32(lenBuf, 0);
             if (payloadLength <= 0 || payloadLength > MaxPacketSize) return null;
 
-            byte[] oneByte = ArrayPool<byte>.Shared.Rent(1);
-            int r1;
-            try {
-                r1 = await stream.ReadAsync(oneByte.AsMemory(0, 1), token);
-            } finally {
-                ArrayPool<byte>.Shared.Return(oneByte);
+            byte[] payload = ArrayPool<byte>.Shared.Rent(payloadLength);
+            int r1 = await stream.ReadAsync(payload.AsMemory(0, 1), token);
+            if (r1 <= 0) {
+                ArrayPool<byte>.Shared.Return(payload);
+                return null;
             }
-            if (r1 <= 0) return null;
-            var type = (PacketType)oneByte[0];
+            var type = (PacketType)payload[0];
 
             if (type != PacketType.WorldChunksSync && payloadLength > MaxStandardPacketSize) {
+                ArrayPool<byte>.Shared.Return(payload);
                 return null;
             }
 
-            byte[] payload = ArrayPool<byte>.Shared.Rent(payloadLength);
-            payload[0] = oneByte[0];
             read = 1;
             while (read < payloadLength) {
                 int r = await stream.ReadAsync(payload.AsMemory(read, payloadLength - read), token);

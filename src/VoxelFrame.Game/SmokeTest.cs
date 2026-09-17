@@ -26,6 +26,7 @@ internal static class SmokeTest {
             Timed("movement", () => TestMovement(shared));
             Timed("break", () => TestBreakAndPlace(shared));
             Timed("mining", TestMining);
+            Timed("durability_fixes", () => TestDurabilityAndMiningFixes(shared));
             Timed("crafting", TestCrafting);
             Timed("fire", () => TestFire(shared));
             Timed("food", () => TestFood(shared));
@@ -202,6 +203,69 @@ internal static class SmokeTest {
 
         // Урон оружия растёт с тиром
         Check(GameData.GetWeaponDamage(GameData.IronSwordItem.Id) > GameData.GetWeaponDamage(GameData.WoodSwordItem.Id), "железный меч сильнее деревянного");
+    }
+
+    private static void TestDurabilityAndMiningFixes(GameSession s) {
+        Console.WriteLine("[3.6] Проверки исправлений прочности, поломки инструментов и блокирования");
+
+        // 1. Дроп при поломке кирки на последнем ударе (1 HP)
+        var mineCell = new Vec3i(s.World.SpawnBlock.X + 2, s.World.SpawnBlock.Y + 2, s.World.SpawnBlock.Z + 2);
+        s.World.PlacePlacedBlock(mineCell, GameData.BIronOre);
+        var pick = GameData.NewItem(GameData.IronPickaxeItem);
+        pick.Durability = 1;
+        s.Player.Inventory.InsertAt(0, new ItemEntry(pick, 1));
+        s.Player.SelectedSlot = 0;
+        s.World.Pickups.Clear();
+        s.Player.BreakBlock(s.World, s, mineCell, GameData.BIronOre);
+
+        bool pickBroken = s.Player.Inventory.Slots[0] == null;
+        bool ironDropped = s.World.Pickups.Any(p => p.Item.Definition.Id == GameData.IronOreItem.Id)
+                           || s.Player.Inventory.CountOf(GameData.IronOreItem) > 0;
+        Check(pickBroken, "кирка с 1 HP сломалась при добыче");
+        Check(ironDropped, "железная руда успешно выпала при разрушении блока сломавшейся киркой");
+
+        // 2. Потеря прочности щитом при блокировании
+        var shield = GameData.NewItem(GameData.ShieldItem);
+        int maxShieldDur = shield.Durability;
+        s.Player.OffhandEntry = new ItemEntry(shield, 1);
+        s.Player.IsBlocking = true;
+        s.Player.Yaw = 0f;
+        s.Player.Pitch = 0f;
+        s.Player.ApplyDamage(10f, s, s.Player.Position + new Vector3(0f, 0f, 2f));
+        Check(s.Player.OffhandEntry.HasValue, "щит активен в левой руке");
+        Check(s.Player.OffhandEntry.Value.Item.Durability < maxShieldDur,
+              $"щит потерял прочность при блокировании удара ({s.Player.OffhandEntry?.Item.Durability} < {maxShieldDur})");
+
+        // 3. Расход прочности огнива при использовании
+        var flint = GameData.NewItem(GameData.FlintAndSteelItem);
+        int maxFlintDur = flint.Durability;
+        Check(GameData.HasDurability(GameData.FlintAndSteelItem.Id), "огниво зарегистрировано с прочностью");
+        s.Player.Inventory.InsertAt(1, new ItemEntry(flint, 1));
+        s.Player.SelectedSlot = 1;
+        s.Player.DamageSelectedTool(s);
+        var curFlint = s.Player.Inventory.Slots[1];
+        Check(curFlint.HasValue && curFlint.Value.Item.Durability == maxFlintDur - 1,
+              $"огниво потратило прочность при использовании ({curFlint?.Item.Durability} == {maxFlintDur - 1})");
+
+        // 4. Сохранение и загрузка прочности в сундуках (SaveSystem v21)
+        var chestPos = new Vec3i(s.World.SpawnBlock.X + 5, 50, s.World.SpawnBlock.Z + 5);
+        var chest = s.World.GetOrCreateChest(chestPos);
+        var sword = GameData.NewItem(GameData.DiamondSwordItem);
+        sword.Durability = 777;
+        chest.InsertAt(0, new ItemEntry(sword, 1));
+
+        string tmpSave = Path.Combine(Path.GetTempPath(), $"vf_test_dur_{Guid.NewGuid():N}.dat");
+        try {
+            s.SaveTo(tmpSave);
+            var s2 = SaveSystem.Load(tmpSave, headless: true);
+            var loadedChest = s2.World.GetOrCreateChest(chestPos);
+            var entry = loadedChest.Slots[0];
+            Check(entry.HasValue, "предмет загружен из сохраненного сундука");
+            Check(entry.HasValue && entry.Value.Item.Durability == 777,
+                  $"прочность предмета в сундуке восстановлена корректно ({entry?.Item.Durability} == 777)");
+        } finally {
+            if (File.Exists(tmpSave)) File.Delete(tmpSave);
+        }
     }
 
     // ── 4. Крафт и консервация ───────────────────────────────────────────────

@@ -224,15 +224,16 @@ public sealed class HostileMob {
                 if (dist > 5f && TeleportCooldown <= 0f) {
                     TeleportCooldown = 2.5f + (float)_random.NextDouble() * 2f;
                     TeleportNearPlayer(world, player);
-                } else {
-                    // Эндэрмен НЕ ходит по воде: если впереди вода — поворачиваем в сторону
-                    var aheadCell = new Vec3i(
-                        (int)MathF.Floor(Position.X + moveDir.X * 1.3f),
-                        (int)MathF.Floor(Position.Y + 1f),
-                        (int)MathF.Floor(Position.Z + moveDir.Z * 1.3f));
-                    if (world.GetVoxel(aheadCell).TypeId == GameData.BWater.Id) {
-                        moveDir = Vector3.Normalize(new Vector3(-moveDir.Z, 0f, moveDir.X));
-                    }
+                }
+                // Эндэрмен НЕ ходит по воде: если впереди на уровне ног или тела вода — поворачиваем в сторону
+                float feetY = Position.Y - HalfSizeY + 0.1f;
+                var aheadFoot = new Vec3i(
+                    (int)MathF.Floor(Position.X + moveDir.X * 1.3f),
+                    (int)MathF.Floor(feetY),
+                    (int)MathF.Floor(Position.Z + moveDir.Z * 1.3f));
+                var aheadBody = aheadFoot + new Vec3i(0, 1, 0);
+                if (world.GetVoxel(aheadFoot).TypeId == GameData.BWater.Id || world.GetVoxel(aheadBody).TypeId == GameData.BWater.Id) {
+                    moveDir = Vector3.Normalize(new Vector3(-moveDir.Z, 0f, moveDir.X));
                 }
             } else if (Type == HostileType.Blaze) {
                 speed = 1.5f;
@@ -535,8 +536,9 @@ public sealed class HostileMob {
                 var floor = new Vec3i(tx, by, tz);
                 var foot = new Vec3i(tx, by + 1, tz);
                 var head = new Vec3i(tx, by + 2, tz);
+                var head2 = new Vec3i(tx, by + 3, tz);
                 if (!world.IsSolidAt(floor)) continue;
-                if (world.IsSolidAt(foot) || world.IsSolidAt(head)) continue;
+                if (world.IsSolidAt(foot) || world.IsSolidAt(head) || world.IsSolidAt(head2)) continue;
                 var pos = new Vector3(tx + 0.5f, by + 1.0f + half.Y, tz + 0.5f);
                 if (!Collision.IntersectsSolid(world, pos - half, pos + half, ignoreDoors: true)) {
                     Position = pos;
@@ -550,8 +552,9 @@ public sealed class HostileMob {
                 var floor = new Vec3i(tx, by, tz);
                 var foot = new Vec3i(tx, by + 1, tz);
                 var head = new Vec3i(tx, by + 2, tz);
+                var head2 = new Vec3i(tx, by + 3, tz);
                 if (!world.IsSolidAt(floor)) continue;
-                if (world.IsSolidAt(foot) || world.IsSolidAt(head)) continue;
+                if (world.IsSolidAt(foot) || world.IsSolidAt(head) || world.IsSolidAt(head2)) continue;
                 var pos = new Vector3(tx + 0.5f, by + 1.0f + half.Y, tz + 0.5f);
                 if (!Collision.IntersectsSolid(world, pos - half, pos + half, ignoreDoors: true)) {
                     Position = pos;
@@ -577,8 +580,9 @@ public sealed class HostileMob {
                 var floor = new Vec3i(tx, by, tz);
                 var foot = new Vec3i(tx, by + 1, tz);
                 var head = new Vec3i(tx, by + 2, tz);
+                var head2 = new Vec3i(tx, by + 3, tz);
                 if (!world.IsSolidAt(floor)) continue;
-                if (world.IsSolidAt(foot) || world.IsSolidAt(head)) continue;
+                if (world.IsSolidAt(foot) || world.IsSolidAt(head) || world.IsSolidAt(head2)) continue;
                 // Ноги должны быть на суше
                 ushort footT = world.GetVoxel(foot).TypeId;
                 if (footT == GameData.BWater.Id || footT == GameData.BLava.Id) continue;
@@ -608,8 +612,9 @@ public sealed class HostileMob {
                 var floor = new Vec3i(tx, by, tz);
                 var foot = new Vec3i(tx, by + 1, tz);
                 var head = new Vec3i(tx, by + 2, tz);
+                var head2 = new Vec3i(tx, by + 3, tz);
                 if (!world.IsSolidAt(floor)) continue;
-                if (world.IsSolidAt(foot) || world.IsSolidAt(head)) continue;
+                if (world.IsSolidAt(foot) || world.IsSolidAt(head) || world.IsSolidAt(head2)) continue;
                 ushort footT = world.GetVoxel(foot).TypeId;
                 if (footT == GameData.BWater.Id || footT == GameData.BLava.Id) continue; // не в воду
                 var pos = new Vector3(tx + 0.5f, by + 1.0f + half.Y, tz + 0.5f);
@@ -742,6 +747,19 @@ public sealed class ArrowProjectile {
                     MathF.Abs(toBoss.Z) < EndSlime.HalfSizeXZ + 0.4f) {
                     Alive = false;
                     boss.TakeDamage(Damage, world, session);
+                    SoundSystem.PlayArrowHit();
+                    return;
+                }
+            }
+            // Стрела игрока поражает Истинного Слизня Бездны
+            if (world.TrueVoidBoss is { Alive: true } trueBoss) {
+                var bossCent = trueBoss.Position;
+                var toBoss = bossCent - Position;
+                if (MathF.Abs(toBoss.X) < TrueEndSlime.HalfSizeXZ + 0.4f &&
+                    MathF.Abs(toBoss.Y) < TrueEndSlime.HalfSizeY + 0.4f &&
+                    MathF.Abs(toBoss.Z) < TrueEndSlime.HalfSizeXZ + 0.4f) {
+                    Alive = false;
+                    trueBoss.TakeDamage(Damage, world, session);
                     SoundSystem.PlayArrowHit();
                     return;
                 }

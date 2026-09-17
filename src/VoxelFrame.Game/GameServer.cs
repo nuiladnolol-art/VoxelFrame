@@ -971,7 +971,9 @@ public sealed class GameServer : IDisposable {
 
                                 GameWorld.SuppressNetworkSync = true;
                                 try {
-                                    targetWorld.PlacePlacedBlock(cell, GameData.GetBlock(typeId), mask);
+                                    if (GameData.TryGetBlock(typeId, out var block)) {
+                                        targetWorld.PlacePlacedBlock(cell, block, mask);
+                                    }
                                 } finally {
                                     GameWorld.SuppressNetworkSync = false;
                                 }

@@ -748,6 +748,15 @@ public sealed partial class GameWorld : IDisposable {
         LightEngine.RecomputeBlock(gc, this);
         _meshDirty.Add(gc);
 
+        // Пересчет солнечного света для нижележащих чанков по вертикали, если блок изменил тень
+        for (int dy = 1; dy <= 2; dy++) {
+            var lowerCoord = new Vec3i(cc.X, cc.Y - dy, cc.Z);
+            if (_chunks.TryGetValue(lowerCoord, out var lowerGc)) {
+                LightEngine.RecomputeSun(lowerGc, this);
+                _meshDirty.Add(lowerGc);
+            }
+        }
+
         // Помечаем соседние чанки грязными для мгновенного обновления видимых граней
         foreach (var n in NeighborCoords(cc)) {
             if (_chunks.TryGetValue(n, out var ngc)) {

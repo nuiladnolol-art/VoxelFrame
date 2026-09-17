@@ -190,7 +190,7 @@ public static class Hud {
         var offhandRect = new Rectangle(x0 - SlotSize - 14, y0, SlotSize, SlotSize);
         Raylib.DrawRectangleRounded(offhandRect, 0.15f, 6, new Color(45, 45, 60, 200));
         Raylib.DrawRectangleRoundedLinesEx(offhandRect, 0.15f, 6, 1.5f, new Color(80, 90, 115, 255));
-        Fonts.Draw("F", offhandRect.X + 4f, offhandRect.Y + 3f, 11f, new Color(170, 190, 225, 180));
+        Fonts.Draw(KeyBinds.GetName(KeyBinds.SwapHands), offhandRect.X + 4f, offhandRect.Y + 3f, 11f, new Color(170, 190, 225, 180));
 
         if (player.OffhandItem != null && player.OffhandCount > 0) {
             DrawItemIcon(player.OffhandItem, offhandRect, 0.7f);
@@ -611,10 +611,10 @@ public static class Hud {
             y += 20f;
         }
 
-        LineL($"VoxelFrame 1.0.0 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
+        LineL($"VoxelFrame 1.0.1 ({Raylib.GetFPS()} fps, {Raylib.GetFrameTime() * 1000f:F1} ms)");
         LineL($"XYZ: {player.Position.X:F3} / {player.Position.Y:F5} / {player.Position.Z:F3}", new Color(255, 240, 120, 255));
-        LineL($"Block: {px} {py} {pz} [{(px & 15)} {(py & 15)} {(pz & 15)} in sub-chunk]");
-        LineL($"Chunk: {px >> 4} {py >> 4} {pz >> 4} in chunk [{px >> 4}, {pz >> 4}]");
+        LineL($"Block: {px} {py} {pz} [{(px & 31)} {(py & 31)} {(pz & 31)} in chunk]");
+        LineL($"Chunk: {px >> 5} {py >> 5} {pz >> 5} in chunk [{px >> 5}, {pz >> 5}]");
         LineL($"Facing: {facing} (Yaw: {player.Yaw * 180f / MathF.PI:F1}°, Pitch: {player.Pitch * 180f / MathF.PI:F1}°)", new Color(175, 215, 255, 255));
         LineL($"Light: {session.World.GetSunLight(new Vec3i(px, py, pz))} (sky {session.DayNight.SkyFactor * 15f:F1})");
         LineL($"Biome: {biomeName}", new Color(150, 235, 175, 255));

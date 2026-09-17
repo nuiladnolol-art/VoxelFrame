@@ -134,15 +134,20 @@ public sealed partial class Player {
         session.LastDeathPos = Position;
 
         // Блокирование урона щитом
-        bool hasShield = (OffhandItem != null && OffhandItem.Id == GameData.ShieldItem.Id) || (SelectedItem != null && SelectedItem.Id == GameData.ShieldItem.Id);
+        bool shieldInOffhand = OffhandItem != null && OffhandItem.Id == GameData.ShieldItem.Id;
+        bool shieldInMain = SelectedItem != null && SelectedItem.Id == GameData.ShieldItem.Id;
+        bool hasShield = shieldInOffhand || shieldInMain;
         if (hasShield && IsBlocking && attackerPos.HasValue) {
             var diff = attackerPos.Value - Position;
             var toAttacker = diff.LengthSquared() > 0.001f ? Vector3.Normalize(diff) : Forward;
             float dot = Vector3.Dot(new Vector3(Forward.X, 0f, Forward.Z), new Vector3(toAttacker.X, 0f, toAttacker.Z));
-            if (dot > 0.15f) {
+            if (dot > 0.45f) { // Сектор защиты ~120 градусов
                 SoundSystem.PlayShieldBlock();
                 ScreenShake = MathF.Min(0.2f, ScreenShake + 0.1f);
                 session.AddMessage("Удар заблокирован щитом!");
+                int shieldDmg = Math.Max(1, (int)MathF.Ceiling(amount / 3f));
+                if (shieldInOffhand) DamageOffhandTool(session, shieldDmg);
+                else DamageSelectedTool(session, shieldDmg);
                 return;
             }
         }
@@ -266,25 +271,38 @@ public sealed partial class Player {
         int tx = (int)MathF.Floor(target.X);
         int tz = (int)MathF.Floor(target.Z);
         int topY = (int)MathF.Floor(target.Y);
-        for (int wy = topY + 1; wy >= topY - 16 && wy >= 2; wy--) {
-            var belowPos = new Vec3i(tx, wy - 1, tz);
-            var footPos = new Vec3i(tx, wy, tz);
-            var headPos = new Vec3i(tx, wy + 1, tz);
-            var belowVox = world.GetVoxel(belowPos);
-            if (belowVox.TypeId == 0 || belowVox.TypeId == GameData.BLava.Id || belowVox.TypeId == GameData.BWater.Id) continue;
-            var belowBlock = GameData.GetBlock(belowVox.TypeId);
-            if (!belowBlock.IsSolid) continue;
-            bool footFree = !world.IsSolidAt(footPos);
-            bool headFree = !world.IsSolidAt(headPos);
-            if (footFree && headFree) {
-                Position = new Vector3(tx + 0.5f, wy + 0.95f, tz + 0.5f);
-                Velocity = Vector3.Zero;
-                OnGround = true;
-                return;
+
+        Span<(int dx, int dz)> offsets = stackalloc (int, int)[] {
+            (0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)
+        };
+
+        foreach (var (ox, oz) in offsets) {
+            int cx = tx + ox;
+            int cz = tz + oz;
+            for (int wy = topY + 2; wy >= topY - 16 && wy >= 2; wy--) {
+                var belowPos = new Vec3i(cx, wy - 1, cz);
+                var footPos = new Vec3i(cx, wy, cz);
+                var headPos = new Vec3i(cx, wy + 1, cz);
+                var belowVox = world.GetVoxel(belowPos);
+                if (belowVox.TypeId == 0 || belowVox.TypeId == GameData.BLava.Id || belowVox.TypeId == GameData.BWater.Id) continue;
+                var belowBlock = GameData.GetBlock(belowVox.TypeId);
+                if (!belowBlock.IsSolid) continue;
+                bool footFree = !world.IsSolidAt(footPos);
+                bool headFree = !world.IsSolidAt(headPos);
+                if (footFree && headFree) {
+                    Position = new Vector3(cx + 0.5f, wy + 0.95f, cz + 0.5f);
+                    Velocity = Vector3.Zero;
+                    OnGround = true;
+                    return;
+                }
             }
         }
-        // Опора не нашлась (жемчуг улетел в пустоту) — просто переносим в точку приземления.
-        Position = new Vector3(target.X, MathF.Max(2f, target.Y), target.Z);
+        // Опора не нашлась — проверяем, чтобы fallback не замуровал игрока в блок
+        float safeY = MathF.Max(2f, target.Y);
+        while (safeY < 250f && (world.IsSolidAt(new Vec3i(tx, (int)MathF.Floor(safeY), tz)) || world.IsSolidAt(new Vec3i(tx, (int)MathF.Floor(safeY + 1.5f), tz)))) {
+            safeY += 1.0f;
+        }
+        Position = new Vector3(target.X, safeY, target.Z);
         Velocity = Vector3.Zero;
     }
 
@@ -374,8 +392,8 @@ public sealed partial class Player {
             GameServer.Active?.BroadcastHostAction(PlayerActionType.ItemChange, itemId);
         }
 
-        // Быстрая смена предмета между основной и второй рукой по клавише F
-        if (Raylib_cs.Raylib.IsKeyPressed(Raylib_cs.KeyboardKey.F)) {
+        // Быстрая смена предмета между основной и второй рукой по назначенной клавише
+        if (Raylib_cs.Raylib.IsKeyPressed(KeyBinds.SwapHands)) {
             SwapMainAndOffhand();
             int itemId = SelectedItem?.Id ?? 0;
             GameClient.Active?.SendAction(PlayerActionType.ItemChange, itemId);
@@ -443,12 +461,14 @@ public sealed partial class Player {
         }
         CurrentEyeHeight += (targetEyeHeight - CurrentEyeHeight) * MathF.Min(1f, dt * 15f);
 
-        var feetCell = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z));
+        float feetY = Position.Y - HalfExtents.Y + 0.05f;
+        var feetCell = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(feetY), (int)MathF.Floor(Position.Z));
         var feetBlock = world.GetVoxel(feetCell);
+        var waistVoxel = world.GetVoxel(new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z)));
         var eyeVoxel = world.GetVoxel(new Vec3i((int)MathF.Floor(Eye.X), (int)MathF.Floor(Eye.Y), (int)MathF.Floor(Eye.Z)));
-        bool inWeb = feetBlock.TypeId == GameData.BWeb.Id || eyeVoxel.TypeId == GameData.BWeb.Id;
-        bool inWater = feetBlock.TypeId == GameData.BWater.Id || eyeVoxel.TypeId == GameData.BWater.Id;
-        bool inLava = feetBlock.TypeId == GameData.BLava.Id || eyeVoxel.TypeId == GameData.BLava.Id;
+        bool inWeb = feetBlock.TypeId == GameData.BWeb.Id || waistVoxel.TypeId == GameData.BWeb.Id || eyeVoxel.TypeId == GameData.BWeb.Id;
+        bool inWater = feetBlock.TypeId == GameData.BWater.Id || waistVoxel.TypeId == GameData.BWater.Id || eyeVoxel.TypeId == GameData.BWater.Id;
+        bool inLava = feetBlock.TypeId == GameData.BLava.Id || waistVoxel.TypeId == GameData.BLava.Id || eyeVoxel.TypeId == GameData.BLava.Id;
         bool inFire = world.Fire.Burning.ContainsKey(feetCell) || world.Fire.Campfires.Contains(feetCell);
 
         if (inFire && !inWater && session.GameMode != GameMode.Creative) {
@@ -672,9 +692,10 @@ public sealed partial class Player {
             DrownDamageTimer = 0f;
         }
 
-        // Урон и мягкое выталкивание при застревании в блоках
+        // Урон и мягкое выталкивание при застревании в блоках (ноги или голова)
         var feet = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z));
-        if (world.IsSolidAt(feet)) {
+        var head = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y + 1.5f), (int)MathF.Floor(Position.Z));
+        if (world.IsSolidAt(feet) || world.IsSolidAt(head)) {
             StuckTimer += dt;
             if (StuckTimer >= 0.5f) {
                 StuckTimer = 0f;
@@ -1224,14 +1245,17 @@ public sealed partial class Player {
                             world.RemoveBlock(session.TargetBlock);
                             GameWorld.CreateExplosion(new Vector3(session.TargetBlock.X + 0.5f, session.TargetBlock.Y + 0.5f, session.TargetBlock.Z + 0.5f), 4.2f, 26f, session);
                             SoundSystem.PlayPlace();
+                            DamageSelectedTool(session);
                         } else if (TryIgniteNetherPortal(world, session.TargetBlock, placeCell)) {
                             SoundSystem.PlayPlace();
                             session.AddMessage("Портал в Нижний мир активирован!");
+                            DamageSelectedTool(session);
                         } else {
                             var blk = world.GetBlockType(session.TargetBlock);
                             if (blk != null && blk.IsFlammable) {
                                 world.Fire.Ignite(session.TargetBlock);
                                 SoundSystem.PlayPlace();
+                                DamageSelectedTool(session);
                             } else {
                                 var placeVox = world.GetVoxel(placeCell);
                                 if (placeVox.TypeId == 0) {
@@ -1240,6 +1264,7 @@ public sealed partial class Player {
                                     world.Fire.Burning[placeCell] = dur;
                                     world.MarkLightDirty(placeCell);
                                     SoundSystem.PlayPlace();
+                                    DamageSelectedTool(session);
                                 }
                             }
                         }
@@ -1293,8 +1318,18 @@ public sealed partial class Player {
                                 SoundSystem.PlaySplash();
 
                                 if (session.GameMode != GameMode.Creative) {
-                                    Inventory.RemoveAt(SelectedSlot);
-                                    Inventory.InsertAt(SelectedSlot, new ItemEntry(GameData.NewItem(isWater ? GameData.WaterBucketItem : GameData.LavaBucketItem), 1));
+                                    var curBucket = SelectedEntry;
+                                    var filledDef = isWater ? GameData.WaterBucketItem : GameData.LavaBucketItem;
+                                    if (curBucket.HasValue && curBucket.Value.Quantity > 1) {
+                                        Inventory.InsertAt(SelectedSlot, curBucket.Value with { Quantity = curBucket.Value.Quantity - 1 });
+                                        var filledItem = GameData.NewItem(filledDef);
+                                        if (!Inventory.TryInsert(filledItem, 1)) {
+                                            world.SpawnPickup(filledDef.Id, 1, new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z)));
+                                        }
+                                    } else {
+                                        Inventory.RemoveAt(SelectedSlot);
+                                        Inventory.InsertAt(SelectedSlot, new ItemEntry(GameData.NewItem(filledDef), 1));
+                                    }
                                 }
                                 session.AddMessage(isWater ? "Ведро наполнено водой" : "Ведро наполнено лавой");
                             }
@@ -1450,6 +1485,7 @@ public sealed partial class Player {
                     var shootVel = Forward * arrowSpeed;
                     world.Arrows.Add(new ArrowProjectile(shootPos, shootVel, null) { FromPlayer = true, Damage = dmg });
                     SoundSystem.PlayBowShoot();
+                    DamageSelectedTool(session);
                     GameClient.Active?.SendSpawnProjectile(shootPos, shootVel, 0, (byte)world.Dimension);
                     if (GameServer.Active != null) {
                         var spawnProjP = NetworkProtocol.WriteSpawnProjectile(1, shootPos, shootVel, 0, (byte)world.Dimension);

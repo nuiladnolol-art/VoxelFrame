@@ -14,6 +14,10 @@ public static class KeyBinds {
     public static KeyboardKey Inventory = KeyboardKey.E;
     public static KeyboardKey Pause = KeyboardKey.Escape;
     public static KeyboardKey ToggleDebug = KeyboardKey.F3;
+    public static KeyboardKey SwapHands = KeyboardKey.F;
+    public static KeyboardKey TogglePerspective = KeyboardKey.F5;
+    public static KeyboardKey Chat = KeyboardKey.T;
+    public static KeyboardKey PlayerList = KeyboardKey.Tab;
 
     public static string GetName(KeyboardKey key) => key switch {
         KeyboardKey.LeftShift => "L.Shift",
@@ -39,5 +43,9 @@ public static class KeyBinds {
         Inventory = KeyboardKey.E;
         Pause = KeyboardKey.Escape;
         ToggleDebug = KeyboardKey.F3;
+        SwapHands = KeyboardKey.F;
+        TogglePerspective = KeyboardKey.F5;
+        Chat = KeyboardKey.T;
+        PlayerList = KeyboardKey.Tab;
     }
 }

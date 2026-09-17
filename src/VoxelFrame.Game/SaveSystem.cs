@@ -13,7 +13,7 @@ namespace VoxelFrame.Game;
 /// </summary>
 public static class SaveSystem {
     public const uint Magic = 0x56465331;   // "VFS1"
-    public const int Version = 20;
+    public const int Version = 21;
 
     public static string CurrentWorldPath = "";
     public static int SelectedWorldSlot = 1;
@@ -73,6 +73,12 @@ public static class SaveSystem {
 
     public static void DeleteSave(string path) {
         if (File.Exists(path)) File.Delete(path);
+        string bak = path + ".bak";
+        if (File.Exists(bak)) File.Delete(bak);
+        string playersDir = Path.Combine(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path) + "_players");
+        if (Directory.Exists(playersDir)) {
+            try { Directory.Delete(playersDir, true); } catch { }
+        }
     }
 
     public static void Save(GameSession session, string path) {
@@ -231,6 +237,7 @@ public static class SaveSystem {
             bw.Write(pk.Item.Definition.Id);
             bw.Write(pk.Quantity);
             WriteVec3(bw, pk.Position);
+            if (GameData.HasDurability(pk.Item.Definition.Id)) bw.Write(pk.Item.Durability);
         }
 
         bw.Write(world.Animals.Count);
@@ -273,6 +280,7 @@ public static class SaveSystem {
                 bw.Write(idx);
                 bw.Write(e!.Value.Item.Definition.Id);
                 bw.Write(e.Value.Quantity);
+                if (GameData.HasDurability(e.Value.Item.Definition.Id)) bw.Write(e.Value.Item.Durability);
             }
         }
 
@@ -298,16 +306,19 @@ public static class SaveSystem {
             if (f.Input.HasValue) {
                 bw.Write(f.Input.Value.Item.Definition.Id);
                 bw.Write(f.Input.Value.Quantity);
+                if (GameData.HasDurability(f.Input.Value.Item.Definition.Id)) bw.Write(f.Input.Value.Item.Durability);
             }
             bw.Write(f.Fuel.HasValue);
             if (f.Fuel.HasValue) {
                 bw.Write(f.Fuel.Value.Item.Definition.Id);
                 bw.Write(f.Fuel.Value.Quantity);
+                if (GameData.HasDurability(f.Fuel.Value.Item.Definition.Id)) bw.Write(f.Fuel.Value.Item.Durability);
             }
             bw.Write(f.Output.HasValue);
             if (f.Output.HasValue) {
                 bw.Write(f.Output.Value.Item.Definition.Id);
                 bw.Write(f.Output.Value.Quantity);
+                if (GameData.HasDurability(f.Output.Value.Item.Definition.Id)) bw.Write(f.Output.Value.Item.Durability);
             }
         }
     }
@@ -464,8 +475,12 @@ public static class SaveSystem {
             ushort defId = br.ReadUInt16();
             int qty = br.ReadInt32();
             var pos = ReadVec3(br);
-            if (GameData.Items.TryGetValue(defId, out var def))
-                session.World.Pickups.Add(new ItemPickup(GameData.NewItem(def), qty, pos));
+            int pkDur = version >= 21 && GameData.HasDurability(defId) ? br.ReadInt32() : 0;
+            if (GameData.Items.TryGetValue(defId, out var def)) {
+                var itm = GameData.NewItem(def);
+                if (pkDur > 0) itm.Durability = pkDur;
+                session.World.Pickups.Add(new ItemPickup(itm, qty, pos));
+            }
         }
 
         int animalCount = br.ReadInt32();
@@ -524,8 +539,10 @@ public static class SaveSystem {
                     ushort cDefId = br.ReadUInt16();
                     int cQty = br.ReadInt32();
                     if (version < 13) br.ReadSingle(); // legacy condition (удалена в v13)
+                    int cDur = version >= 21 && GameData.HasDurability(cDefId) ? br.ReadInt32() : 0;
                     if (GameData.Items.TryGetValue(cDefId, out var cDef)) {
                         var cItem = GameData.NewItem(cDef);
+                        if (cDur > 0) cItem.Durability = cDur;
                         cinv.InsertAt(cidx, new ItemEntry(cItem, cQty));
                     }
                 }
@@ -556,8 +573,10 @@ public static class SaveSystem {
                     ushort defId = br.ReadUInt16();
                     int qty = br.ReadInt32();
                     if (version < 13) br.ReadSingle(); // legacy condition (удалена в v13)
+                    int fDur = version >= 21 && GameData.HasDurability(defId) ? br.ReadInt32() : 0;
                     if (GameData.Items.TryGetValue(defId, out var def)) {
                         var itm = GameData.NewItem(def);
+                        if (fDur > 0) itm.Durability = fDur;
                         f.Input = new ItemEntry(itm, qty);
                     }
                 } else f.Input = null;
@@ -566,8 +585,10 @@ public static class SaveSystem {
                     ushort defId = br.ReadUInt16();
                     int qty = br.ReadInt32();
                     if (version < 13) br.ReadSingle(); // legacy condition (удалена в v13)
+                    int fDur = version >= 21 && GameData.HasDurability(defId) ? br.ReadInt32() : 0;
                     if (GameData.Items.TryGetValue(defId, out var def)) {
                         var itm = GameData.NewItem(def);
+                        if (fDur > 0) itm.Durability = fDur;
                         f.Fuel = new ItemEntry(itm, qty);
                     }
                 } else f.Fuel = null;
@@ -576,8 +597,10 @@ public static class SaveSystem {
                     ushort defId = br.ReadUInt16();
                     int qty = br.ReadInt32();
                     if (version < 13) br.ReadSingle(); // legacy condition (удалена в v13)
+                    int fDur = version >= 21 && GameData.HasDurability(defId) ? br.ReadInt32() : 0;
                     if (GameData.Items.TryGetValue(defId, out var def)) {
                         var itm = GameData.NewItem(def);
+                        if (fDur > 0) itm.Durability = fDur;
                         f.Output = new ItemEntry(itm, qty);
                     }
                 } else f.Output = null;
@@ -756,8 +779,12 @@ public static class SaveSystem {
             ushort defId = br.ReadUInt16();
             int qty = br.ReadInt32();
             var pos = ReadVec3(br);
-            if (GameData.Items.TryGetValue(defId, out var def))
-                world.Pickups.Add(new ItemPickup(GameData.NewItem(def), qty, pos));
+            int pkDur = version >= 21 && GameData.HasDurability(defId) ? br.ReadInt32() : 0;
+            if (GameData.Items.TryGetValue(defId, out var def)) {
+                var itm = GameData.NewItem(def);
+                if (pkDur > 0) itm.Durability = pkDur;
+                world.Pickups.Add(new ItemPickup(itm, qty, pos));
+            }
         }
 
         int animalCount = br.ReadInt32();
@@ -816,8 +843,12 @@ public static class SaveSystem {
                 int cidx = br.ReadInt32();
                 ushort cDefId = br.ReadUInt16();
                 int cQty = br.ReadInt32();
-                if (GameData.Items.TryGetValue(cDefId, out var cDef))
-                    cinv.InsertAt(cidx, new ItemEntry(GameData.NewItem(cDef), cQty));
+                int cDur = version >= 21 && GameData.HasDurability(cDefId) ? br.ReadInt32() : 0;
+                if (GameData.Items.TryGetValue(cDefId, out var cDef)) {
+                    var cItem = GameData.NewItem(cDef);
+                    if (cDur > 0) cItem.Durability = cDur;
+                    cinv.InsertAt(cidx, new ItemEntry(cItem, cQty));
+                }
             }
         }
 
@@ -843,22 +874,34 @@ public static class SaveSystem {
             if (br.ReadBoolean()) {
                 ushort defId = br.ReadUInt16();
                 int qty = br.ReadInt32();
-                if (GameData.Items.TryGetValue(defId, out var def))
-                    f.Input = new ItemEntry(GameData.NewItem(def), qty);
+                int fDur = version >= 21 && GameData.HasDurability(defId) ? br.ReadInt32() : 0;
+                if (GameData.Items.TryGetValue(defId, out var def)) {
+                    var itm = GameData.NewItem(def);
+                    if (fDur > 0) itm.Durability = fDur;
+                    f.Input = new ItemEntry(itm, qty);
+                }
             } else f.Input = null;
 
             if (br.ReadBoolean()) {
                 ushort defId = br.ReadUInt16();
                 int qty = br.ReadInt32();
-                if (GameData.Items.TryGetValue(defId, out var def))
-                    f.Fuel = new ItemEntry(GameData.NewItem(def), qty);
+                int fDur = version >= 21 && GameData.HasDurability(defId) ? br.ReadInt32() : 0;
+                if (GameData.Items.TryGetValue(defId, out var def)) {
+                    var itm = GameData.NewItem(def);
+                    if (fDur > 0) itm.Durability = fDur;
+                    f.Fuel = new ItemEntry(itm, qty);
+                }
             } else f.Fuel = null;
 
             if (br.ReadBoolean()) {
                 ushort defId = br.ReadUInt16();
                 int qty = br.ReadInt32();
-                if (GameData.Items.TryGetValue(defId, out var def))
-                    f.Output = new ItemEntry(GameData.NewItem(def), qty);
+                int fDur = version >= 21 && GameData.HasDurability(defId) ? br.ReadInt32() : 0;
+                if (GameData.Items.TryGetValue(defId, out var def)) {
+                    var itm = GameData.NewItem(def);
+                    if (fDur > 0) itm.Durability = fDur;
+                    f.Output = new ItemEntry(itm, qty);
+                }
             } else f.Output = null;
         }
 
@@ -1085,6 +1128,11 @@ public static class SaveSystem {
                 ["Drop"] = (int)KeyBinds.Drop,
                 ["Inventory"] = (int)KeyBinds.Inventory,
                 ["Pause"] = (int)KeyBinds.Pause,
+                ["ToggleDebug"] = (int)KeyBinds.ToggleDebug,
+                ["SwapHands"] = (int)KeyBinds.SwapHands,
+                ["TogglePerspective"] = (int)KeyBinds.TogglePerspective,
+                ["Chat"] = (int)KeyBinds.Chat,
+                ["PlayerList"] = (int)KeyBinds.PlayerList,
                 ["Fullscreen"] = Raylib_cs.Raylib.IsWindowState(Raylib_cs.ConfigFlags.UndecoratedWindow) || Raylib_cs.Raylib.IsWindowFullscreen(),
                 ["Width"] = Raylib_cs.Raylib.GetScreenWidth(),
                 ["Height"] = Raylib_cs.Raylib.GetScreenHeight(),
@@ -1140,6 +1188,11 @@ public static class SaveSystem {
             R("Drop", v => KeyBinds.Drop = (Raylib_cs.KeyboardKey)v);
             R("Inventory", v => KeyBinds.Inventory = (Raylib_cs.KeyboardKey)v);
             R("Pause", v => KeyBinds.Pause = (Raylib_cs.KeyboardKey)v);
+            R("ToggleDebug", v => KeyBinds.ToggleDebug = (Raylib_cs.KeyboardKey)v);
+            R("SwapHands", v => KeyBinds.SwapHands = (Raylib_cs.KeyboardKey)v);
+            R("TogglePerspective", v => KeyBinds.TogglePerspective = (Raylib_cs.KeyboardKey)v);
+            R("Chat", v => KeyBinds.Chat = (Raylib_cs.KeyboardKey)v);
+            R("PlayerList", v => KeyBinds.PlayerList = (Raylib_cs.KeyboardKey)v);
             R("GraphicsQuality", v => {
                 GraphicsQuality = (GraphicsPreset)Math.Clamp(v, 0, 2);
             });

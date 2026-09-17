@@ -605,10 +605,10 @@ internal static class Program {
         }
 
         if (uiState != UiState.Playing) {
-            bool suppressInventoryKey = Screens.RecipeSearchActive || Screens.InMultiplayerScreen;
+            bool suppressInventoryKey = Screens.RecipeSearchActive || Screens.CreativeSearchActive || Screens.InMultiplayerScreen;
             return new PlayerInput {
                 OpenInventory = !suppressInventoryKey && Raylib.IsKeyPressed(KeyBinds.Inventory),
-                Pause = pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause) && !Screens.RecipeSearchActive,
+                Pause = pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause) && !Screens.RecipeSearchActive && !Screens.CreativeSearchActive,
             };
         }
 

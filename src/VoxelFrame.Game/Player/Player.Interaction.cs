@@ -41,12 +41,12 @@ public sealed partial class Player {
             return; // В Творческом режиме блоки разрушаются без дропа и без износа инструмента
         }
 
-        // Износ инструмента при ломании блока в Выживании
-        DamageSelectedTool(session);
-
-        // Проверяем, может ли текущий инструмент добыть этот блок
+        // Проверяем, может ли текущий инструмент добыть этот блок (до его возможной поломки)
         ushort toolId = SelectedEntry?.Item.Definition.Id ?? 0;
         bool canHarvest = GameData.CanHarvestBlock(block, toolId);
+
+        // Износ инструмента при ломании блока в Выживании
+        DamageSelectedTool(session);
 
         if (canHarvest) {
             int dropCount = block.DropItemCount;
@@ -232,6 +232,8 @@ public sealed partial class Player {
                 if (TryConsumeSelected(item, 1, session)) {
                     world.FallingBlocks.Add(new FallingBlock(block, new Vector3(cell.X + 0.5f, cell.Y + 0.5f, cell.Z + 0.5f)));
                     SoundSystem.PlayPlace();
+                    GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, block.Id, facing, isBreak: false, (byte)session.World.Dimension);
+                    GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, block.Id, facing, isBreak: false);
                     return true;
                 }
                 return false;

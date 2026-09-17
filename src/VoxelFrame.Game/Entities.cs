@@ -194,12 +194,28 @@ public static class Collision {
             }
         }
 
-        // 4. Движение по Y
-        pos.Y += vel.Y * dt;
-        if (IntersectsSolid(world, pos - half, pos + half, ignoreDoors)) {
-            if (vel.Y < 0f) onGround = true;
-            pos.Y -= vel.Y * dt;
-            vel.Y = 0f;
+        // 4. Движение по Y (с субстеппингом против туннелирования сквозь блоки при быстром падении)
+        float totalDistY = vel.Y * dt;
+        float absDistY = MathF.Abs(totalDistY);
+        if (absDistY > 0.35f) {
+            int subSteps = (int)MathF.Ceiling(absDistY / 0.35f);
+            float stepY = totalDistY / subSteps;
+            for (int s = 0; s < subSteps; s++) {
+                pos.Y += stepY;
+                if (IntersectsSolid(world, pos - half, pos + half, ignoreDoors)) {
+                    if (vel.Y < 0f) onGround = true;
+                    pos.Y -= stepY;
+                    vel.Y = 0f;
+                    break;
+                }
+            }
+        } else if (absDistY > 0f) {
+            pos.Y += totalDistY;
+            if (IntersectsSolid(world, pos - half, pos + half, ignoreDoors)) {
+                if (vel.Y < 0f) onGround = true;
+                pos.Y -= totalDistY;
+                vel.Y = 0f;
+            }
         }
 
         // 5. Проверка касания земли чуть ниже стоп

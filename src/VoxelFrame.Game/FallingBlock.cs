@@ -40,6 +40,15 @@ public sealed class FallingBlock {
         int by = (int)MathF.Floor(Position.Y - HalfSize);
 
         var below = new Vec3i(bx, by, bz);
+        var voxBelow = world.GetVoxel(below);
+        if (voxBelow.TypeId != 0 && !world.IsSolidAt(below)) {
+            // Если упали на факел, цветок, росток — хрупкий блок ломается и дропается
+            if (GameData.TryGetBlock(voxBelow.TypeId, out var belowDef) && belowDef.DropItemId != 0) {
+                world.SpawnPickup(belowDef.DropItemId, belowDef.DropItemCount, below);
+            }
+            world.RemoveBlock(below);
+        }
+
         if (world.IsSolidAt(below)) {
             // Нашли препятствие — ищем ближайшую свободную ячейку выше и устанавливаем блок обратно в мир
             int placeY = by + 1;
@@ -47,6 +56,10 @@ public sealed class FallingBlock {
                 placeY++;
             }
             var land = new Vec3i(bx, placeY, bz);
+            var existingLand = world.GetVoxel(land);
+            if (existingLand.TypeId != 0 && GameData.TryGetBlock(existingLand.TypeId, out var landDef) && landDef.DropItemId != 0) {
+                world.SpawnPickup(landDef.DropItemId, landDef.DropItemCount, land);
+            }
             world.PlacePlacedBlock(land, Block);
             Alive = false;
         }

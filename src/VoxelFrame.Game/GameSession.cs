@@ -140,7 +140,8 @@ public sealed class GameSession {
 
     public void RespawnPlayer() {
         if (World.Dimension != Dimension.Overworld) {
-            World = OverworldWorld ?? new GameWorld(World.Seed) { Dimension = Dimension.Overworld };
+            World = OverworldWorld ?? new GameWorld(MasterSeed) { Dimension = Dimension.Overworld };
+            Player.Dimension = Dimension.Overworld;
         }
         Player.Health = Player.MaxHealth;
         Player.Hunger = Player.MaxHunger;
