@@ -12,33 +12,20 @@ Raylib.SetConfigFlags(ConfigFlags.VSyncHint);
 Raylib.InitWindow(640, 360, "RenderDiag");
 Raylib.SetTargetFPS(60);
 TextureAtlas.Load();
-RegisterTilesForDiag();
+VoxelFrame.Game.Program.RegisterTiles();
 
 var session = GameSession.NewGame(12345, headless: true);
 var world = session.World;
 
-// Копия Program.RegisterTiles — регистрация тайлов атласа для блоков.
-static void RegisterTilesForDiag() {
-    TextureAtlas.SetBlockTiles(GameData.BGrass.Id, TextureAtlas.TGrassTop, TextureAtlas.TGrassSide, TextureAtlas.TDirt);
-    TextureAtlas.SetBlockTiles(GameData.BDirt.Id, TextureAtlas.TDirt, TextureAtlas.TDirt, TextureAtlas.TDirt);
-    TextureAtlas.SetBlockTiles(GameData.BStone.Id, TextureAtlas.TStone, TextureAtlas.TStone, TextureAtlas.TStone);
-    TextureAtlas.SetBlockTiles(GameData.BLog.Id, TextureAtlas.TLogTop, TextureAtlas.TLogSide, TextureAtlas.TLogTop);
-    TextureAtlas.SetBlockTiles(GameData.BLeaves.Id, TextureAtlas.TLeaves, TextureAtlas.TLeaves, TextureAtlas.TLeaves);
-    TextureAtlas.SetBlockTiles(GameData.BPlanks.Id, TextureAtlas.TPlanks, TextureAtlas.TPlanks, TextureAtlas.TPlanks);
-    TextureAtlas.SetBlockTiles(GameData.BCoalOre.Id, TextureAtlas.TCoalOre, TextureAtlas.TCoalOre, TextureAtlas.TCoalOre);
-    TextureAtlas.SetBlockTiles(GameData.BTorch.Id, TextureAtlas.TTorch, TextureAtlas.TTorch, TextureAtlas.TTorch);
-    TextureAtlas.SetBlockTiles(GameData.BCampfire.Id, TextureAtlas.TCampfire, TextureAtlas.TCampfire, TextureAtlas.TCampfire);
-    TextureAtlas.SetBlockTiles(GameData.BAsh.Id, TextureAtlas.TAsh, TextureAtlas.TAsh, TextureAtlas.TAsh);
-    TextureAtlas.SetBlockTiles(GameData.BBedrock.Id, TextureAtlas.TBedrock, TextureAtlas.TBedrock, TextureAtlas.TBedrock);
-}
-
 // Построить ВСЕ меши напрямую (без очереди 3/кадр).
 foreach (var gc in world.Chunks) {
     gc.RecomputeAllSurfaces();
-    LightEngine.RecomputeSun(gc);
+    LightEngine.RecomputeSun(gc, world);
     LightEngine.RecomputeBlock(gc, world);
-    gc.Meshes.AddRange(ChunkMesher.Build(gc, world));
-    gc.MeshUploaded = gc.Meshes.Count > 0;
+    var (opq, trans) = ChunkMesher.Build(gc, world);
+    gc.Meshes.AddRange(opq);
+    gc.TranslucentMeshes.AddRange(trans);
+    gc.MeshUploaded = gc.Meshes.Count > 0 || gc.TranslucentMeshes.Count > 0;
 }
 Console.WriteLine($"Meshes built: {world.Chunks.Count}");
 
@@ -82,9 +69,9 @@ for (int wy = 59; wy >= 50; wy--) {
 }
 
 var btGrass = TextureAtlas.BlockTiles(GameData.BGrass.Id);
-Console.WriteLine($"Grass BlockTiles: top={btGrass.Top} side={btGrass.Side} bottom={btGrass.Bottom}");
+Console.WriteLine($"Grass BlockTiles: top={btGrass.PosY} side={btGrass.PosX} bottom={btGrass.NegY}");
 var btStone = TextureAtlas.BlockTiles(GameData.BStone.Id);
-Console.WriteLine($"Stone BlockTiles: top={btStone.Top} side={btStone.Side} bottom={btStone.Bottom}");
+Console.WriteLine($"Stone BlockTiles: top={btStone.PosY} side={btStone.PosX} bottom={btStone.NegY}");
 foreach (byte t in new byte[] { 0, 2, 3 }) {
     var r = TextureAtlas.TileUv(t);
     Console.WriteLine($"TileUv({t}) = ({r.X:F3},{r.Y:F3},{r.Width:F3},{r.Height:F3})");
@@ -165,7 +152,7 @@ sw.Stop();
 double ms = sw.Elapsed.TotalMilliseconds / 120.0;
 Console.WriteLine($"Avg frame: {ms:F1} ms -> {1000.0 / ms:F1} FPS (draw-only, no rebuilds)");
 
-Raylib.TakeScreenshot("C:/Users/arsis/OneDrive/Desktop/VoxelGame/render_diag_3d.png");
+Raylib.TakeScreenshot("render_diag_3d.png");
 Console.WriteLine("Screenshot 3D saved");
 
 // Оффскрин рендер в RenderTexture — обходит проблемы с дефолтным framebuffer.
@@ -225,7 +212,7 @@ Raylib.BeginDrawing();
 Raylib.ClearBackground(Color.White);
 Raylib.DrawRectangle(100, 100, 200, 100, Color.Red);
 Raylib.EndDrawing();
-Raylib.TakeScreenshot("C:/Users/arsis/OneDrive/Desktop/VoxelGame/render_diag_2d.png");
+Raylib.TakeScreenshot("render_diag_2d.png");
 Console.WriteLine("Screenshot 2D saved");
 
 Raylib.UnloadMaterial(material);

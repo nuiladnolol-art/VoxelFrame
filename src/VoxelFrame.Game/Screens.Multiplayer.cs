@@ -392,6 +392,9 @@ public static partial class Screens {
 
                 if (!client.HasReceivedWelcome) {
                     ConnectingStatus = "Таймаут подключения к серверу";
+                    // Клиент уже зарегистрирован как Active и держит сокет с ReceiveLoop —
+                    // без явного Disconnect игра навсегда считала бы себя подключённой.
+                    GameClient.Disconnect();
                     await Task.Delay(1500, token);
                     IsConnecting = false;
                     return;
@@ -421,6 +424,7 @@ public static partial class Screens {
             } catch (Exception ex) {
                 if (!token.IsCancellationRequested) {
                     ConnectingStatus = $"Ошибка: {ex.Message}";
+                    GameClient.Disconnect();
                     await Task.Delay(2000);
                     IsConnecting = false;
                 }

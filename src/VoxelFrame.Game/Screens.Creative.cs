@@ -72,7 +72,7 @@ public static partial class Screens {
         const int visibleRows = 5;
         const int slot = 52, gap = 4;
         int gridW = cols * slot + (cols - 1) * gap;
-        int panelW = gridW + 64;
+        int panelW = gridW + 100;
         int panelH = (visibleRows + 1) * slot + (visibleRows + 1) * gap + 150;
         float px = (w - panelW) / 2f, py = (h - panelH) / 2f;
 
@@ -376,7 +376,7 @@ public static partial class Screens {
         }
 
         // Слот корзины (Trash slot)
-        float trashX = scrollbarX + 20f;
+        float trashX = px + panelW - slot - 20f;
         float trashY = hotbarY;
         var trashRec = new Rectangle(trashX, trashY, slot, slot);
         bool trashHover = Raylib.CheckCollisionPointRec(mouse, trashRec);

@@ -27,6 +27,8 @@ public class GameReleaseItem {
     public string DisplayName { get; set; } = "";
     public string Tag { get; set; } = "";
     public string DownloadUrl { get; set; } = "";
+    /// <summary>URL файла SHA256SUMS.txt из релиза (может быть пустым у старых релизов).</summary>
+    public string ChecksumsUrl { get; set; } = "";
     public bool IsLocalDev { get; set; }
     public bool IsInstalled { get; set; }
     public string InstallPath { get; set; } = "";
@@ -36,7 +38,37 @@ public class GameReleaseItem {
 }
 
 public class LauncherForm : Form {
-    public const string CurrentLauncherVersion = "1.0.1";
+    /// <summary>
+    /// Версия лаунчера берётся из сборки (AssemblyInformationalVersion), а не из
+    /// константы в коде: иначе после релиза v1.1.0 лаунчер вечно предлагал обновление.
+    /// </summary>
+    public static readonly string CurrentLauncherVersion = ReadOwnVersion();
+
+    private static string ReadOwnVersion() {
+        try {
+            var asm = typeof(LauncherForm).Assembly;
+            var info = asm.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false);
+            if (info.Length > 0 && info[0] is System.Reflection.AssemblyInformationalVersionAttribute iv && !string.IsNullOrWhiteSpace(iv.InformationalVersion)) {
+                return iv.InformationalVersion.Split('+')[0].Trim();
+            }
+            var v = asm.GetName().Version;
+            if (v != null) return $"{v.Major}.{v.Minor}.{v.Build}";
+        } catch { }
+        return "0.0.0";
+    }
+
+    /// <summary>Версия exe из его метаданных — для локальной сборки вместо хардкода «v1.0.2».</summary>
+    private static string? ReadExeVersion(string exePath) {
+        try {
+            var vi = FileVersionInfo.GetVersionInfo(exePath);
+            string? raw = vi.ProductVersion ?? vi.FileVersion;
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            raw = raw.Split('+')[0].Trim();
+            return raw.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? raw : "v" + raw;
+        } catch {
+            return null;
+        }
+    }
 
     private TextBox txtNickname;
     private ComboBox cbVersion;
@@ -52,6 +84,7 @@ public class LauncherForm : Form {
     private string _latestName = "";
     private string _latestSetupUrl = "";
     private string _latestZipUrl = "";
+    private string _latestSumsUrl = "";
     private bool _hasPromptedUpdate = false;
 
     private readonly List<GameReleaseItem> _versions = new();
@@ -96,7 +129,7 @@ public class LauncherForm : Form {
         headerPanel.Controls.Add(lblTitle);
 
         Label lblBadge = new Label {
-            Text = "1.0.1",
+            Text = CurrentLauncherVersion,
             Font = new Font("Segoe UI", 9, FontStyle.Bold),
             ForeColor = Color.FromArgb(100, 220, 120),
             BackColor = Color.FromArgb(30, 60, 40),
@@ -398,17 +431,18 @@ public class LauncherForm : Form {
         }
 
         if (newestExe != null) {
+            string devTag = ReadExeVersion(newestExe) ?? CurrentLauncherVersion;
             _versions.Add(new GameReleaseItem {
-                DisplayName = "💾 v1.0.1 (Установлена)",
-                Tag = "v1.0.1",
+                DisplayName = $"💾 {devTag} (Установлена)",
+                Tag = devTag,
                 IsInstalled = true,
                 InstallPath = Path.GetDirectoryName(newestExe)!,
                 ExePath = newestExe
             });
         } else if (gameDir != null) {
             _versions.Add(new GameReleaseItem {
-                DisplayName = "💾 v1.0.1 (Установлена)",
-                Tag = "v1.0.1",
+                DisplayName = $"💾 {CurrentLauncherVersion} (Установлена)",
+                Tag = CurrentLauncherVersion,
                 IsLocalDev = true,
                 IsInstalled = true,
                 InstallPath = gameDir
@@ -457,35 +491,51 @@ public class LauncherForm : Form {
                 var root = doc.RootElement;
                 if (root.ValueKind == JsonValueKind.Array) {
                     string versionsDir = GetVersionsDirectory();
-                    int count = 0;
                     _latestTag = "";
                     _latestName = "";
                     _latestSetupUrl = "";
                     _latestZipUrl = "";
+                    _latestSumsUrl = "";
 
+                    // Черновики и пре-релизы не предлагаем как обновление, а порядок
+                    // берём из semver, а не из порядка массива GitHub API.
+                    var releases = new List<(string Tag, string Name, string ZipUrl, string SetupUrl, string SumsUrl)>();
                     foreach (var rel in root.EnumerateArray()) {
-                        string tag = rel.GetProperty("tag_name").GetString() ?? "";
+                        if (rel.TryGetProperty("draft", out var draftEl) && draftEl.ValueKind == JsonValueKind.True) continue;
+                        if (rel.TryGetProperty("prerelease", out var preEl) && preEl.ValueKind == JsonValueKind.True) continue;
+
+                        string tag = rel.TryGetProperty("tag_name", out var tagEl) ? tagEl.GetString() ?? "" : "";
+                        if (string.IsNullOrWhiteSpace(tag)) continue;
                         string name = rel.TryGetProperty("name", out var np) ? np.GetString() ?? tag : tag;
                         string zipUrl = "";
                         string setupUrl = "";
+                        string sumsUrl = "";
 
                         if (rel.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array) {
                             foreach (var asset in assets.EnumerateArray()) {
                                 string aName = asset.GetProperty("name").GetString() ?? "";
                                 string dUrl = asset.GetProperty("browser_download_url").GetString() ?? "";
-                                if (aName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) {
+                                if (aName.Equals("SHA256SUMS.txt", StringComparison.OrdinalIgnoreCase)) {
+                                    sumsUrl = dUrl;
+                                } else if (aName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) {
                                     zipUrl = dUrl;
                                 } else if (aName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) {
                                     setupUrl = dUrl;
                                 }
                             }
                         }
+                        releases.Add((tag, name, zipUrl, setupUrl, sumsUrl));
+                    }
+                    releases.Sort((a, b) => CompareVersions(b.Tag, a.Tag));
 
+                    int count = 0;
+                    foreach (var (tag, name, zipUrl, setupUrl, sumsUrl) in releases) {
                         if (count == 0) {
                             _latestTag = tag;
                             _latestName = name;
                             _latestSetupUrl = setupUrl;
                             _latestZipUrl = zipUrl;
+                            _latestSumsUrl = sumsUrl;
                         }
 
                         string instDir = Path.Combine(versionsDir, tag);
@@ -495,6 +545,7 @@ public class LauncherForm : Form {
                         var existing = _versions.Find(v => v.Tag == tag);
                         if (existing != null) {
                             existing.DownloadUrl = zipUrl;
+                            existing.ChecksumsUrl = sumsUrl;
                             existing.IsInstalled = installed;
                             existing.InstallPath = instDir;
                             existing.ExePath = exePath;
@@ -503,6 +554,7 @@ public class LauncherForm : Form {
                                 DisplayName = $"🌐 {tag} {(installed ? "(Установлена)" : "")}",
                                 Tag = tag,
                                 DownloadUrl = zipUrl,
+                                ChecksumsUrl = sumsUrl,
                                 IsInstalled = installed,
                                 InstallPath = instDir,
                                 ExePath = exePath
@@ -560,18 +612,65 @@ public class LauncherForm : Form {
         }
     }
 
+    /// <summary>
+    /// Сравнение тегов вида «v1.2.3» и «1.2.3-beta». Возвращает отрицательное число,
+    /// если <paramref name="a"/> старше <paramref name="b"/>, 0 — равны, положительное — новее.
+    /// Релиз всегда новее пре-релиза с теми же номерами (иначе бета предлагалась как обновление).
+    /// </summary>
+    private static int CompareVersions(string a, string b) {
+        var (na, preA) = ParseVersionTag(a);
+        var (nb, preB) = ParseVersionTag(b);
+        for (int i = 0; i < 3; i++) {
+            int c = na[i].CompareTo(nb[i]);
+            if (c != 0) return c;
+        }
+        // 0 — пре-релиз, 1 — релиз: релиз новее.
+        return (preA ? 0 : 1).CompareTo(preB ? 0 : 1);
+    }
+
+    private static (int[] Numbers, bool IsPrerelease) ParseVersionTag(string tag) {
+        string clean = (tag ?? "").Trim().TrimStart('v', 'V');
+        int dash = clean.IndexOf('-');
+        bool pre = dash >= 0 || clean.Contains("pre", StringComparison.OrdinalIgnoreCase) || clean.Contains("beta", StringComparison.OrdinalIgnoreCase);
+        if (dash >= 0) clean = clean[..dash];
+        var parts = clean.Split('.');
+        var nums = new int[3];
+        for (int i = 0; i < 3 && i < parts.Length; i++) {
+            int.TryParse(parts[i], out nums[i]);
+        }
+        return (nums, pre);
+    }
+
     private static bool IsNewerVersion(string remoteTag, string localTag) {
         if (string.IsNullOrWhiteSpace(remoteTag)) return false;
         if (string.Equals(remoteTag, localTag, StringComparison.OrdinalIgnoreCase)) return false;
-        string rClean = remoteTag.TrimStart('v', 'V').Split('-')[0];
-        string lClean = localTag.TrimStart('v', 'V').Split('-')[0];
-        if (Version.TryParse(rClean, out var vr) && Version.TryParse(lClean, out var vl)) {
-            if (vr > vl) return true;
-            if (vr < vl) return false;
-            if (!remoteTag.Contains("pre", StringComparison.OrdinalIgnoreCase) &&
-                localTag.Contains("pre", StringComparison.OrdinalIgnoreCase)) return true;
+        return CompareVersions(remoteTag, localTag) > 0;
+    }
+
+    private static string ComputeSha256(string path) {
+        using var stream = File.OpenRead(path);
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        return Convert.ToHexString(sha.ComputeHash(stream)).ToLowerInvariant();
+    }
+
+    /// <summary>Ищет хеш файла в SHA256SUMS.txt (формат «hash  имя» или «hash *имя»).</summary>
+    private async Task<string?> FetchExpectedHashAsync(string sumsUrl, string fileName) {
+        try {
+            string text = await _http.GetStringAsync(sumsUrl);
+            foreach (var rawLine in text.Split('\n')) {
+                var line = rawLine.Trim();
+                if (line.Length == 0) continue;
+                var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 2) continue;
+                string name = parts[^1].TrimStart('*');
+                if (name.Equals(fileName, StringComparison.OrdinalIgnoreCase)) {
+                    return parts[0].Trim().ToLowerInvariant();
+                }
+            }
+        } catch {
+            // Нет сети/файла — считаем, что проверить нечем.
         }
-        return !remoteTag.TrimStart('v', 'V').Equals(localTag.TrimStart('v', 'V'), StringComparison.OrdinalIgnoreCase);
+        return null;
     }
 
     private async Task AutoUpdateLauncherAsync(string targetTag, string setupUrl, string zipUrl) {
@@ -594,7 +693,9 @@ public class LauncherForm : Form {
         }
 
         bool isSetup = downloadUrl.EndsWith(".exe", StringComparison.OrdinalIgnoreCase);
-        string tempFile = Path.Combine(Path.GetTempPath(), isSetup ? $"VoxelFrame-Setup-{targetTag}.exe" : $"VoxelFrame-{targetTag}.zip");
+        // Имя ассета нужно для поиска хеша в SHA256SUMS.txt — оно должно совпадать с релизом.
+        string assetName = Path.GetFileName(new Uri(downloadUrl).LocalPath);
+        string tempFile = Path.Combine(Path.GetTempPath(), $"VF_{Guid.NewGuid():N}_{assetName}");
 
         try {
             using var resp = await _http.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
@@ -618,6 +719,19 @@ public class LauncherForm : Form {
                 }
             }
             fs.Close();
+
+            // Не запускаем скачанный exe/архив без проверки хеша из релиза.
+            if (!string.IsNullOrEmpty(_latestSumsUrl)) {
+                lblStatus.Text = "Проверка контрольной суммы обновления...";
+                string? expected = await FetchExpectedHashAsync(_latestSumsUrl, assetName);
+                if (expected == null) {
+                    throw new InvalidDataException("В SHA256SUMS.txt нет хеша для файла обновления.");
+                }
+                string actual = ComputeSha256(tempFile);
+                if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase)) {
+                    throw new InvalidDataException($"Контрольная сумма обновления не совпала (ожидалось {expected}, получено {actual}).");
+                }
+            }
 
             lblStatus.Text = "Запуск обновления...";
             lblStatus.ForeColor = Color.FromArgb(100, 220, 120);
@@ -734,16 +848,53 @@ del ""%~f0""
             }
             fs.Close();
 
+            // Проверяем контрольную сумму до распаковки: без неё единственный барьер — TLS,
+            // а скомпрометированный релиз запускался бы у всех пользователей.
+            if (!string.IsNullOrEmpty(item.ChecksumsUrl)) {
+                lblStatus.Text = "Проверка контрольной суммы...";
+                string fileName = Path.GetFileName(new Uri(item.DownloadUrl).LocalPath);
+                string? expected = await FetchExpectedHashAsync(item.ChecksumsUrl, fileName);
+                if (expected == null) {
+                    throw new InvalidDataException("В SHA256SUMS.txt нет хеша для скачанного файла.");
+                }
+                string actual = ComputeSha256(tempZip);
+                if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase)) {
+                    throw new InvalidDataException($"Контрольная сумма не совпала (ожидалось {expected}, получено {actual}). Файл повреждён или подменён.");
+                }
+            }
+
             lblStatus.Text = "Распаковка релиза...";
             string destDir = Path.Combine(GetVersionsDirectory(), item.Tag);
-            if (Directory.Exists(destDir)) Directory.Delete(destDir, true);
-            Directory.CreateDirectory(destDir);
+            string stagingDir = destDir + ".tmp";
+            // Распаковываем в staging и подменяем каталог только после успешной проверки:
+            // раньше рабочая версия удалялась ДО распаковки и при сбое терялась навсегда.
+            if (Directory.Exists(stagingDir)) Directory.Delete(stagingDir, true);
+            Directory.CreateDirectory(stagingDir);
+            try {
+                ZipFile.ExtractToDirectory(tempZip, stagingDir, true);
 
-            ZipFile.ExtractToDirectory(tempZip, destDir, true);
+                string stagedExe = Path.Combine(stagingDir, "VoxelFrame.Game.exe");
+                if (!File.Exists(stagedExe)) {
+                    var found = Directory.GetFiles(stagingDir, "VoxelFrame.Game.exe", SearchOption.AllDirectories);
+                    if (found.Length == 0) throw new InvalidDataException("В архиве релиза нет VoxelFrame.Game.exe.");
+                }
+
+                if (Directory.Exists(destDir)) Directory.Delete(destDir, true);
+                Directory.Move(stagingDir, destDir);
+            } catch {
+                try { if (Directory.Exists(stagingDir)) Directory.Delete(stagingDir, true); } catch { }
+                throw;
+            }
+
+            string finalExe = Path.Combine(destDir, "VoxelFrame.Game.exe");
+            if (!File.Exists(finalExe)) {
+                var found = Directory.GetFiles(destDir, "VoxelFrame.Game.exe", SearchOption.AllDirectories);
+                if (found.Length > 0) finalExe = found[0];
+            }
 
             item.IsInstalled = true;
             item.InstallPath = destDir;
-            item.ExePath = Path.Combine(destDir, "VoxelFrame.Game.exe");
+            item.ExePath = finalExe;
 
             lblStatus.Text = $"Релиз {item.Tag} успешно установлен!";
             lblStatus.ForeColor = Color.FromArgb(100, 220, 120);
@@ -957,52 +1108,17 @@ public static class IconHelper {
     public static void EnsureAppIcons() {
         try {
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            string? root = FindProjectRoot();
-            if (root == null) return;
-
-            string assetsDir = Path.Combine(root, "assets");
-            Directory.CreateDirectory(assetsDir);
+            string localIco = Path.Combine(baseDir, "launcher.ico");
+            if (File.Exists(localIco)) return;
 
             int[] sizes = new[] { 16, 32, 48, 64, 128, 256 };
             List<Bitmap> bitmaps = new();
             foreach (int s in sizes) {
                 bitmaps.Add(RenderVoxelBlockIcon(s));
             }
-
-            // Save assets/icon.png
-            string pngPath = Path.Combine(assetsDir, "icon.png");
-            if (!File.Exists(pngPath)) {
-                bitmaps[^1].Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
-            }
-
-            // Save multi-size .ico files
-            string[] targetIcos = new[] {
-                Path.Combine(assetsDir, "icon.ico"),
-                Path.Combine(root, "src", "VoxelFrame.Game", "app.ico"),
-                Path.Combine(root, "src", "VoxelFrame.Launcher", "launcher.ico"),
-                Path.Combine(root, "src", "VoxelFrame.Installer", "app.ico"),
-                Path.Combine(baseDir, "launcher.ico")
-            };
-
-            foreach (var path in targetIcos) {
-                try {
-                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                    SaveMultiSizeIco(bitmaps, path);
-                } catch { }
-            }
-
+            SaveMultiSizeIco(bitmaps, localIco);
             foreach (var bmp in bitmaps) bmp.Dispose();
         } catch { }
-    }
-
-    private static string? FindProjectRoot() {
-        string? dir = AppDomain.CurrentDomain.BaseDirectory;
-        for (int i = 0; i < 8 && dir != null; i++) {
-            if (Directory.Exists(Path.Combine(dir, "src")) && Directory.Exists(Path.Combine(dir, "assets")))
-                return Path.GetFullPath(dir);
-            dir = Path.GetDirectoryName(dir);
-        }
-        return null;
     }
 
     public static Bitmap RenderVoxelBlockIcon(int size) {

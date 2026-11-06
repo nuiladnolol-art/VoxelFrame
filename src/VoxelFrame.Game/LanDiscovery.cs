@@ -86,6 +86,8 @@ public sealed class LanDiscovery : IDisposable {
             _listener.Client.Bind(new IPEndPoint(IPAddress.Any, NetworkProtocol.DiscoveryPort));
         } catch (Exception ex) {
             Console.WriteLine($"[LAN Discovery] Ошибка биндинга сокета: {ex.Message}");
+            try { _listener?.Close(); } catch { }
+            _listener = null;
             return;
         }
 

@@ -13,7 +13,7 @@ namespace VoxelFrame.Game;
 /// </summary>
 public static class SaveSystem {
     public const uint Magic = 0x56465331;   // "VFS1"
-    public const int Version = 21;
+    public const int Version = 22;   // v22: в сейв пишется измерение Бездны
 
     public static string CurrentWorldPath = "";
     public static int SelectedWorldSlot = 1;
@@ -84,88 +84,98 @@ public static class SaveSystem {
     public static void Save(GameSession session, string path) {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var tmp = path + ".tmp";
-        using (var fs = File.Create(tmp))
-        using (var gz = new GZipStream(fs, CompressionLevel.Fastest))
-        using (var bw = new BinaryWriter(gz, Encoding.UTF8, leaveOpen: false)) {
-            bw.Write(Magic);
-            bw.Write(Version);
-            string worldName = Path.GetFileNameWithoutExtension(path);
-            bw.Write(worldName);
-            // Мастер-сид — сид Обычного мира; Нижний и Энд выводятся из него XOR-ом.
-            var overworld0 = session.World.Dimension == Dimension.Overworld ? session.World : session.OverworldWorld;
-            bw.Write(overworld0?.Seed ?? session.MasterSeed);
-            bw.Write(session.DayNight.TimeOfDay);
-            bw.Write((int)session.GameMode);
-            bw.Write(session.KeepInventory);
-            bw.Write(session.CheatsEnabled);
-            bw.Write((int)session.Dimension);
+        try {
+            using (var fs = File.Create(tmp)) {
+                using (var gz = new GZipStream(fs, CompressionLevel.Fastest, leaveOpen: true))
+                using (var bw = new BinaryWriter(gz, Encoding.UTF8, leaveOpen: true)) {
+                    bw.Write(Magic);
+                    bw.Write(Version);
+                    string worldName = Path.GetFileNameWithoutExtension(path);
+                    bw.Write(worldName);
+                    // Мастер-сид — сид Обычного мира; Нижний и Энд выводятся из него XOR-ом.
+                    var overworld0 = session.World.Dimension == Dimension.Overworld ? session.World : session.OverworldWorld;
+                    bw.Write(overworld0?.Seed ?? session.MasterSeed);
+                    bw.Write(session.DayNight.TimeOfDay);
+                    bw.Write((int)session.GameMode);
+                    bw.Write(session.KeepInventory);
+                    bw.Write(session.CheatsEnabled);
+                    bw.Write((int)session.Dimension);
 
-            var p = session.Player;
-            WriteVec3(bw, p.Position);
-            bw.Write(p.Yaw);
-            bw.Write(p.Pitch);
-            bw.Write(p.Health);
-            bw.Write(p.Hunger);
-            bw.Write(p.Saturation);
-            bw.Write(p.HighestYInAir);
-            bw.Write(p.SelectedSlot);
+                    var p = session.Player;
+                    WriteVec3(bw, p.Position);
+                    bw.Write(p.Yaw);
+                    bw.Write(p.Pitch);
+                    bw.Write(p.Health);
+                    bw.Write(p.Hunger);
+                    bw.Write(p.Saturation);
+                    bw.Write(p.HighestYInAir);
+                    bw.Write(p.SelectedSlot);
 
-            var inv = p.Inventory;
-            int nonNullCount = 0;
-            for (int i = 0; i < inv.Capacity; i++) {
-                var s = inv.Slots[i];
-                if (s != null && s.Value.Quantity > 0) nonNullCount++;
-            }
-            bw.Write(nonNullCount);
-            for (int i = 0; i < inv.Capacity; i++) {
-                var s = inv.Slots[i];
-                if (s != null && s.Value.Quantity > 0) {
-                    bw.Write(i);
-                    bw.Write(s.Value.Item.Definition.Id);
-                    bw.Write(s.Value.Quantity);
-                    if (GameData.HasDurability(s.Value.Item.Definition.Id)) bw.Write(s.Value.Item.Durability);
+                    var inv = p.Inventory;
+                    int nonNullCount = 0;
+                    for (int i = 0; i < inv.Capacity; i++) {
+                        var s = inv.Slots[i];
+                        if (s != null && s.Value.Quantity > 0) nonNullCount++;
+                    }
+                    bw.Write(nonNullCount);
+                    for (int i = 0; i < inv.Capacity; i++) {
+                        var s = inv.Slots[i];
+                        if (s != null && s.Value.Quantity > 0) {
+                            bw.Write(i);
+                            bw.Write(s.Value.Item.Definition.Id);
+                            bw.Write(s.Value.Quantity);
+                            if (GameData.HasDurability(s.Value.Item.Definition.Id)) bw.Write(s.Value.Item.Durability);
+                        }
+                    }
+
+                    if (p.OffhandEntry != null) {
+                        bw.Write(true);
+                        bw.Write(p.OffhandEntry.Value.Item.Definition.Id);
+                        bw.Write(p.OffhandEntry.Value.Quantity);
+                        if (GameData.HasDurability(p.OffhandEntry.Value.Item.Definition.Id)) bw.Write(p.OffhandEntry.Value.Item.Durability);
+                    } else {
+                        bw.Write(false);
+                    }
+
+                    // 4 слота экипировки брони
+                    for (int a = 0; a < 4; a++) {
+                        if (p.Armor[a] is { } ae && ae.Quantity > 0) {
+                            bw.Write(true);
+                            bw.Write(ae.Item.Definition.Id);
+                            bw.Write(ae.Quantity);
+                            bw.Write(ae.Item.Durability);
+                        } else {
+                            bw.Write(false);
+                        }
+                    }
+
+                    // Пишем все существующие миры: Обычный + каждый посещённый Нижний/Энд.
+                    // Недоступные измерения остаются null — их сид выводится заново при первом входе.
+                    var worlds = CollectWorlds(session);
+                    bw.Write(worlds.Count);
+                    foreach (var (dim, w) in worlds) {
+                        bw.Write((int)dim);
+                        bw.Write(w.Seed);
+                        bw.Write(w.SpawnBlock.X);
+                        bw.Write(w.SpawnBlock.Y);
+                        bw.Write(w.SpawnBlock.Z);
+                        WriteWorldData(bw, w);
+                    }
                 }
+                // Данные должны реально лежать на диске до атомарной подмены:
+                // иначе при отключении питания File.Replace подменит файл на пустой.
+                fs.Flush(flushToDisk: true);
             }
-
-            if (p.OffhandEntry != null) {
-                bw.Write(true);
-                bw.Write(p.OffhandEntry.Value.Item.Definition.Id);
-                bw.Write(p.OffhandEntry.Value.Quantity);
-                if (GameData.HasDurability(p.OffhandEntry.Value.Item.Definition.Id)) bw.Write(p.OffhandEntry.Value.Item.Durability);
-            } else {
-                bw.Write(false);
-            }
-
-            // 4 слота экипировки брони
-            for (int a = 0; a < 4; a++) {
-                if (p.Armor[a] is { } ae && ae.Quantity > 0) {
-                    bw.Write(true);
-                    bw.Write(ae.Item.Definition.Id);
-                    bw.Write(ae.Quantity);
-                    bw.Write(ae.Item.Durability);
-                } else {
-                    bw.Write(false);
-                }
-            }
-
-            // Пишем все существующие миры: Обычный + каждый посещённый Нижний/Энд.
-            // Недоступные измерения остаются null — их сид выводится заново при первом входе.
-            var worlds = CollectWorlds(session);
-            bw.Write(worlds.Count);
-            foreach (var (dim, w) in worlds) {
-                bw.Write((int)dim);
-                bw.Write(w.Seed);
-                bw.Write(w.SpawnBlock.X);
-                bw.Write(w.SpawnBlock.Y);
-                bw.Write(w.SpawnBlock.Z);
-                WriteWorldData(bw, w);
-            }
+            // Атомарная подмена: предыдущий рабочий сейв уходит в .bak.
+            // Краши посреди сохранения оставляют либо новый main, либо старый main + .bak —
+            // мир не теряется никогда.
+            if (File.Exists(path)) File.Replace(tmp, path, path + ".bak");
+            else File.Move(tmp, path);
+        } catch {
+            // Не оставляем полузаписанный .tmp: следующий сейв должен начать с чистого листа.
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+            throw;
         }
-        // Атомарная подмена: предыдущий рабочий сейв уходит в .bak.
-        // Краши посреди сохранения оставляют либо новый main, либо старый main + .bak —
-        // мир не теряется никогда.
-        if (File.Exists(path)) File.Replace(tmp, path, path + ".bak");
-        else File.Move(tmp, path);
     }
 
     // ── Сериализация миров (Обычный/Нижний/Энд) ─────────────────────────────
@@ -177,6 +187,7 @@ public static class SaveSystem {
         Add(session.World.Dimension == Dimension.Overworld ? session.World : session.OverworldWorld);
         Add(session.World.Dimension == Dimension.Nether ? session.World : session.NetherWorld);
         Add(session.World.Dimension == Dimension.End ? session.World : session.EndWorld);
+        Add(session.World.Dimension == Dimension.Void ? session.World : session.VoidWorld);
         return list;
     }
 
@@ -210,8 +221,12 @@ public static class SaveSystem {
         var chunkByteBuf = new byte[Chunk.VoxelCount * sizeof(ushort)];
         var types = new ushort[Chunk.VoxelCount];
 
-        bw.Write(world.Chunks.Count);
-        foreach (var gc in world.Chunks) {
+        // Пишем только изменённые/загруженные чанки: нетронутые детерминированно
+        // восстановит генератор. Раньше сейв складывал все загруженные чанки —
+        // при радиусе 5 это десятки мегабайт на каждый автосейв.
+        var savedChunks = world.GetModifiedChunksSnapshot();
+        bw.Write(savedChunks.Count);
+        foreach (var gc in savedChunks) {
             bw.Write(gc.Coord.X);
             bw.Write(gc.Coord.Y);
             bw.Write(gc.Coord.Z);
@@ -394,7 +409,7 @@ public static class SaveSystem {
             session.Player.Saturation = br.ReadSingle();
         }
         session.Player.HighestYInAir = br.ReadSingle();
-        session.Player.SelectedSlot = br.ReadInt32();
+        session.Player.SelectedSlot = Math.Clamp(br.ReadInt32(), 0, 8);
 
         int entryCount = br.ReadInt32();
         for (int i = 0; i < entryCount; i++) {
@@ -529,7 +544,7 @@ public static class SaveSystem {
             for (int ch = 0; ch < chestCount; ch++) {
                 var cpos = new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32());
                 if (!session.World.Chests.TryGetValue(cpos, out var cinv)) {
-                    cinv = new Container();
+                    cinv = GameWorld.NewChest();
                     session.World.Chests[cpos] = cinv;
                 }
                 session.World.LootedStructureChests.Add(cpos);
@@ -543,7 +558,7 @@ public static class SaveSystem {
                     if (GameData.Items.TryGetValue(cDefId, out var cDef)) {
                         var cItem = GameData.NewItem(cDef);
                         if (cDur > 0) cItem.Durability = cDur;
-                        cinv.InsertAt(cidx, new ItemEntry(cItem, cQty));
+                        cinv.InsertAtOrPack(cidx, new ItemEntry(cItem, cQty));
                     }
                 }
             }
@@ -649,7 +664,7 @@ public static class SaveSystem {
         p.Hunger = br.ReadSingle();
         p.Saturation = br.ReadSingle();
         p.HighestYInAir = br.ReadSingle();
-        p.SelectedSlot = br.ReadInt32();
+        p.SelectedSlot = Math.Clamp(br.ReadInt32(), 0, 8);
 
         int entryCount = br.ReadInt32();
         for (int i = 0; i < entryCount; i++) {
@@ -690,9 +705,9 @@ public static class SaveSystem {
             }
         }
 
-        // Миры: Обычный/Нижний/Энд (столько, сколько было посещено)
+        // Миры: Обычный/Нижний/Энд/Бездна (столько, сколько было посещено)
         int worldCount = br.ReadInt32();
-        GameWorld? overworld = null, nether = null, end = null;
+        GameWorld? overworld = null, nether = null, end = null, voidWorld = null;
         for (int i = 0; i < worldCount; i++) {
             var dim = (Dimension)br.ReadInt32();
             int seed = br.ReadInt32();
@@ -703,21 +718,29 @@ public static class SaveSystem {
                 case Dimension.Overworld: overworld = w; break;
                 case Dimension.Nether: nether = w; break;
                 case Dimension.End: end = w; break;
+                case Dimension.Void: voidWorld = w; break;
             }
         }
         session.OverworldWorld = overworld;
         session.NetherWorld = nether;
         session.EndWorld = end;
+        session.VoidWorld = voidWorld;
 
         var currentWorld = currentDim switch {
             Dimension.Overworld => overworld,
             Dimension.Nether => nether,
             Dimension.End => end,
+            Dimension.Void => voidWorld,
             _ => null,
         };
         session.World = currentWorld ?? overworld ?? new GameWorld(masterSeed) { Dimension = Dimension.Overworld };
 
-        if (float.IsNaN(loadedPos.X) || float.IsNaN(loadedPos.Y) || float.IsNaN(loadedPos.Z) ||
+        // Старые сейвы не содержали Бездну: координаты в сейве — из Бездны, но мира нет.
+        // Телепортировать игрока по ним в Обычный мир нельзя — он окажется внутри камня.
+        bool dimensionLost = currentWorld == null && currentDim != session.World.Dimension;
+        p.Dimension = session.World.Dimension;
+
+        if (dimensionLost || float.IsNaN(loadedPos.X) || float.IsNaN(loadedPos.Y) || float.IsNaN(loadedPos.Z) ||
             float.IsInfinity(loadedPos.X) || float.IsInfinity(loadedPos.Y) || float.IsInfinity(loadedPos.Z)) {
             p.Position = session.World.GetSafeRespawnPosition(session.World.SpawnBlock);
         } else {
@@ -834,7 +857,7 @@ public static class SaveSystem {
         for (int ch = 0; ch < chestCount; ch++) {
             var cpos = new Vec3i(br.ReadInt32(), br.ReadInt32(), br.ReadInt32());
             if (!world.Chests.TryGetValue(cpos, out var cinv)) {
-                cinv = new Container();
+                cinv = GameWorld.NewChest();
                 world.Chests[cpos] = cinv;
             }
             world.LootedStructureChests.Add(cpos);
@@ -847,7 +870,7 @@ public static class SaveSystem {
                 if (GameData.Items.TryGetValue(cDefId, out var cDef)) {
                     var cItem = GameData.NewItem(cDef);
                     if (cDur > 0) cItem.Durability = cDur;
-                    cinv.InsertAt(cidx, new ItemEntry(cItem, cQty));
+                    cinv.InsertAtOrPack(cidx, new ItemEntry(cItem, cQty));
                 }
             }
         }
@@ -934,74 +957,97 @@ public static class SaveSystem {
         return File.Exists(GetPlayerDataPath(playerName));
     }
 
+    /// <summary>Сериализует записи PlayerData: автосейв и отключение клиента не должны
+    /// одновременно писать в один и тот же .tmp (иначе IOException и потеря прогресса).</summary>
+    private static readonly object PlayerSaveLock = new();
+
     public static void SavePlayerData(string playerName, Player player) {
-        try {
-            string path = GetPlayerDataPath(playerName);
-            string tmp = path + ".tmp";
-            using (var fs = File.Create(tmp))
-            using (var gz = new GZipStream(fs, CompressionLevel.Fastest))
-            using (var bw = new BinaryWriter(gz, Encoding.UTF8, leaveOpen: false)) {
-                bw.Write(Magic);
-                bw.Write(Version);
-                bw.Write(player.Name);
-                WriteVec3(bw, player.Position);
-                bw.Write(player.Yaw);
-                bw.Write(player.Pitch);
-                bw.Write(player.Health);
-                bw.Write(player.Hunger);
-                bw.Write(player.Saturation);
-                bw.Write(player.HighestYInAir);
-                bw.Write(player.SelectedSlot);
-                bw.Write((byte)player.Dimension);
+        lock (PlayerSaveLock) {
+            string tmp = "";
+            try {
+                string path = GetPlayerDataPath(playerName);
+                // Уникальный tmp: даже при параллельных вызовах файлы не перетираются.
+                tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                using (var fs = File.Create(tmp)) {
+                    using (var gz = new GZipStream(fs, CompressionLevel.Fastest, leaveOpen: true))
+                    using (var bw = new BinaryWriter(gz, Encoding.UTF8, leaveOpen: false)) {
+                        bw.Write(Magic);
+                        bw.Write(Version);
+                        bw.Write(player.Name);
+                        WriteVec3(bw, player.Position);
+                        bw.Write(player.Yaw);
+                        bw.Write(player.Pitch);
+                        bw.Write(player.Health);
+                        bw.Write(player.Hunger);
+                        bw.Write(player.Saturation);
+                        bw.Write(player.HighestYInAir);
+                        bw.Write(player.SelectedSlot);
+                        bw.Write((byte)player.Dimension);
 
-                // Инвентарь
-                int nonNullCount = 0;
-                for (int i = 0; i < player.Inventory.Capacity; i++) {
-                    var s = player.Inventory.Slots[i];
-                    if (s != null && s.Value.Quantity > 0) nonNullCount++;
-                }
-                bw.Write(nonNullCount);
-                for (int i = 0; i < player.Inventory.Capacity; i++) {
-                    var s = player.Inventory.Slots[i];
-                    if (s != null && s.Value.Quantity > 0) {
-                        bw.Write(i);
-                        bw.Write(s.Value.Item.Definition.Id);
-                        bw.Write(s.Value.Quantity);
-                        bw.Write(s.Value.Item.Durability);
+                        // Инвентарь
+                        int nonNullCount = 0;
+                        for (int i = 0; i < player.Inventory.Capacity; i++) {
+                            var s = player.Inventory.Slots[i];
+                            if (s != null && s.Value.Quantity > 0) nonNullCount++;
+                        }
+                        bw.Write(nonNullCount);
+                        for (int i = 0; i < player.Inventory.Capacity; i++) {
+                            var s = player.Inventory.Slots[i];
+                            if (s != null && s.Value.Quantity > 0) {
+                                bw.Write(i);
+                                bw.Write(s.Value.Item.Definition.Id);
+                                bw.Write(s.Value.Quantity);
+                                bw.Write(s.Value.Item.Durability);
+                            }
+                        }
+
+                        // Оффхэнд
+                        if (player.OffhandEntry != null) {
+                            bw.Write(true);
+                            bw.Write(player.OffhandEntry.Value.Item.Definition.Id);
+                            bw.Write(player.OffhandEntry.Value.Quantity);
+                            bw.Write(player.OffhandEntry.Value.Item.Durability);
+                        } else {
+                            bw.Write(false);
+                        }
+
+                        // Броня
+                        for (int a = 0; a < 4; a++) {
+                            if (player.Armor[a] is { } ae && ae.Quantity > 0) {
+                                bw.Write(true);
+                                bw.Write(ae.Item.Definition.Id);
+                                bw.Write(ae.Quantity);
+                                bw.Write(ae.Item.Durability);
+                            } else {
+                                bw.Write(false);
+                            }
+                        }
                     }
+                    fs.Flush(flushToDisk: true);
                 }
-
-                // Оффхэнд
-                if (player.OffhandEntry != null) {
-                    bw.Write(true);
-                    bw.Write(player.OffhandEntry.Value.Item.Definition.Id);
-                    bw.Write(player.OffhandEntry.Value.Quantity);
-                    bw.Write(player.OffhandEntry.Value.Item.Durability);
-                } else {
-                    bw.Write(false);
-                }
-
-                // Броня
-                for (int a = 0; a < 4; a++) {
-                    if (player.Armor[a] is { } ae && ae.Quantity > 0) {
-                        bw.Write(true);
-                        bw.Write(ae.Item.Definition.Id);
-                        bw.Write(ae.Quantity);
-                        bw.Write(ae.Item.Durability);
-                    } else {
-                        bw.Write(false);
-                    }
-                }
+                string bak = path + ".bak";
+                if (File.Exists(path)) File.Replace(tmp, path, bak);
+                else File.Move(tmp, path);
+            } catch (Exception ex) {
+                Console.WriteLine($"[SaveSystem] Ошибка сохранения данных игрока {playerName}: {ex.Message}");
+                try { if (tmp.Length > 0 && File.Exists(tmp)) File.Delete(tmp); } catch { }
             }
-            File.Move(tmp, path, overwrite: true);
-        } catch (Exception ex) {
-            Console.WriteLine($"[SaveSystem] Ошибка сохранения данных игрока {playerName}: {ex.Message}");
         }
     }
 
     public static bool LoadPlayerData(string playerName, Player player) {
+        string path = GetPlayerDataPath(playerName);
+        if (TryLoadPlayerDataFile(path, player)) return true;
+        string bak = path + ".bak";
+        if (File.Exists(bak) && TryLoadPlayerDataFile(bak, player)) {
+            Console.WriteLine($"[SaveSystem] Восстановлены данные игрока {playerName} из резервной копии .bak");
+            return true;
+        }
+        return false;
+    }
+
+    private static bool TryLoadPlayerDataFile(string path, Player player) {
         try {
-            string path = GetPlayerDataPath(playerName);
             if (!File.Exists(path)) return false;
             using var fs = File.OpenRead(path);
             using var gz = new GZipStream(fs, CompressionMode.Decompress);
@@ -1018,7 +1064,7 @@ public static class SaveSystem {
             player.Hunger = br.ReadSingle();
             player.Saturation = br.ReadSingle();
             player.HighestYInAir = br.ReadSingle();
-            player.SelectedSlot = br.ReadInt32();
+            player.SelectedSlot = Math.Clamp(br.ReadInt32(), 0, 8);
             if (version >= 2 || gz.CanRead) {
                 try {
                     player.Dimension = (Dimension)br.ReadByte();
@@ -1073,7 +1119,7 @@ public static class SaveSystem {
             }
             return true;
         } catch (Exception ex) {
-            Console.WriteLine($"[SaveSystem] Ошибка загрузки данных игрока {playerName}: {ex.Message}");
+            Console.WriteLine($"[SaveSystem] Ошибка чтения файла данных игрока {path}: {ex.Message}");
             return false;
         }
     }
@@ -1113,6 +1159,10 @@ public static class SaveSystem {
     public static bool PostFxBloom = true;
 
     public static string SelectedSkin = "cyan";
+
+    public static bool SavedFullscreen;
+    public static int SavedWidth;
+    public static int SavedHeight;
 
     public static void SaveSettings() {
         try {
@@ -1193,6 +1243,9 @@ public static class SaveSystem {
             R("TogglePerspective", v => KeyBinds.TogglePerspective = (Raylib_cs.KeyboardKey)v);
             R("Chat", v => KeyBinds.Chat = (Raylib_cs.KeyboardKey)v);
             R("PlayerList", v => KeyBinds.PlayerList = (Raylib_cs.KeyboardKey)v);
+            B("Fullscreen", v => SavedFullscreen = v);
+            R("Width", v => SavedWidth = v);
+            R("Height", v => SavedHeight = v);
             R("GraphicsQuality", v => {
                 GraphicsQuality = (GraphicsPreset)Math.Clamp(v, 0, 2);
             });

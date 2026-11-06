@@ -16,6 +16,7 @@ saves/
 .vscode/
 .idea/
 .claude/
+.openclaude/
 *.user
 *.suo
 

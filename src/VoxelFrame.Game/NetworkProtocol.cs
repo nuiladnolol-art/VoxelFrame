@@ -32,6 +32,15 @@ public readonly struct PacketFrame : IDisposable {
     }
 }
 
+/// <summary>
+/// Идентификаторы боссов в пакете AttackEntity: у боссов нет обычного Id из
+/// счётчика мобов, поэтому используем зарезервированные значения.
+/// </summary>
+public static class BossEntityIds {
+    public const uint EndSlime = 0xFFFFFF01;
+    public const uint TrueEndSlime = 0xFFFFFF02;
+}
+
 public enum PacketType : byte {
     Handshake = 1,
     Welcome = 2,
@@ -114,40 +123,36 @@ public static class NetworkProtocol {
     /// Возвращает структуру PacketFrame, которую необходимо освободить через Dispose().
     /// </summary>
     public static PacketFrame? ReadPacketFrame(Stream stream) {
-        byte[] lenBuf = ArrayPool<byte>.Shared.Rent(4);
-        try {
-            int read = 0;
-            while (read < 4) {
-                int r = stream.Read(lenBuf, read, 4 - read);
-                if (r <= 0) return null;
-                read += r;
-            }
-            int payloadLength = BitConverter.ToInt32(lenBuf, 0);
-            if (payloadLength <= 0 || payloadLength > MaxPacketSize) return null;
+        Span<byte> lenBuf = stackalloc byte[4];
+        int read = 0;
+        while (read < 4) {
+            int r = stream.Read(lenBuf.Slice(read, 4 - read));
+            if (r <= 0) return null;
+            read += r;
+        }
+        int payloadLength = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(lenBuf);
+        if (payloadLength <= 0 || payloadLength > MaxPacketSize) return null;
 
-            int firstByte = stream.ReadByte();
-            if (firstByte < 0) return null;
-            var type = (PacketType)firstByte;
+        int firstByte = stream.ReadByte();
+        if (firstByte < 0) return null;
+        var type = (PacketType)firstByte;
 
-            if (type != PacketType.WorldChunksSync && payloadLength > MaxStandardPacketSize) {
+        if (type != PacketType.WorldChunksSync && payloadLength > MaxStandardPacketSize) {
+            return null;
+        }
+
+        byte[] payload = ArrayPool<byte>.Shared.Rent(payloadLength);
+        payload[0] = (byte)firstByte;
+        read = 1;
+        while (read < payloadLength) {
+            int r = stream.Read(payload, read, payloadLength - read);
+            if (r <= 0) {
+                ArrayPool<byte>.Shared.Return(payload);
                 return null;
             }
-
-            byte[] payload = ArrayPool<byte>.Shared.Rent(payloadLength);
-            payload[0] = (byte)firstByte;
-            read = 1;
-            while (read < payloadLength) {
-                int r = stream.Read(payload, read, payloadLength - read);
-                if (r <= 0) {
-                    ArrayPool<byte>.Shared.Return(payload);
-                    return null;
-                }
-                read += r;
-            }
-            return new PacketFrame(type, payload, payloadLength);
-        } finally {
-            ArrayPool<byte>.Shared.Return(lenBuf);
+            read += r;
         }
+        return new PacketFrame(type, payload, payloadLength);
     }
 
     /// <summary>
@@ -163,7 +168,7 @@ public static class NetworkProtocol {
                 if (r <= 0) return null;
                 read += r;
             }
-            int payloadLength = BitConverter.ToInt32(lenBuf, 0);
+            int payloadLength = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(lenBuf);
             if (payloadLength <= 0 || payloadLength > MaxPacketSize) return null;
 
             byte[] payload = ArrayPool<byte>.Shared.Rent(payloadLength);

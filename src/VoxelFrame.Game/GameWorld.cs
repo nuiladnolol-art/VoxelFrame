@@ -28,11 +28,19 @@ public sealed partial class GameWorld : IDisposable {
     public readonly Dictionary<Vec3i, Container> Chests = new();
     public readonly HashSet<Vec3i> PlacedChests = new();
     public readonly HashSet<Vec3i> LootedStructureChests = new();
+
+    /// <summary>Размер сундука: 3×9 слотов — ровно столько, сколько рисует интерфейс.</summary>
+    public const int ChestCapacity = 27;
+
+    public static Container NewChest() => new(ChestCapacity);
     public Vec3i SpawnBlock;
 
     [ThreadStatic] public static bool SuppressNetworkSync;
     public static Action<Vec3i, ushort, byte, bool, Dimension>? OnNetworkBlockChangeBroadcast;
     public static Action<Vec3i, FurnaceData, Dimension>? OnFurnaceChangedBroadcast;
+
+    /// <summary>Кто установил сетевые хуки (клиент или сервер). Владелец снимает только свои хуки.</summary>
+    public static object? NetworkHookOwner;
 
     private readonly WorldGrid _grid = new();
     private readonly Dictionary<Vec3i, GameChunk> _chunks = new();
@@ -62,6 +70,35 @@ public sealed partial class GameWorld : IDisposable {
 
     private readonly HashSet<Vec3i> _modifiedChunks = new();
 
+    /// <summary>Чанки, которые уже проходили первичную генерацию (для одноразовых спавнов).</summary>
+    private readonly HashSet<Vec3i> _generated = new();
+
+    // Батчинг массовых правок: свет пересчитывается один раз на всю операцию.
+    private int _bulkDepth;
+    private readonly HashSet<GameChunk> _bulkLightDirty = new();
+
+    /// <summary>
+    /// Начинает массовую правку блоков (взрыв, тик жидкости, каскад обрушения).
+    /// Пока счётчик больше нуля, свет не пересчитывается на каждый воксель.
+    /// Обязательно парный вызов <see cref="EndBulkEdit"/>.
+    /// </summary>
+    public void BeginBulkEdit() => _bulkDepth++;
+
+    /// <summary>Завершает массовую правку и пересчитывает свет для затронутых чанков.</summary>
+    public void EndBulkEdit() {
+        if (_bulkDepth == 0) return;
+        if (--_bulkDepth > 0) return;
+        if (_bulkLightDirty.Count == 0) return;
+        foreach (var gc in _bulkLightDirty) {
+            if (!ReferenceEquals(TryGetChunk(gc.Coord), gc)) continue; // чанк успели выгрузить
+            LightEngine.RecomputeSun(gc, this);
+            LightEngine.RecomputeBlock(gc, this);
+            _meshDirty.Add(gc);
+            QueueLightRelight(gc);
+        }
+        _bulkLightDirty.Clear();
+    }
+
     /// <summary>
     /// Возвращает потокобезопасный снимок только тех чанков, в которых были изменены блоки или которые загружены из сохранения.
     /// </summary>
@@ -82,8 +119,8 @@ public sealed partial class GameWorld : IDisposable {
     public GameChunk GetOrCreateChunk(Vec3i cc) {
         if (_chunks.TryGetValue(cc, out var gc)) return gc;
         var core = _grid.GetOrCreateChunk(cc);
-        bool isNew = core.Version == 0;
-        if (isNew) {
+        bool needsGeneration = core.Version == 0;
+        if (needsGeneration) {
             if (Dimension == Dimension.Nether) {
                 Generator.GenerateNetherChunk(core, cc.X * Chunk.SizeX, cc.Y * Chunk.SizeY, cc.Z * Chunk.SizeZ);
             } else if (Dimension == Dimension.End) {
@@ -94,14 +131,18 @@ public sealed partial class GameWorld : IDisposable {
                 Generator.GenerateChunk(core);
             }
         }
+        // Побочные эффекты генерации (животные, кристаллы) — строго один раз за мир:
+        // после выгрузки чанк пересоздаётся, но заселять его заново нельзя,
+        // иначе поголовье и кристаллы дублируются.
+        bool firstGeneration = _generated.Add(cc);
         gc = new GameChunk(cc, core);
         gc.RecomputeAllSurfaces();
         _chunks.Add(cc, gc);
         ScanDecorations(gc);
-        if (isNew && Dimension == Dimension.End) {
+        if (firstGeneration && Dimension == Dimension.End) {
             ScanEndCrystals(gc);
         }
-        if (isNew && cc.Y == 1 && Dimension == Dimension.Overworld) {
+        if (firstGeneration && cc.Y == 1 && Dimension == Dimension.Overworld) {
             SpawnInitialChunkAnimals(gc);
         }
         // Новый чанк сам вычислит свой свет, засеявшись с границ соседей.
@@ -219,7 +260,7 @@ public sealed partial class GameWorld : IDisposable {
 
     public BlockType? GetBlockType(Vec3i w) {
         var v = GetVoxel(w);
-        return v.TypeId == 0 ? null : GameData.GetBlock(v.TypeId);
+        return v.TypeId == 0 || !GameData.TryGetBlock(v.TypeId, out var b) ? null : b;
     }
 
     public bool IsSolidAt(Vec3i w) {
@@ -243,7 +284,7 @@ public sealed partial class GameWorld : IDisposable {
 
     public bool IsOpaqueAt(Vec3i w) {
         var v = GetVoxel(w);
-        return v.TypeId != 0 && GameData.GetBlock(v.TypeId).IsOpaque;
+        return v.TypeId != 0 && GameData.TryGetBlock(v.TypeId, out var b) && b.IsOpaque;
     }
 
     public int GetColumnSurfaceHeight(int wx, int wz) {
@@ -285,7 +326,7 @@ public sealed partial class GameWorld : IDisposable {
         SetVoxelInternal(w, MakePlacedVoxel(block, facing));
         if (block.Id == GameData.BChest.Id) {
             PlacedChests.Add(w);
-            Chests[w] = new Container();
+            Chests[w] = NewChest();
         } else if (block.Id == GameData.BEnderCrystal.Id) {
             // Установленный игроком эндер-кристалл тоже становится взрывающейся сущностью
             TrySpawnCrystalEntityAt(w);
@@ -295,8 +336,7 @@ public sealed partial class GameWorld : IDisposable {
     public void SetBlock(Vec3i w, ushort typeId) {
         if (typeId == 0) {
             RemoveBlock(w);
-        } else {
-            var block = GameData.GetBlock(typeId);
+        } else if (GameData.TryGetBlock(typeId, out var block)) {
             PlacePlacedBlock(w, block);
         }
     }
@@ -327,10 +367,14 @@ public sealed partial class GameWorld : IDisposable {
     public event Action<Vector3, int>? OnDustSpawned;
     public event Action<Vector3, int>? OnCritSpawned;
     public event Action<Vector3, Color, int>? OnEatParticlesSpawned;
+    public event Action<Vector3, int>? OnSplashSpawned;
+    public event Action<Vector3, ushort, int>? OnBlockDustSpawned;
 
     public void SpawnDust(Vector3 pos, int count = 4) => OnDustSpawned?.Invoke(pos, count);
     public void SpawnCrit(Vector3 pos, int count = 14) => OnCritSpawned?.Invoke(pos, count);
     public void SpawnEatParticles(Vector3 pos, Color color, int count = 5) => OnEatParticlesSpawned?.Invoke(pos, color, count);
+    public void SpawnSplash(Vector3 pos, int count = 8) => OnSplashSpawned?.Invoke(pos, count);
+    public void SpawnBlockDust(Vector3 pos, ushort blockId, int count = 6) => OnBlockDustSpawned?.Invoke(pos, blockId, count);
 
     /// <summary>Событие луча лечения: частицы летят от точки A к точке B (визуализация регенерации босса).</summary>
     public event Action<Vector3, Vector3, int>? OnHealBeamSpawned;
@@ -441,7 +485,7 @@ public sealed partial class GameWorld : IDisposable {
 
     public Container GetOrCreateChest(Vec3i pos, GameSession? session = null) {
         if (Chests.TryGetValue(pos, out var inv)) return inv;
-        var newInv = new Container();
+        var newInv = NewChest();
 
         if (PlacedChests.Contains(pos) || LootedStructureChests.Contains(pos)) {
             // Сундук игрока или уже разграбленная структура: создается чистый пустой сундук без дюпа
@@ -457,41 +501,53 @@ public sealed partial class GameWorld : IDisposable {
         void Add(ItemDefinition def, int qty) { if (qty > 0 && s < slots.Length) newInv.InsertAt(slots[s++], new ItemEntry(GameData.NewItem(def), qty)); }
 
         if (Generator.GetBiome(pos.X, pos.Y, pos.Z) == BiomeType.Desert) {
-            Add(GameData.GoldIngotItem, rng.Next(2, 6));
-            Add(GameData.IronIngotItem, rng.Next(1, 5));
+            Add(GameData.GoldIngotItem, rng.Next(2, 7));
+            Add(GameData.IronIngotItem, rng.Next(2, 6));
             Add(GameData.BoneItem, rng.Next(3, 8));
             Add(GameData.GunpowderItem, rng.Next(2, 6));
             Add(GameData.SandItem, rng.Next(4, 12));
-            if (rng.NextDouble() < 0.40) Add(GameData.DiamondItem, rng.Next(1, 3));
-            if (rng.NextDouble() < 0.25) Add(GameData.GoldenAppleItem, 1);
-            if (rng.NextDouble() < 0.15) Add(GameData.MusicDiscItem, 1);
-            if (rng.NextDouble() < 0.15) Add(GameData.TotemItem, 1);
+            if (rng.NextDouble() < 0.45) Add(GameData.TNTItem, rng.Next(1, 3));
+            if (rng.NextDouble() < 0.45) Add(GameData.DiamondItem, rng.Next(1, 3));
+            if (rng.NextDouble() < 0.30) Add(GameData.GoldenAppleItem, 1);
+            if (rng.NextDouble() < 0.20) Add(GameData.MusicDiscItem, 1);
+            if (rng.NextDouble() < 0.20) Add(GameData.TotemItem, 1);
+            if (rng.NextDouble() < 0.25) Add(GameData.DesertArtifactItem, 1);
         } else if (Dimension == Dimension.Nether || pos.Y >= 50 && (pos.X * 37 + pos.Z * 19) % 29 == 0) {
-            Add(GameData.GoldIngotItem, rng.Next(1, 4));
+            Add(GameData.GoldIngotItem, rng.Next(2, 6));
             Add(GameData.FlintAndSteelItem, 1);
-            Add(GameData.ObsidianItem, rng.Next(1, 3));
-            Add(GameData.CoalItem, rng.Next(2, 6));
-            if (rng.NextDouble() < 0.35) Add(GameData.NetherQuartzItem, rng.Next(2, 6));
-            if (rng.NextDouble() < 0.20) Add(GameData.IronIngotItem, rng.Next(1, 3));
-            if (rng.NextDouble() < 0.10) Add(GameData.GoldenAppleItem, 1);
+            Add(GameData.ObsidianItem, rng.Next(2, 5));
+            Add(GameData.CoalItem, rng.Next(3, 8));
+            Add(GameData.NetherQuartzItem, rng.Next(3, 8));
+            if (rng.NextDouble() < 0.35) Add(GameData.IronIngotItem, rng.Next(2, 5));
+            if (rng.NextDouble() < 0.25) Add(GameData.BlazeRodItem, rng.Next(1, 3));
+            if (rng.NextDouble() < 0.20) Add(GameData.DiamondItem, rng.Next(1, 2));
+            if (rng.NextDouble() < 0.15) Add(GameData.GoldenAppleItem, 1);
+            if (rng.NextDouble() < 0.15) Add(GameData.NetherTotemItem, 1);
         } else if (pos.Y <= 38 && pos.Y >= 10) {
-            Add(GameData.IronIngotItem, rng.Next(1, 4));
-            Add(GameData.StringItem, rng.Next(2, 6));
+            Add(GameData.IronIngotItem, rng.Next(2, 6));
+            Add(GameData.StringItem, rng.Next(3, 8));
             Add(GameData.BoneItem, rng.Next(2, 7));
-            Add(GameData.GunpowderItem, rng.Next(1, 4));
-            Add(GameData.BreadItem, rng.Next(1, 3));
-            Add(GameData.TorchItem, rng.Next(4, 10));
-            if (rng.NextDouble() < 0.10) Add(GameData.MusicDiscItem, 1);
-            if (rng.NextDouble() < 0.06) Add(GameData.TotemItem, 1); // редкий тотем в глубоких сокровищницах
+            Add(GameData.GunpowderItem, rng.Next(2, 5));
+            Add(GameData.BreadItem, rng.Next(2, 4));
+            Add(GameData.TorchItem, rng.Next(6, 14));
+            Add(GameData.CoalItem, rng.Next(3, 8));
+            if (rng.NextDouble() < 0.30) Add(GameData.IronPickaxeItem, 1);
+            if (rng.NextDouble() < 0.25) Add(GameData.IronSwordItem, 1);
+            if (rng.NextDouble() < 0.15) Add(GameData.MusicDiscItem, 1);
+            if (rng.NextDouble() < 0.15) Add(GameData.GoldenAppleItem, 1);
+            if (rng.NextDouble() < 0.10) Add(GameData.TotemItem, 1);
         } else {
-            Add(GameData.BreadItem, rng.Next(2, 5));
+            Add(GameData.BreadItem, rng.Next(3, 6));
             Add(GameData.WheatSeedsItem, rng.Next(3, 8));
-            Add(GameData.AppleItem, rng.Next(1, 3));
-            Add(GameData.TorchItem, rng.Next(4, 10));
-            Add(GameData.PlankItem, rng.Next(3, 8));
-            if (rng.NextDouble() < 0.45) Add(GameData.CoalItem, rng.Next(1, 3));
-            if (rng.NextDouble() < 0.30) Add(GameData.StonePickaxeItem, 1);
-            if (rng.NextDouble() < 0.20) Add(GameData.IronIngotItem, rng.Next(1, 2));
+            Add(GameData.AppleItem, rng.Next(2, 5));
+            Add(GameData.TorchItem, rng.Next(6, 12));
+            Add(GameData.OakSaplingItem, rng.Next(2, 5));
+            if (rng.NextDouble() < 0.40) Add(GameData.CarrotItem, rng.Next(2, 5));
+            if (rng.NextDouble() < 0.40) Add(GameData.PotatoItem, rng.Next(2, 5));
+            if (rng.NextDouble() < 0.50) Add(GameData.CoalItem, rng.Next(2, 5));
+            if (rng.NextDouble() < 0.35) Add(GameData.IronIngotItem, rng.Next(1, 3));
+            if (rng.NextDouble() < 0.25) Add(GameData.StonePickaxeItem, 1);
+            if (rng.NextDouble() < 0.20) Add(GameData.LeatherChestplateItem, 1);
         }
 
         // Страж пустыни пробуждается при первом открытии сундука в пирамиде (Пустыня)
@@ -512,9 +568,14 @@ public sealed partial class GameWorld : IDisposable {
         return newInv;
     }
 
-    public static void CreateExplosion(Vector3 pos, float radius, float maxDamage, GameSession? session, bool breakBlocks = true) {
+    /// <summary>
+    /// Взрыв в конкретном мире. Мир передаётся явно: раньше метод всегда бил по
+    /// <c>session.World</c>, из-за чего взрыв клиента в Нижнем мире разрушал блоки
+    /// Обычного мира по тем же координатам.
+    /// </summary>
+    public static void CreateExplosion(GameWorld world, Vector3 pos, float radius, float maxDamage, GameSession? session, bool breakBlocks = true) {
         SoundSystem.PlayExplosion();
-        if (session != null) {
+        if (session != null && ReferenceEquals(session.World, world)) {
             float dist = Vector3.Distance(session.Player.Position, pos);
             if (dist < radius * 1.5f) {
                 float dmg = (1.0f - dist / (radius * 1.5f)) * maxDamage;
@@ -523,26 +584,33 @@ public sealed partial class GameWorld : IDisposable {
             }
         }
 
-        if (session != null && breakBlocks) {
+        if (breakBlocks) {
             var center = new Vec3i((int)MathF.Floor(pos.X), (int)MathF.Floor(pos.Y), (int)MathF.Floor(pos.Z));
             int r = (int)MathF.Ceiling(radius);
             var rng = new Random();
-            for (int dx = -r; dx <= r; dx++) {
-                for (int dy = -r; dy <= r; dy++) {
-                    for (int dz = -r; dz <= r; dz++) {
-                        if (dx * dx + dy * dy + dz * dz <= radius * radius) {
-                            var target = center + new Vec3i(dx, dy, dz);
-                            var vox = session.World.GetVoxel(target);
-                            if (vox.TypeId != 0 && vox.TypeId != GameData.BBedrock.Id && vox.TypeId != GameData.BObsidian.Id) {
-                                var b = GameData.GetBlock(vox.TypeId);
-                                session.World.RemoveBlock(target);
-                                if (b.DropItemId != 0 && rng.NextDouble() < 0.35) {
-                                    session.World.SpawnPickup(b.DropItemId, 1, target);
+            // Сотни ударов по блокам за кадр: свет считаем один раз в конце,
+            // иначе взрыв замораживал игру на секунды.
+            world.BeginBulkEdit();
+            try {
+                for (int dx = -r; dx <= r; dx++) {
+                    for (int dy = -r; dy <= r; dy++) {
+                        for (int dz = -r; dz <= r; dz++) {
+                            if (dx * dx + dy * dy + dz * dz <= radius * radius) {
+                                var target = center + new Vec3i(dx, dy, dz);
+                                var vox = world.GetVoxel(target);
+                                if (vox.TypeId != 0 && vox.TypeId != GameData.BBedrock.Id && vox.TypeId != GameData.BObsidian.Id) {
+                                    var b = GameData.GetBlock(vox.TypeId);
+                                    world.RemoveBlock(target);
+                                    if (b.DropItemId != 0 && rng.NextDouble() < 0.35) {
+                                        world.SpawnPickup(b.DropItemId, 1, target);
+                                    }
                                 }
                             }
                         }
                     }
                 }
+            } finally {
+                world.EndBulkEdit();
             }
         }
     }
@@ -566,8 +634,8 @@ public sealed partial class GameWorld : IDisposable {
                         if (belowVox.TypeId != 0 && belowVox.TypeId != GameData.BLava.Id && belowVox.TypeId != GameData.BWater.Id) {
                             var belowBlock = GameData.GetBlock(belowVox.TypeId);
                             if (belowBlock.IsSolid) {
-                                bool footFree = footVox.TypeId == 0 || (GameData.GetBlock(footVox.TypeId) is { IsSolid: false } fb && fb.Id != GameData.BLava.Id);
-                                bool headFree = headVox.TypeId == 0 || (GameData.GetBlock(headVox.TypeId) is { IsSolid: false } hb && hb.Id != GameData.BLava.Id);
+                                bool footFree = footVox.TypeId == 0 || (GameData.GetBlock(footVox.TypeId) is { IsSolid: false } fb && fb.Id != GameData.BLava.Id && fb.Id != GameData.BWater.Id);
+                                bool headFree = headVox.TypeId == 0 || (GameData.GetBlock(headVox.TypeId) is { IsSolid: false } hb && hb.Id != GameData.BLava.Id && hb.Id != GameData.BWater.Id);
                                 if (footFree && headFree) {
                                     // Центр хитбокса игрока (HalfExtents.Y = 0.9f) над поверхностью блока
                                     return new Vector3(wx + 0.5f, wy + 0.95f, wz + 0.5f);
@@ -585,18 +653,21 @@ public sealed partial class GameWorld : IDisposable {
     /// <summary>Ближайшая к точке крепость Энда (для Ока Эндера).</summary>
     public Vector3? FindNearestEndStronghold(Vector3 from) => Generator.FindNearestEndStronghold(from);
 
-    /// <summary>Загрузка чанка из сохранения: типы + частичные объёмы содержимого + маски ориентации/слоев.</summary>
-    public void LoadChunk(Vec3i cc, ushort[] types, Dictionary<int, byte>? masks = null) {
+    /// <summary>Загрузка чанка из сохранения или сети: типы + частичные объёмы содержимого + маски ориентации/слоев.</summary>
+    public void LoadChunk(Vec3i cc, ushort[] types, Dictionary<int, byte>? masks = null, bool fromNetwork = false) {
         var core = _grid.GetOrCreateChunk(cc);
+        // Заменяемый GameChunk мог держать GPU-меши — освобождаем до подмены.
+        if (_chunks.TryGetValue(cc, out var replaced)) replaced.UnloadMesh();
         for (int i = 0; i < types.Length; i++) {
-            if (types[i] == 0) {
+            // Неизвестный id (битый сейв или пакет от чужой версии) — оставляем воздух,
+            // иначе GameData.GetBlock бросит KeyNotFoundException и уронит клиент.
+            if (types[i] == 0 || !GameData.TryGetBlock(types[i], out var block)) {
                 if (core.Get(i).TypeId != 0) {
                     var air = VoxelData.Air;
                     core.SetVoxel(i, in air);
                 }
                 continue;
             }
-            var block = GameData.GetBlock(types[i]);
             byte mask = masks != null && masks.TryGetValue(i, out byte m) ? m : (byte)0;
             var pv = MakePlacedVoxel(block, mask);
             core.SetVoxel(i, in pv);
@@ -604,7 +675,8 @@ public sealed partial class GameWorld : IDisposable {
         var gc = new GameChunk(cc, core);
         gc.RecomputeAllSurfaces();
         _chunks[cc] = gc;
-        _modifiedChunks.Add(cc);
+        if (!fromNetwork) _modifiedChunks.Add(cc);
+        _generated.Add(cc);   // пришёл из сейва/сети — генератор его не трогает
         ScanDecorations(gc);
         if (Dimension == Dimension.End) ScanEndCrystals(gc);
         // Как в GetOrCreateChunk: свет считаем только для нового чанка,
@@ -627,7 +699,7 @@ public sealed partial class GameWorld : IDisposable {
     private void SetVoxelInternal(Vec3i w, in VoxelData voxel) {
         var oldVoxel = GetVoxel(w);
         GetOrCreateChunk(Chunk.CoordOf(w));
-        _grid.SetVoxel(w, in voxel);   // событие VoxelChanged → уведомление слоя освещения/мешей
+        _grid.SetVoxel(w, in voxel);   // единый путь записи вокселя
         OnBlockChanged(w, in voxel);
 
         if (!SuppressNetworkSync) {
@@ -701,8 +773,17 @@ public sealed partial class GameWorld : IDisposable {
         return false;
     }
 
-    /// <summary>Реестр декора (факелы, посевы, трава) для рендера без сканирования всех вокселей.</summary>
-    public IEnumerable<Vec3i> DecorPositions => _decor.Values.SelectMany(v => v);
+    /// <summary>
+    /// Реестр декора (факелы, посевы, трава) для рендера без сканирования всех вокселей.
+    /// Без LINQ: перечисляется каждый кадр.
+    /// </summary>
+    public IEnumerable<Vec3i> DecorPositions {
+        get {
+            foreach (var list in _decor.Values) {
+                for (int i = 0; i < list.Count; i++) yield return list[i];
+            }
+        }
+    }
 
     private static bool IsDecorVoxel(ushort t, byte mask) =>
         t == GameData.BTorch.Id || t == GameData.BWheatCrop.Id || t == GameData.BCarrotCrop.Id ||
@@ -741,20 +822,38 @@ public sealed partial class GameWorld : IDisposable {
         if (gc == null) return;
         _modifiedChunks.Add(cc);
         UpdateDecor(cc, w, in voxel);
-        int lx = w.X & 31, lz = w.Z & 31;
+        int lx = w.X & 31, ly = w.Y & 31, lz = w.Z & 31;
         gc.RecomputeSurfaceColumn(lx, lz);
 
-        LightEngine.RecomputeSun(gc, this);
-        LightEngine.RecomputeBlock(gc, this);
-        _meshDirty.Add(gc);
-
-        // Пересчет солнечного света для нижележащих чанков по вертикали, если блок изменил тень
-        for (int dy = 1; dy <= 2; dy++) {
-            var lowerCoord = new Vec3i(cc.X, cc.Y - dy, cc.Z);
-            if (_chunks.TryGetValue(lowerCoord, out var lowerGc)) {
-                LightEngine.RecomputeSun(lowerGc, this);
-                _meshDirty.Add(lowerGc);
+        if (_bulkDepth > 0) {
+            // Массовая правка (взрыв, тик жидкости): свет пересчитываем один раз
+            // в EndBulkEdit, а не на каждый воксель — иначе кадр вставал на секунды.
+            _bulkLightDirty.Add(gc);
+            for (int dy = 1; dy <= 2; dy++) {
+                if (_chunks.TryGetValue(new Vec3i(cc.X, cc.Y - dy, cc.Z), out var below)) _bulkLightDirty.Add(below);
             }
+            _meshDirty.Add(gc);
+        } else {
+            LightEngine.RecomputeSun(gc, this);
+            LightEngine.RecomputeBlock(gc, this);
+            _meshDirty.Add(gc);
+
+            // Пересчет солнечного света для нижележащих чанков по вертикали, если блок изменил тень
+            for (int dy = 1; dy <= 2; dy++) {
+                var lowerCoord = new Vec3i(cc.X, cc.Y - dy, cc.Z);
+                if (_chunks.TryGetValue(lowerCoord, out var lowerGc)) {
+                    LightEngine.RecomputeSun(lowerGc, this);
+                    _meshDirty.Add(lowerGc);
+                }
+            }
+
+            // Границы: если блок на краю чанка, пересчитываем блочный свет соседа!
+            if (lx == 0 && _chunks.TryGetValue(new Vec3i(cc.X - 1, cc.Y, cc.Z), out var nXm)) QueueLightRelight(nXm);
+            if (lx == 31 && _chunks.TryGetValue(new Vec3i(cc.X + 1, cc.Y, cc.Z), out var nXp)) QueueLightRelight(nXp);
+            if (ly == 0 && _chunks.TryGetValue(new Vec3i(cc.X, cc.Y - 1, cc.Z), out var nYm)) QueueLightRelight(nYm);
+            if (ly == 31 && _chunks.TryGetValue(new Vec3i(cc.X, cc.Y + 1, cc.Z), out var nYp)) QueueLightRelight(nYp);
+            if (lz == 0 && _chunks.TryGetValue(new Vec3i(cc.X, cc.Y, cc.Z - 1), out var nZm)) QueueLightRelight(nZm);
+            if (lz == 31 && _chunks.TryGetValue(new Vec3i(cc.X, cc.Y, cc.Z + 1), out var nZp)) QueueLightRelight(nZp);
         }
 
         // Помечаем соседние чанки грязными для мгновенного обновления видимых граней
@@ -773,8 +872,16 @@ public sealed partial class GameWorld : IDisposable {
     }
 
     public void MarkLightDirty(Vec3i w) {
-        var gc = TryGetChunk(Chunk.CoordOf(w));
+        var cc = Chunk.CoordOf(w);
+        var gc = TryGetChunk(cc);
         if (gc != null) QueueLightRelight(gc);
+        int lx = w.X & 31, ly = w.Y & 31, lz = w.Z & 31;
+        if (lx == 0 && _chunks.TryGetValue(new Vec3i(cc.X - 1, cc.Y, cc.Z), out var nXm)) QueueLightRelight(nXm);
+        if (lx == 31 && _chunks.TryGetValue(new Vec3i(cc.X + 1, cc.Y, cc.Z), out var nXp)) QueueLightRelight(nXp);
+        if (ly == 0 && _chunks.TryGetValue(new Vec3i(cc.X, cc.Y - 1, cc.Z), out var nYm)) QueueLightRelight(nYm);
+        if (ly == 31 && _chunks.TryGetValue(new Vec3i(cc.X, cc.Y + 1, cc.Z), out var nYp)) QueueLightRelight(nYp);
+        if (lz == 0 && _chunks.TryGetValue(new Vec3i(cc.X, cc.Y, cc.Z - 1), out var nZm)) QueueLightRelight(nZm);
+        if (lz == 31 && _chunks.TryGetValue(new Vec3i(cc.X, cc.Y, cc.Z + 1), out var nZp)) QueueLightRelight(nZp);
     }
 
     /// <summary>Ставит чанк в очередь пересчёта света (без дублей в наборе).</summary>
@@ -922,17 +1029,6 @@ public sealed partial class GameWorld : IDisposable {
             LightEngine.RecomputeBlock(gc, this);
             _meshDirty.Add(gc);
         }
-
-        // Сходимость швов на границах.
-        foreach (var gc in _lightBatch) {
-            foreach (var off in NeighborOffsets) {
-                var nCoord = new Vec3i(gc.Coord.X + off.X, gc.Coord.Y + off.Y, gc.Coord.Z + off.Z);
-                if (_chunks.TryGetValue(nCoord, out var ngc) && _lightDirty.Contains(ngc)) {
-                    QueueLightRelight(gc);
-                    break;
-                }
-            }
-        }
     }
 
     public void TickGrassSpread(float dt) {
@@ -1024,7 +1120,21 @@ public sealed partial class GameWorld : IDisposable {
         }
     }
 
-    public const float CropGrowthInterval = 30f;
+    public const float CropGrowthInterval = 1.5f;
+
+    /// <summary>
+    /// Проверяет наличие воды в горизонтальном радиусе от указанной клетки (увлажнение грядок).
+    /// </summary>
+    public bool HasWaterNearby(Vec3i pos, int radius) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                var check = new Vec3i(pos.X + dx, pos.Y - 1, pos.Z + dz);
+                if (GetVoxel(check).TypeId == GameData.BWater.Id) return true;
+                if (GetVoxel(check + new Vec3i(0, 1, 0)).TypeId == GameData.BWater.Id) return true;
+            }
+        }
+        return false;
+    }
 
     /// <summary>
     /// Выращивает полноценное дерево дуба на месте саженца.
@@ -1092,14 +1202,22 @@ public sealed partial class GameWorld : IDisposable {
                     continue;
                 }
 
-                // Рост посева: переход на следующую стадию (0..3)
-                int currentStage = vox.SubGridLayerMask; // 0..3
-                if (currentStage < 3) {
-                    var blk = vox.TypeId == GameData.BWheatCrop.Id ? GameData.BWheatCrop :
-                              vox.TypeId == GameData.BCarrotCrop.Id ? GameData.BCarrotCrop : GameData.BPotatoCrop;
-                    var newVox = MakePlacedVoxel(blk);
-                    newVox.SubGridLayerMask = (byte)(currentStage + 1);
-                    SetVoxelRaw(pos, in newVox);
+                // Динамический стохастический рост: для роста требуется свет >= 8
+                byte light = Math.Max(GetSunLight(pos), GetBlockLight(pos));
+                if (light < 8) continue;
+
+                // Наличие воды ускоряет рост в 2.5 раза
+                bool hydrated = HasWaterNearby(pos, 4);
+                double growthChance = hydrated ? 0.08 : 0.03; // ~18с на стадию с водой, ~50с без воды
+                if (_random.NextDouble() < growthChance) {
+                    int currentStage = vox.SubGridLayerMask; // 0..3
+                    if (currentStage < 3) {
+                        var blk = vox.TypeId == GameData.BWheatCrop.Id ? GameData.BWheatCrop :
+                                  vox.TypeId == GameData.BCarrotCrop.Id ? GameData.BCarrotCrop : GameData.BPotatoCrop;
+                        var newVox = MakePlacedVoxel(blk);
+                        newVox.SubGridLayerMask = (byte)(currentStage + 1);
+                        SetVoxelRaw(pos, in newVox);
+                    }
                 }
             } else if (vox.TypeId == GameData.BSapling.Id) {
                 if (belowVox.TypeId != GameData.BGrass.Id && belowVox.TypeId != GameData.BDirt.Id) {
@@ -1107,8 +1225,9 @@ public sealed partial class GameWorld : IDisposable {
                     SpawnPickup(GameData.OakSaplingItem.Id, 1, pos);
                     continue;
                 }
-                // Саженец имеет шанс вырасти в дерево со временем (~30% за такт)
-                if (_random.NextDouble() < 0.30) {
+                // Динамический рост каждого саженца при освещении (~3.5% за тик 1.5с ≈ 40-45с)
+                byte saplingLight = Math.Max(GetSunLight(pos), GetBlockLight(pos));
+                if (saplingLight >= 8 && _random.NextDouble() < 0.035) {
                     GrowTree(pos);
                 }
             }
@@ -1215,6 +1334,9 @@ public sealed partial class GameWorld : IDisposable {
 
     private void PushEntities(ref Vector3 posA, ref Vector3 velA, float hxA, float hyA, float hzA,
                               ref Vector3 posB, ref Vector3 velB, float hxB, float hyB, float hzB) {
+        if (!float.IsFinite(posA.X) || !float.IsFinite(posA.Y) || !float.IsFinite(posA.Z) ||
+            !float.IsFinite(posB.X) || !float.IsFinite(posB.Y) || !float.IsFinite(posB.Z)) return;
+
         // Проверка по высоте: сущности не должны расталкиваться сквозь перекрытия (пол/потолок/пещеры)
         float dy = MathF.Abs(posA.Y - posB.Y);
         float minDistY = hyA + hyB;
@@ -1227,7 +1349,7 @@ public sealed partial class GameWorld : IDisposable {
         float distSq = dx * dx + dz * dz;
         float minDist = MathF.Max(minDistX, minDistZ);
 
-        if (distSq >= minDist * minDist || distSq < 0.00001f) return;
+        if (!float.IsFinite(distSq) || distSq >= minDist * minDist || distSq < 0.00001f) return;
 
         float dist = MathF.Sqrt(distSq);
         float overlap = (minDist - dist) * 0.5f;
@@ -1372,7 +1494,7 @@ public sealed partial class GameWorld : IDisposable {
     }
 
     /// <summary>Пикапы: покачивание, притяжение к игроку, сбор в инвентарь.</summary>
-    public void TickPickups(float dt, Player player) {
+    public void TickPickups(float dt, Player? player) {
         for (int i = Pickups.Count - 1; i >= 0; i--) {
             var p = Pickups[i];
             if (p.Quantity <= 0) { Pickups.RemoveAt(i); continue; }

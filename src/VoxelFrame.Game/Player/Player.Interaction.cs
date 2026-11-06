@@ -20,8 +20,7 @@ public sealed partial class Player {
         }
         world.RemoveBlock(pos);
         SoundSystem.PlayDig(block.Id);
-        GameClient.Active?.SendBlockChange(pos.X, pos.Y, pos.Z, 0, 0, isBreak: true, (byte)session.World.Dimension);
-        GameServer.Active?.BroadcastHostBlockChange(pos.X, pos.Y, pos.Z, 0, 0, isBreak: true);
+        // Сеть уже уведомлена хуком OnNetworkBlockChangeBroadcast из SetVoxelInternal.
 
         // Проверка песка/гравия выше — каскадное падение от гравитации!
         var curAbove = pos + new Vec3i(0, 1, 0);
@@ -110,6 +109,7 @@ public sealed partial class Player {
 
     public bool TryConsumeSelected(ItemDefinition item, int qty = 1, GameSession? session = null) {
         if (session != null && session.GameMode == GameMode.Creative) return true;
+        if (SelectedSlot < 0 || SelectedSlot >= 9) return false;
         var entry = Inventory.Slots[SelectedSlot];
         if (entry != null && entry.Value.Item.Definition == item && qty > 0) {
             int currentQty = entry.Value.Quantity;
@@ -170,10 +170,6 @@ public sealed partial class Player {
                 world.PlacePlacedBlock(cell, GameData.BDoorLower, facing);
                 world.PlacePlacedBlock(above, GameData.BDoorUpper, facing);
                 SoundSystem.PlayPlace();
-                GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, GameData.BDoorLower.Id, facing, isBreak: false, (byte)session.World.Dimension);
-                GameClient.Active?.SendBlockChange(above.X, above.Y, above.Z, GameData.BDoorUpper.Id, facing, isBreak: false, (byte)session.World.Dimension);
-                GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, GameData.BDoorLower.Id, facing, isBreak: false);
-                GameServer.Active?.BroadcastHostBlockChange(above.X, above.Y, above.Z, GameData.BDoorUpper.Id, facing, isBreak: false);
                 return true;
             }
             return false;
@@ -199,10 +195,6 @@ public sealed partial class Player {
                 world.PlacePlacedBlock(cell, GameData.BBed, facing);
                 world.PlacePlacedBlock(headCell, GameData.BBedHead, facing);
                 SoundSystem.PlayPlace();
-                GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, GameData.BBed.Id, facing, isBreak: false, (byte)session.World.Dimension);
-                GameClient.Active?.SendBlockChange(headCell.X, headCell.Y, headCell.Z, GameData.BBedHead.Id, facing, isBreak: false, (byte)session.World.Dimension);
-                GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, GameData.BBed.Id, facing, isBreak: false);
-                GameServer.Active?.BroadcastHostBlockChange(headCell.X, headCell.Y, headCell.Z, GameData.BBedHead.Id, facing, isBreak: false);
                 return true;
             }
             return false;
@@ -219,8 +211,6 @@ public sealed partial class Player {
             if (TryConsumeSelected(item, 1, session)) {
                 world.PlacePlacedBlock(cell, block, torchFacing);
                 SoundSystem.PlayPlace();
-                GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, block.Id, torchFacing, isBreak: false, (byte)session.World.Dimension);
-                GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, block.Id, torchFacing, isBreak: false);
                 return true;
             }
             return false;
@@ -230,10 +220,11 @@ public sealed partial class Player {
             var below = cell + new Vec3i(0, -1, 0);
             if (!world.IsSolidAt(below)) {
                 if (TryConsumeSelected(item, 1, session)) {
+                    // Блок не ставится в мир сразу — летит FallingBlock, а точку приземления
+                    // разошлёт сам хук из PlacePlacedBlock. Слать блок в исходную клетку нельзя:
+                    // у остальных игроков появлялся бы лишний висящий блок.
                     world.FallingBlocks.Add(new FallingBlock(block, new Vector3(cell.X + 0.5f, cell.Y + 0.5f, cell.Z + 0.5f)));
                     SoundSystem.PlayPlace();
-                    GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, block.Id, facing, isBreak: false, (byte)session.World.Dimension);
-                    GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, block.Id, facing, isBreak: false);
                     return true;
                 }
                 return false;
@@ -245,8 +236,6 @@ public sealed partial class Player {
         if (TryConsumeSelected(item, 1, session)) {
             world.PlacePlacedBlock(cell, block, facing);
             SoundSystem.PlayPlace();
-            GameClient.Active?.SendBlockChange(cell.X, cell.Y, cell.Z, block.Id, facing, isBreak: false, (byte)session.World.Dimension);
-            GameServer.Active?.BroadcastHostBlockChange(cell.X, cell.Y, cell.Z, block.Id, facing, isBreak: false);
             return true;
         }
         return false;
@@ -311,8 +300,6 @@ public sealed partial class Player {
                             int iz = axis == 1 ? minZ + innerStep : minZ;
                             var p = new Vec3i(ix, minY + y, iz);
                             world.PlacePlacedBlock(p, GameData.BNetherPortal);
-                            GameClient.Active?.SendBlockChange(p.X, p.Y, p.Z, GameData.BNetherPortal.Id, 0, false, (byte)world.Dimension);
-                            GameServer.Active?.BroadcastHostBlockChange(p.X, p.Y, p.Z, GameData.BNetherPortal.Id, 0, false);
                         }
                     }
                     return true;
@@ -365,5 +352,41 @@ public sealed partial class Player {
             }
         }
         return true;
+    }
+
+    /// <summary>Выбор блока в прицеле на СКМ (Pick Block).</summary>
+    public void HandlePickBlock(GameSession session) {
+        if (!session.HasTarget) return;
+        var vox = session.World.GetVoxel(session.TargetBlock);
+        if (vox.TypeId == 0) return;
+        if (!GameData.TryGetItemByBlock(vox.TypeId, out ushort itemId)) return;
+        if (!GameData.Items.TryGetValue(itemId, out var itemDef)) return;
+
+        // 1. Ищем в хотбаре (слоты 0..8)
+        for (int i = 0; i < 9; i++) {
+            if (Inventory.Slots[i] is { } slot && slot.Item.Definition.Id == itemId) {
+                SelectedSlot = i;
+                SoundSystem.PlayPop();
+                return;
+            }
+        }
+
+        // 2. Ищем в основном инвентаре (слоты 9..35) и свапаем в текущий слот хотбара
+        for (int i = 9; i < 36; i++) {
+            if (Inventory.Slots[i] is { } slot && slot.Item.Definition.Id == itemId) {
+                var curHotbar = Inventory.Slots[SelectedSlot];
+                Inventory.Slots[SelectedSlot] = slot;
+                Inventory.Slots[i] = curHotbar;
+                SoundSystem.PlayPop();
+                return;
+            }
+        }
+
+        // 3. В Творческом режиме — выдаем предмет прямо в руку
+        if (session.GameMode == GameMode.Creative) {
+            var itemInst = GameData.NewItem(itemDef);
+            Inventory.Slots[SelectedSlot] = new ItemEntry(itemInst, itemDef.MaxStack);
+            SoundSystem.PlayPop();
+        }
     }
 }

@@ -59,6 +59,7 @@ public class InstallerForm : Form {
         public string Name = "";
         public string GameZipUrl = "";
         public string InstallerUrl = "";
+        public string SumsUrl = "";
     }
 
     /// <summary>Версия установщика (берётся из csproj: &lt;Version&gt;).</summary>
@@ -335,7 +336,9 @@ public class InstallerForm : Form {
                     foreach (var asset in assets.EnumerateArray()) {
                         string an = asset.TryGetProperty("name", out var n2) ? n2.GetString() ?? "" : "";
                         string au = asset.TryGetProperty("browser_download_url", out var u2) ? u2.GetString() ?? "" : "";
-                        if (an.StartsWith("VoxelFrame-", StringComparison.OrdinalIgnoreCase) && an.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                        if (an.Equals("SHA256SUMS.txt", StringComparison.OrdinalIgnoreCase))
+                            info.SumsUrl = au;
+                        else if (an.StartsWith("VoxelFrame-", StringComparison.OrdinalIgnoreCase) && an.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                             info.GameZipUrl = au;
                         else if (an.StartsWith("VoxelFrame-Setup", StringComparison.OrdinalIgnoreCase) && an.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                             info.InstallerUrl = au;
@@ -384,7 +387,7 @@ public class InstallerForm : Form {
     }
 
     /// <summary>Скачивает и распаковывает игру в целевую папку; возвращает успех.</summary>
-    private async Task<bool> DownloadAndInstallAsync(string url, string targetDir) {
+    private async Task<bool> DownloadAndInstallAsync(string url, string targetDir, string sumsUrl = "") {
         try {
             string tempZip = Path.Combine(Path.GetTempPath(), "VoxelFrame_Install.zip");
             var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
@@ -406,12 +409,49 @@ public class InstallerForm : Form {
             }
             lblStatus.Invoke(() => lblStatus.Text = "Распаковка загруженных файлов...");
             progressBar.Invoke(() => progressBar.Value = 85);
+
+            // Проверяем хеш скачанного архива, если релиз его публикует.
+            if (!string.IsNullOrEmpty(sumsUrl)) {
+                string? expected = await FetchExpectedHashAsync(sumsUrl, Path.GetFileName(new Uri(url).LocalPath));
+                if (expected == null) {
+                    lblStatus.Invoke(() => lblStatus.Text = "В SHA256SUMS.txt нет хеша для архива — установка отменена.");
+                    try { File.Delete(tempZip); } catch { }
+                    return false;
+                }
+                using (var stream = File.OpenRead(tempZip))
+                using (var sha = System.Security.Cryptography.SHA256.Create()) {
+                    string actual = Convert.ToHexString(sha.ComputeHash(stream)).ToLowerInvariant();
+                    if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase)) {
+                        lblStatus.Invoke(() => lblStatus.Text = "Контрольная сумма не совпала — файл повреждён или подменён.");
+                        try { File.Delete(tempZip); } catch { }
+                        return false;
+                    }
+                }
+            }
+
             ZipFile.ExtractToDirectory(tempZip, targetDir, true);
             try { File.Delete(tempZip); } catch { }
             return true;
         } catch {
             return false;
         }
+    }
+
+    /// <summary>Ищет хеш файла в SHA256SUMS.txt (формат «hash  имя»).</summary>
+    private async Task<string?> FetchExpectedHashAsync(string sumsUrl, string fileName) {
+        try {
+            string text = await _http.GetStringAsync(sumsUrl);
+            foreach (var rawLine in text.Split('\n')) {
+                var line = rawLine.Trim();
+                if (line.Length == 0) continue;
+                var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 2) continue;
+                if (parts[^1].TrimStart('*').Equals(fileName, StringComparison.OrdinalIgnoreCase)) {
+                    return parts[0].Trim().ToLowerInvariant();
+                }
+            }
+        } catch { }
+        return null;
     }
 
     /// <summary>Скачивает новую версию установщика и подменяет текущий exe (самообновление).</summary>
@@ -446,6 +486,19 @@ public class InstallerForm : Form {
 
     private async Task StartInstallationAsync() {
         string targetDir = txtPath.Text.Trim();
+        string fullPath = Path.GetFullPath(string.IsNullOrEmpty(targetDir) ? "." : targetDir);
+        string root = Path.GetPathRoot(fullPath) ?? "";
+        string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string windowsDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+
+        if (string.Equals(fullPath.TrimEnd('\\', '/'), root.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(fullPath.TrimEnd('\\', '/'), userProfile.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(fullPath.TrimEnd('\\', '/'), windowsDir.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(fullPath.TrimEnd('\\', '/'), programFiles.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)) {
+            MessageBox.Show("Нельзя устанавливать игру напрямую в системную или корневую папку. Укажите отдельную подпапку.", "Недопустимый путь", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
         if (string.IsNullOrEmpty(targetDir)) {
             MessageBox.Show("Пожалуйста, укажите папку для установки.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
@@ -475,14 +528,17 @@ public class InstallerForm : Form {
                 if (!string.IsNullOrEmpty(githubUrl)) {
                     lblStatus.Invoke(() => lblStatus.Text = $"Скачивание {githubTag} с GitHub...");
                     progressBar.Invoke(() => progressBar.Value = 15);
-                    installed = await DownloadAndInstallAsync(githubUrl, targetDir);
+                    string sumsUrl = (_releases.Count > 0 && cmbVersion.SelectedIndex >= 0)
+                        ? _releases[cmbVersion.SelectedIndex].SumsUrl : "";
+                    installed = await DownloadAndInstallAsync(githubUrl, targetDir, sumsUrl);
                 }
 
-                // 1. Попытка извлечь встроенный payload.zip (если GitHub недоступен)
+                // 1. Попытка извлечь встроенный payload.zip (только если GitHub недоступен:
+                // иначе встроенная (старая) сборка затирала только что скачанную выбранную версию)
                 var assembly = Assembly.GetExecutingAssembly();
                 string[] resNames = assembly.GetManifestResourceNames();
                 string? payloadRes = Array.Find(resNames, r => r.EndsWith("payload.zip", StringComparison.OrdinalIgnoreCase));
-                if (payloadRes != null) {
+                if (!installed && payloadRes != null) {
                     lblStatus.Invoke(() => lblStatus.Text = "Распаковка встроенных файлов...");
                     using var stream = assembly.GetManifestResourceStream(payloadRes);
                     if (stream != null) {
@@ -662,7 +718,11 @@ public class InstallerForm : Form {
             del "%userprofile%\Desktop\VoxelFrame Launcher.lnk" 2>nul
             rmdir /s /q "%appdata%\Microsoft\Windows\Start Menu\Programs\VoxelFrame" 2>nul
             cd /d "%temp%"
-            rmdir /s /q "{cleanTargetDir}" 2>nul
+            if exist "{cleanTargetDir}\VoxelFrame.Launcher.exe" (
+                rmdir /s /q "{cleanTargetDir}" 2>nul
+            ) else if exist "{cleanTargetDir}\VoxelFrame.Game.exe" (
+                rmdir /s /q "{cleanTargetDir}" 2>nul
+            )
             echo VoxelFrame успешно удален.
             pause
             """;

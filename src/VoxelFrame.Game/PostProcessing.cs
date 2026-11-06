@@ -21,6 +21,8 @@ public static class PostProcessing {
     private static int _vignetteStrengthLoc = -1;
     private static int _goldenLoc = -1;
     private static int _bloomLoc = -1;
+    private static int _underwaterLoc = -1;
+    private static int _underlavaLoc = -1;
 
     private static GameSession? _session;
     private static bool _inScene;
@@ -36,6 +38,8 @@ public static class PostProcessing {
             _vignetteStrengthLoc = Raylib.GetShaderLocation(_shader, "vignetteStrength");
             _goldenLoc = Raylib.GetShaderLocation(_shader, "golden");
             _bloomLoc = Raylib.GetShaderLocation(_shader, "bloom");
+            _underwaterLoc = Raylib.GetShaderLocation(_shader, "underwater");
+            _underlavaLoc = Raylib.GetShaderLocation(_shader, "underlava");
             _ready = true;
         } catch {
             _failed = true;
@@ -80,6 +84,20 @@ public static class PostProcessing {
         if (_goldenLoc != -1) Raylib.SetShaderValue(_shader, _goldenLoc, golden, ShaderUniformDataType.Float);
         if (_bloomLoc != -1) Raylib.SetShaderValue(_shader, _bloomLoc, SaveSystem.PostFxBloom ? 1f : 0f, ShaderUniformDataType.Float);
 
+        float underwater = 0f;
+        float underlava = 0f;
+        if (_session?.Player != null && _session.World != null) {
+            var eyeCell = new VoxelFrame.Core.Vec3i(
+                (int)MathF.Floor(_session.Player.Eye.X),
+                (int)MathF.Floor(_session.Player.Eye.Y),
+                (int)MathF.Floor(_session.Player.Eye.Z));
+            var eyeVox = _session.World.GetVoxel(eyeCell);
+            if (eyeVox.TypeId == GameData.BWater.Id) underwater = 1f;
+            else if (eyeVox.TypeId == GameData.BLava.Id) underlava = 1f;
+        }
+        if (_underwaterLoc != -1) Raylib.SetShaderValue(_shader, _underwaterLoc, underwater, ShaderUniformDataType.Float);
+        if (_underlavaLoc != -1) Raylib.SetShaderValue(_shader, _underlavaLoc, underlava, ShaderUniformDataType.Float);
+
         Raylib.BeginShaderMode(_shader);
         Raylib.DrawTextureRec(_rt.Texture, src, Vector2.Zero, Color.White);
         Raylib.EndShaderMode();
@@ -102,6 +120,15 @@ public static class PostProcessing {
             if (_rt.Texture.Id != 0) Raylib.UnloadRenderTexture(_rt);
             _ready = false;
         }
+        // Статическая ссылка на сессию держала в памяти весь мир (чанки + меши)
+        // после выхода в меню; сбрасываем и состояние, чтобы PostFX мог
+        // восстановиться после временного сбоя без перезапуска игры.
+        _session = null;
+        _inScene = false;
+        _failed = false;
+        _w = 0;
+        _h = 0;
+        _rt = default;
     }
 
     private const string FragmentShaderSrc = """
@@ -113,9 +140,20 @@ public static class PostProcessing {
         uniform float vignetteStrength;  // 0..0.6
         uniform float golden;            // 0..1 сила золотого часа
         uniform float bloom;             // 0/1
+        uniform float underwater;        // 0..1
+        uniform float underlava;         // 0..1
 
         void main() {
             vec4 c = texture(texture0, fragTexCoord);
+
+            // Мягкий и четкий подводный/лавовый оттенок (без размывающего дисторшна)
+            if (underwater > 0.001) {
+                vec3 waterTint = vec3(0.65, 0.85, 1.15);
+                c.rgb = mix(c.rgb, c.rgb * waterTint + vec3(0.02, 0.05, 0.10), underwater * 0.40);
+            } else if (underlava > 0.001) {
+                vec3 lavaTint = vec3(1.35, 0.45, 0.15);
+                c.rgb = mix(c.rgb, c.rgb * lavaTint + vec3(0.25, 0.05, 0.0), underlava * 0.60);
+            }
 
             // Золотой час: тёплый оттенок, лёгкое затемнение теней
             if (golden > 0.001) {
@@ -126,26 +164,21 @@ public static class PostProcessing {
                 c.rgb *= 1.0 - golden * 0.12 * (1.0 - smoothstep(0.0, 0.35, lum));
             }
 
-            // Bloom: «свечение» ярких участков через широкую выборку соседей
+            // Bloom: быстрый и мягкий 4-tap ореол вокруг ярких источников (факелы, солнце, лава)
             if (bloom > 0.5) {
-                vec2 ts = vec2(1.0) / vec2(textureSize(texture0, 0));
-                vec3 bright = vec3(0.0);
-                const int R = 3;
-                for (int y = -R; y <= R; y++) {
-                    for (int x = -R; x <= R; x++) {
-                        vec2 o = vec2(float(x), float(y)) * ts * 2.0;
-                        vec3 s = texture(texture0, clamp(fragTexCoord + o, vec2(0.0), vec2(1.0))).rgb;
-                        float l = dot(s, vec3(0.299, 0.587, 0.114));
-                        bright += s * smoothstep(0.62, 0.95, l);
-                    }
+                vec2 ts = vec2(2.0) / vec2(textureSize(texture0, 0));
+                vec3 s0 = texture(texture0, clamp(fragTexCoord + vec2(-ts.x, 0.0), vec2(0.0), vec2(1.0))).rgb;
+                vec3 s1 = texture(texture0, clamp(fragTexCoord + vec2(ts.x, 0.0), vec2(0.0), vec2(1.0))).rgb;
+                vec3 s2 = texture(texture0, clamp(fragTexCoord + vec2(0.0, -ts.y), vec2(0.0), vec2(1.0))).rgb;
+                vec3 s3 = texture(texture0, clamp(fragTexCoord + vec2(0.0, ts.y), vec2(0.0), vec2(1.0))).rgb;
+                vec3 avg = (s0 + s1 + s2 + s3) * 0.25;
+                float l = dot(avg, vec3(0.299, 0.587, 0.114));
+                if (l > 0.75) {
+                    c.rgb += avg * ((l - 0.75) * 0.35);
                 }
-                bright /= float((2 * R + 1) * (2 * R + 1));
-                c.rgb += bright * 0.35;
-                // Мягкое тонирование бликов
-                c.rgb = mix(c.rgb, min(c.rgb, vec3(1.6)), 0.25);
             }
 
-            // Виньетка: затемнение углов
+            // Базовая виньетка: аккуратное затемнение углов
             if (vignette > 0.5) {
                 float d = distance(fragTexCoord, vec2(0.5)) / 0.7071;
                 float v = smoothstep(0.55, 1.05, d);

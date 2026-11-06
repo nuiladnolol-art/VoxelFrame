@@ -33,6 +33,7 @@ public sealed class FluidEngine {
     private readonly HashSet<Vec3i> _activeWater = new();
     private readonly HashSet<Vec3i> _activeLava = new();
     private readonly HashSet<Vec3i> _pendingUpdates = new();
+    private readonly List<Vec3i> _pendingDrain = new();
     private readonly List<Vec3i> _processBuf = new();
 
     public IReadOnlyCollection<Vec3i> ActiveLava => _activeLava;
@@ -47,19 +48,39 @@ public sealed class FluidEngine {
         _pendingUpdates.Add(pos);
     }
 
+    public void OnChunkUnloaded(Vec3i chunkCoord) {
+        _activeWater.RemoveWhere(p => (p.X >> 5) == chunkCoord.X && (p.Y >> 5) == chunkCoord.Y && (p.Z >> 5) == chunkCoord.Z);
+        _activeLava.RemoveWhere(p => (p.X >> 5) == chunkCoord.X && (p.Y >> 5) == chunkCoord.Y && (p.Z >> 5) == chunkCoord.Z);
+        _pendingUpdates.RemoveWhere(p => (p.X >> 5) == chunkCoord.X && (p.Y >> 5) == chunkCoord.Y && (p.Z >> 5) == chunkCoord.Z);
+    }
+
+    // Единая точка добавления в активные наборы: лимит проверяется везде,
+    // иначе «защита от утечки памяти» обходилась соседними вызовами.
+    private void AddWater(Vec3i pos) {
+        if (_activeWater.Count < MaxActiveFluidCells) _activeWater.Add(pos);
+    }
+
+    private void AddLava(Vec3i pos) {
+        if (_activeLava.Count < MaxActiveFluidCells) _activeLava.Add(pos);
+    }
+
     public void Tick(float dt) {
-        // Добавляем новые запланированные координаты в соответствующие пулы
+        // Добавляем новые запланированные координаты в соответствующие пулы.
+        // Забираем во временный буфер, чтобы OnBlockChanged во время CheckEmptyCellForFluids не модифицировал HashSet на итерации.
         if (_pendingUpdates.Count > 0) {
-            foreach (var pos in _pendingUpdates) {
+            _pendingDrain.Clear();
+            _pendingDrain.AddRange(_pendingUpdates);
+            _pendingUpdates.Clear();
+            for (int i = 0; i < _pendingDrain.Count; i++) {
+                var pos = _pendingDrain[i];
                 var vox = _world.GetVoxel(pos);
-                if (vox.TypeId == GameData.BWater.Id) _activeWater.Add(pos);
-                else if (vox.TypeId == GameData.BLava.Id) _activeLava.Add(pos);
+                if (vox.TypeId == GameData.BWater.Id) AddWater(pos);
+                else if (vox.TypeId == GameData.BLava.Id) AddLava(pos);
                 else {
                     // Если блок стал воздухом/другим блоком, соседи могут требовать пересчета
                     CheckEmptyCellForFluids(pos);
                 }
             }
-            _pendingUpdates.Clear();
         }
 
         _waterTimer += dt;
@@ -85,13 +106,19 @@ public sealed class FluidEngine {
         activeSet.Clear();
 
         int budget = 4096;
-        for (int i = 0; i < _processBuf.Count; i++) {
-            if (budget-- <= 0) {
-                // Остаток возвращается в набор и обрабатывается на следующем тике
-                for (int j = i; j < _processBuf.Count; j++) activeSet.Add(_processBuf[j]);
-                break;
+        // До 4096 клеток за тик — свет пересчитываем один раз в конце.
+        _world.BeginBulkEdit();
+        try {
+            for (int i = 0; i < _processBuf.Count; i++) {
+                if (budget-- <= 0) {
+                    // Остаток возвращается в набор и обрабатывается на следующем тике
+                    for (int j = i; j < _processBuf.Count; j++) activeSet.Add(_processBuf[j]);
+                    break;
+                }
+                UpdateFluidAt(_processBuf[i]);
             }
-            UpdateFluidAt(_processBuf[i]);
+        } finally {
+            _world.EndBulkEdit();
         }
     }
 
@@ -109,8 +136,8 @@ public sealed class FluidEngine {
         foreach (var off in FluidNeighborOffsets) {
             var n = pos + off;
             var nv = _world.GetVoxel(n);
-            if (nv.TypeId == GameData.BWater.Id) _activeWater.Add(n);
-            else if (nv.TypeId == GameData.BLava.Id) _activeLava.Add(n);
+            if (nv.TypeId == GameData.BWater.Id) AddWater(n);
+            else if (nv.TypeId == GameData.BLava.Id) AddLava(n);
         }
 
         // Проверяем возможность создания бесконечного источника воды в этой пустой клетке
@@ -330,7 +357,7 @@ public sealed class FluidEngine {
         // Если с двух или более сторон настоящие источники -> превращаемся в полноценный источник!
         if (sourceCount >= 2) {
             _world.PlacePlacedBlock(pos, GameData.BWater, 0);
-            if (_activeWater.Count < MaxActiveFluidCells) _activeWater.Add(pos);
+            AddWater(pos);
             NotifyNeighbors(pos);
         }
     }
@@ -392,8 +419,8 @@ public sealed class FluidEngine {
         foreach (var off in FluidNeighborOffsets) {
             var n = pos + off;
             var nv = _world.GetVoxel(n);
-            if (nv.TypeId == GameData.BWater.Id) _activeWater.Add(n);
-            else if (nv.TypeId == GameData.BLava.Id) _activeLava.Add(n);
+            if (nv.TypeId == GameData.BWater.Id) AddWater(n);
+            else if (nv.TypeId == GameData.BLava.Id) AddLava(n);
             else if (nv.TypeId == 0) {
                 CheckInfiniteWaterSource(n);
             }
@@ -402,9 +429,9 @@ public sealed class FluidEngine {
 
     private void ScheduleFluid(Vec3i pos, ushort fluidId) {
         if (fluidId == GameData.BWater.Id) {
-            if (_activeWater.Count < MaxActiveFluidCells) _activeWater.Add(pos);
+            AddWater(pos);
         } else if (fluidId == GameData.BLava.Id) {
-            if (_activeLava.Count < MaxActiveFluidCells) _activeLava.Add(pos);
+            AddLava(pos);
         }
     }
 }

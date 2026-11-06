@@ -160,7 +160,8 @@ public sealed class HostileMob {
 
         var toPlayer = player.Position - Position;
         float dist = toPlayer.Length();
-        if (dist > 64f) { Alive = false; return; } // Деспавн
+        bool isBoss = Type == HostileType.NetherLord || Type == HostileType.SwampGuardian || Type == HostileType.DesertGuardian;
+        if (!isBoss && dist > 64f) { Alive = false; return; } // Деспавн рядовых мобов (мини-боссы не деспавнятся)
 
         Vector3 moveDir = Vector3.Zero;
         float speed = 2.0f;
@@ -173,7 +174,8 @@ public sealed class HostileMob {
         }
 
         if (canTarget && dist < 20f) { // Агр на игрока в режиме Выживания
-            var dir = Vector3.Normalize(new Vector3(toPlayer.X, 0f, toPlayer.Z));
+            float flatDistSq = toPlayer.X * toPlayer.X + toPlayer.Z * toPlayer.Z;
+            var dir = flatDistSq > 0.0001f ? new Vector3(toPlayer.X, 0f, toPlayer.Z) / MathF.Sqrt(flatDistSq) : Vector3.Zero;
             moveDir = dir;
 
             if (Type == HostileType.Spider) {
@@ -233,7 +235,8 @@ public sealed class HostileMob {
                     (int)MathF.Floor(Position.Z + moveDir.Z * 1.3f));
                 var aheadBody = aheadFoot + new Vec3i(0, 1, 0);
                 if (world.GetVoxel(aheadFoot).TypeId == GameData.BWater.Id || world.GetVoxel(aheadBody).TypeId == GameData.BWater.Id) {
-                    moveDir = Vector3.Normalize(new Vector3(-moveDir.Z, 0f, moveDir.X));
+                    float rotSq = moveDir.Z * moveDir.Z + moveDir.X * moveDir.X;
+                    if (rotSq > 0.0001f) moveDir = new Vector3(-moveDir.Z, 0f, moveDir.X) / MathF.Sqrt(rotSq);
                 }
             } else if (Type == HostileType.Blaze) {
                 speed = 1.5f;
@@ -476,20 +479,26 @@ public sealed class HostileMob {
         switch (Type) {
             case HostileType.Zombie:
                 world.SpawnPickup(GameData.RottenFleshItem.Id, _random.Next(1, 3), pos);
+                double zRoll = _random.NextDouble();
+                if (zRoll < 0.025) world.SpawnPickup(GameData.IronIngotItem.Id, 1, pos); // Редкий дроп: железный слиток 2.5%
+                else if (zRoll < 0.045) world.SpawnPickup(GameData.CarrotItem.Id, 1, pos); // Редкий дроп: морковь 2%
+                else if (zRoll < 0.065) world.SpawnPickup(GameData.PotatoItem.Id, 1, pos); // Редкий дроп: картофель 2%
                 break;
             case HostileType.Babakher:
                 world.SpawnPickup(GameData.GunpowderItem.Id, _random.Next(1, 3), pos);
                 break;
             case HostileType.Skeleton:
                 world.SpawnPickup(GameData.ArrowItem.Id, _random.Next(1, 3), pos);
-                world.SpawnPickup(GameData.BoneItem.Id, 1, pos);
+                world.SpawnPickup(GameData.BoneItem.Id, _random.Next(1, 3), pos);
+                if (_random.NextDouble() < 0.05) world.SpawnPickup(GameData.BowItem.Id, 1, pos); // Редкий дроп: лук 5%
                 break;
             case HostileType.Spider:
                 world.SpawnPickup(GameData.StringItem.Id, _random.Next(1, 3), pos);
                 break;
             case HostileType.ZombiePigman:
                 world.SpawnPickup(GameData.RottenFleshItem.Id, _random.Next(1, 3), pos);
-                if (_random.NextDouble() < 0.025) world.SpawnPickup(GameData.GoldIngotItem.Id, 1, pos); // Каноничный редкий дроп 2.5%
+                if (_random.NextDouble() < 0.04) world.SpawnPickup(GameData.GoldIngotItem.Id, 1, pos); // Редкий золотой слиток
+                if (_random.NextDouble() < 0.02) world.SpawnPickup(GameData.GoldSwordItem.Id, 1, pos); // Редкий золотой меч
                 break;
             case HostileType.Blaze:
                 world.SpawnPickup(GameData.BlazeRodItem.Id, _random.Next(1, 3), pos);

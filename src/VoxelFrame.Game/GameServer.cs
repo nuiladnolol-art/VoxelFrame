@@ -29,6 +29,7 @@ public sealed class ConnectedClient {
     public bool IsBlocking { get; set; }
     public float Health { get; set; } = 20f;
     public int SelectedItemId { get; set; }
+    public double LastExplosionTime { get; set; }
     public int OffhandItemId => PlayerData.OffhandEntry?.Item.Definition.Id ?? 0;
     public int HelmetId => PlayerData.Armor[0]?.Item.Definition.Id ?? 0;
     public int ChestplateId => PlayerData.Armor[1]?.Item.Definition.Id ?? 0;
@@ -39,9 +40,12 @@ public sealed class ConnectedClient {
     public string SkinName { get; set; } = "cyan";
     public Dimension Dimension { get; set; } = Dimension.Overworld;
     public Player PlayerData { get; set; } = new();
+    public DateTime LastMovementTime { get; set; } = DateTime.UtcNow;
 
     // Асинхронная очередь отправки: главный цикл и хендлеры не блокируются на медленных сокетах.
     private readonly ConcurrentQueue<byte[]> _sendQueue = new();
+    // Count у ConcurrentQueue — O(n); держим счётчик сами.
+    private long _queuedPackets;
     private readonly SemaphoreSlim _sendSignal = new(0, int.MaxValue);
     private readonly CancellationTokenSource _sendCts = new();
     private readonly Task _writerTask;
@@ -55,18 +59,33 @@ public sealed class ConnectedClient {
     }
 
     public void Send(byte[] data) {
-        if (!_connected || data == null || data.Length == 0) return;
+        if (!_connected || data == null || data.Length < 5) return;
         try {
-            // Клиент сильно отстал — сбрасываем накопившееся вместо роста памяти.
-            while (_sendQueue.Count >= MaxQueuedPackets) {
-                if (!_sendQueue.TryDequeue(out _)) break;
+            // Клиент сильно отстал. Раньше здесь без разбора удалялись самые старые пакеты —
+            // потеря WorldChunksSync/BlockChange оставляла у клиента дыры в мире.
+            if (Interlocked.Read(ref _queuedPackets) >= MaxQueuedPackets) {
+                if (IsReplaceableSnapshot(data[4])) return; // придёт более свежий снапшот
+                // Критичный пакет выбросить нельзя: рвём соединение, клиент переподключится
+                // и получит мир заново (лучше, чем молча битый мир).
+                _connected = false;
+                try { Socket.Close(); } catch { }
+                return;
             }
             _sendQueue.Enqueue(data);
+            Interlocked.Increment(ref _queuedPackets);
             _sendSignal.Release();
         } catch (ObjectDisposedException) {
             _connected = false;
         }
     }
+
+    /// <summary>Пакеты-снапшоты: их безопасно проредить, актуальное состояние придёт следующим кадром.</summary>
+    private static bool IsReplaceableSnapshot(byte packetType) =>
+        packetType == (byte)PacketType.MobSync ||
+        packetType == (byte)PacketType.PickupSync ||
+        packetType == (byte)PacketType.ProjectileSync ||
+        packetType == (byte)PacketType.PlayerMovement ||
+        packetType == (byte)PacketType.TimeWeatherSync;
 
     private async Task SendWriterLoop() {
         var token = _sendCts.Token;
@@ -76,7 +95,11 @@ public sealed class ConnectedClient {
             } catch (OperationCanceledException) {
                 break;
             }
+            // Разбудили один раз — забираем сигналы за все уже отправленные пакеты,
+            // иначе счётчик семафора копился и writer крутил пустые итерации.
             while (_sendQueue.TryDequeue(out var data)) {
+                Interlocked.Decrement(ref _queuedPackets);
+                _sendSignal.Wait(0);
                 try {
                     if (!_connected || !Socket.Connected) return;
                     var stream = Socket.GetStream();
@@ -89,6 +112,8 @@ public sealed class ConnectedClient {
                     return;
                 }
             }
+            // Остаток «лишних» сигналов (если пакеты уже разобраны) обнуляем.
+            while (_sendSignal.Wait(0)) { }
         }
     }
 
@@ -116,6 +141,14 @@ public sealed class GameServer : IDisposable {
     private CancellationTokenSource? _cts;
     private int _nextClientId = 10;
     private readonly ConcurrentDictionary<int, ConnectedClient> _clients = new();
+
+    /// <summary>Предел одновременных подключений.</summary>
+    private const int MaxClients = 16;
+    private int _activeClientConnections;
+    private readonly List<Animal> _nearAnimalsBuffer = new();
+    private readonly List<HostileMob> _nearHostilesBuffer = new();
+    private readonly List<ItemPickup> _nearPickupsBuffer = new();
+    private readonly List<ArrowProjectile> _nearArrowsBuffer = new();
     private readonly GameSession _session;
     private float _timeSyncTimer = 0f;
     private float _entitySyncTimer = 0f;
@@ -141,15 +174,18 @@ public sealed class GameServer : IDisposable {
         GameWorld.OnFurnaceChangedBroadcast = (pos, furnace, dim) => {
             Active?.BroadcastFurnaceSync(pos, furnace, (byte)dim);
         };
+        GameWorld.NetworkHookOwner = srv;
         return srv;
     }
 
     public static void Stop() {
-        if (GameWorld.OnNetworkBlockChangeBroadcast != null) {
+        var owner = Active;
+        // Снимаем хуки, только если их поставил сервер: клиент в том же процессе
+        // иначе оставался без трансляции изменений блоков.
+        if (owner == null || ReferenceEquals(GameWorld.NetworkHookOwner, owner)) {
             GameWorld.OnNetworkBlockChangeBroadcast = null;
-        }
-        if (GameWorld.OnFurnaceChangedBroadcast != null) {
             GameWorld.OnFurnaceChangedBroadcast = null;
+            GameWorld.NetworkHookOwner = null;
         }
         Active?.Dispose();
         Active = null;
@@ -178,20 +214,29 @@ public sealed class GameServer : IDisposable {
             c.Update(dt);
         }
 
-        // Автоматический сбор пикапов для подключенных клиентов
-        var world = _session.World;
-        for (int i = world.Pickups.Count - 1; i >= 0; i--) {
-            var p = world.Pickups[i];
-            if (p.Quantity <= 0) continue;
-            foreach (var cl in _clients.Values) {
-                if (cl.Dimension != world.Dimension) continue;
-                float d = Vector3.Distance(cl.Position, p.Position);
-                if (p.PickupDelay <= 0f && d < 1.5f) {
-                    cl.PlayerData.Inventory.TryInsert(p.Item, p.Quantity);
-                    var collectPacket = NetworkProtocol.WritePickupCollect(p.Id, cl.Id);
-                    Broadcast(collectPacket);
-                    p.Quantity = 0;
-                    break;
+        // Автоматический сбор пикапов и тик пикапов во всех активных измерениях
+        Span<Dimension> allDims = stackalloc Dimension[] { Dimension.Overworld, Dimension.Nether, Dimension.End, Dimension.Void };
+        foreach (var dim in allDims) {
+            var world = _session.GetWorld(dim);
+            if (world == null) continue;
+            if (world != _session.World) {
+                world.TickPickups(dt, null);
+            }
+            for (int i = world.Pickups.Count - 1; i >= 0; i--) {
+                var p = world.Pickups[i];
+                if (p.Quantity <= 0) continue;
+                foreach (var cl in _clients.Values) {
+                    if (cl.Dimension != world.Dimension) continue;
+                    float d = Vector3.Distance(cl.Position, p.Position);
+                    if (p.PickupDelay <= 0f && d < 1.5f) {
+                        // Предмет исчезает только если он реально влез в инвентарь:
+                        // иначе при полном инвентаре дроп пропадал бесследно.
+                        if (!cl.PlayerData.Inventory.TryInsert(p.Item, p.Quantity)) continue;
+                        var collectPacket = NetworkProtocol.WritePickupCollect(p.Id, cl.Id);
+                        Broadcast(collectPacket);
+                        p.Quantity = 0;
+                        break;
+                    }
                 }
             }
         }
@@ -210,20 +255,38 @@ public sealed class GameServer : IDisposable {
                 var cWorld = _session.GetWorld(client.Dimension);
                 if (cWorld == null) continue;
 
-                var nearAnimals = cWorld.Animals.FindAll(a => Vector3.DistanceSquared(a.Position, client.Position) < 128f * 128f);
-                var nearHostiles = cWorld.HostileMobs.FindAll(h => Vector3.DistanceSquared(h.Position, client.Position) < 128f * 128f);
-                var mobPacket = NetworkProtocol.WriteMobSync((byte)cWorld.Dimension, nearAnimals, nearHostiles);
+                _nearAnimalsBuffer.Clear();
+                for (int i = 0; i < cWorld.Animals.Count; i++) {
+                    var a = cWorld.Animals[i];
+                    if (Vector3.DistanceSquared(a.Position, client.Position) < 128f * 128f) _nearAnimalsBuffer.Add(a);
+                }
+
+                _nearHostilesBuffer.Clear();
+                for (int i = 0; i < cWorld.HostileMobs.Count; i++) {
+                    var h = cWorld.HostileMobs[i];
+                    if (Vector3.DistanceSquared(h.Position, client.Position) < 128f * 128f) _nearHostilesBuffer.Add(h);
+                }
+
+                var mobPacket = NetworkProtocol.WriteMobSync((byte)cWorld.Dimension, _nearAnimalsBuffer, _nearHostilesBuffer);
                 client.Send(mobPacket);
 
-                var nearPickups = cWorld.Pickups.FindAll(p => Vector3.DistanceSquared(p.Position, client.Position) < 128f * 128f);
-                if (nearPickups.Count > 0) {
-                    var pickupPacket = NetworkProtocol.WritePickupSync((byte)cWorld.Dimension, nearPickups);
+                _nearPickupsBuffer.Clear();
+                for (int i = 0; i < cWorld.Pickups.Count; i++) {
+                    var p = cWorld.Pickups[i];
+                    if (Vector3.DistanceSquared(p.Position, client.Position) < 128f * 128f) _nearPickupsBuffer.Add(p);
+                }
+                if (_nearPickupsBuffer.Count > 0) {
+                    var pickupPacket = NetworkProtocol.WritePickupSync((byte)cWorld.Dimension, _nearPickupsBuffer);
                     client.Send(pickupPacket);
                 }
 
-                var nearArrows = cWorld.Arrows.FindAll(a => Vector3.DistanceSquared(a.Position, client.Position) < 128f * 128f);
-                if (nearArrows.Count > 0) {
-                    var projPacket = NetworkProtocol.WriteProjectileSync((byte)cWorld.Dimension, nearArrows);
+                _nearArrowsBuffer.Clear();
+                for (int i = 0; i < cWorld.Arrows.Count; i++) {
+                    var arr = cWorld.Arrows[i];
+                    if (Vector3.DistanceSquared(arr.Position, client.Position) < 128f * 128f) _nearArrowsBuffer.Add(arr);
+                }
+                if (_nearArrowsBuffer.Count > 0) {
+                    var projPacket = NetworkProtocol.WriteProjectileSync((byte)cWorld.Dimension, _nearArrowsBuffer);
                     client.Send(projPacket);
                 }
 
@@ -248,6 +311,7 @@ public sealed class GameServer : IDisposable {
             _listener = new TcpListener(IPAddress.Any, Port);
             _listener.Start();
         } catch (Exception ex) {
+            _listener = null;
             _session.AddChatMessage($"Ошибка запуска сервера: {ex.Message}", Raylib_cs.Color.Red);
             return;
         }
@@ -259,9 +323,21 @@ public sealed class GameServer : IDisposable {
             while (!token.IsCancellationRequested && _listener != null) {
                 try {
                     var socket = await _listener.AcceptTcpClientAsync(token);
+                    // Ограничение числа клиентов: без него любой может забить сервер сокетами.
+                    if (Interlocked.Increment(ref _activeClientConnections) > MaxClients) {
+                        Interlocked.Decrement(ref _activeClientConnections);
+                        try { socket.Close(); } catch { }
+                        continue;
+                    }
                     _ = Task.Run(() => HandleClient(socket, token), token);
-                } catch {
+                } catch (OperationCanceledException) {
                     break;
+                } catch (ObjectDisposedException) {
+                    break;
+                } catch (Exception ex) {
+                    // Разовый сбой accept не должен навсегда выключать приём подключений.
+                    Console.WriteLine($"[GameServer] Ошибка accept: {ex.Message}");
+                    try { await Task.Delay(200, token); } catch { break; }
                 }
             }
         }, token);
@@ -269,13 +345,32 @@ public sealed class GameServer : IDisposable {
         _session.AddChatMessage($"Локальный сервер открыт на порту {Port}!", Raylib_cs.Color.Green);
     }
 
+    /// <summary>
+    /// Серверное определение оружия клиента из его собственного инвентаря (не из пакета).
+    /// Предотвращает подделку itemId для расчёта урона в AttackEntity/PlayerHit.
+    /// </summary>
+    private static ushort ResolveClientWeaponId(ConnectedClient client) {
+        // Используем itemId из последнего действия клиента, но только если такой предмет
+        // реально есть в его инвентаре. Это закрывает подделку (напр. алмазный меч из ничего),
+        // не ломая нормальную синхронизацию выбранного предмета.
+        ushort claimed = (ushort)client.SelectedItemId;
+        if (claimed == 0) return 0;
+        var inv = client.PlayerData.Inventory;
+        for (int i = 0; i < inv.Capacity; i++) {
+            if (inv.Slots[i] is { } e && e.Quantity > 0 && e.Item.Definition.Id == claimed) return claimed;
+        }
+        return 0;
+    }
+
     private void HandleClient(TcpClient socket, CancellationToken token) {
         socket.NoDelay = true;
+        socket.ReceiveTimeout = 30000;
         int clientId = Interlocked.Increment(ref _nextClientId);
         var client = new ConnectedClient(clientId, socket);
         _clients[clientId] = client;
 
         NetworkStream stream = socket.GetStream();
+        bool handshaked = false;
 
         try {
             // Welcome handshake
@@ -314,10 +409,21 @@ public sealed class GameServer : IDisposable {
                 if (!frameNullable.HasValue) break;
 
                 using var frame = frameNullable.Value;
+                if (!handshaked) {
+                    if (frame.Type != PacketType.Handshake) {
+                        Console.WriteLine($"[GameServer Client {clientId}] Неавторизованный пакет до Handshake: {frame.Type}");
+                        break;
+                    }
+                    handshaked = true;
+                }
+
                 using var pMs = new MemoryStream(frame.Buffer, 1, frame.Length - 1, writable: false);
                 using var reader = new BinaryReader(pMs, Encoding.UTF8);
 
                 switch (frame.Type) {
+                    case PacketType.KeepAlive: {
+                        break;
+                    }
                     case PacketType.Handshake: {
                         string name = reader.ReadString();
                         string ver = reader.ReadString();
@@ -368,29 +474,41 @@ public sealed class GameServer : IDisposable {
                         }
 
                         // Синхронизируем текущее состояние мира хоста с клиентом через главный поток (предотвращает гонки потоков и зависания)
-                        var initSyncTcs = new TaskCompletionSource<(List<byte[]> ChunkSync, byte[]? MobSync, byte[]? PickupSync)>();
+                        var initSyncTcs = new TaskCompletionSource<(List<byte[]> ChunkSync, byte[]? MobSync, byte[]? PickupSync)>(
+                            TaskCreationOptions.RunContinuationsAsynchronously);
                         EnqueueMainThreadAction(() => {
-                            var dim = (byte)_session.World.Dimension;
-                            var modified = _session.World.GetModifiedChunksSnapshot();
-                            var cSync = NetworkProtocol.WriteWorldChunksSyncBatches(dim, modified);
+                            try {
+                                var dim = (byte)_session.World.Dimension;
+                                var modified = _session.World.GetModifiedChunksSnapshot();
+                                var cSync = NetworkProtocol.WriteWorldChunksSyncBatches(dim, modified);
 
-                            byte[]? mSync = null;
-                            if (_session.World.Animals.Count > 0 || _session.World.HostileMobs.Count > 0) {
-                                mSync = NetworkProtocol.WriteMobSync(dim, _session.World.Animals, _session.World.HostileMobs);
+                                byte[]? mSync = null;
+                                if (_session.World.Animals.Count > 0 || _session.World.HostileMobs.Count > 0) {
+                                    mSync = NetworkProtocol.WriteMobSync(dim, _session.World.Animals, _session.World.HostileMobs);
+                                }
+
+                                byte[]? pSync = null;
+                                if (_session.World.Pickups.Count > 0) {
+                                    pSync = NetworkProtocol.WritePickupSync(dim, _session.World.Pickups);
+                                }
+
+                                _session.AddChatMessage($"Игрок {name} присоединился к игре!", Raylib_cs.Color.Yellow);
+                                _session.AddMessage($"Игрок {name} вошел в мир");
+
+                                initSyncTcs.TrySetResult((cSync, mSync, pSync));
+                            } catch (Exception ex) {
+                                // Без этого сокет-поток навсегда зависал на GetResult(),
+                                // потому что ProcessMainThreadActions глотает исключения.
+                                initSyncTcs.TrySetException(ex);
                             }
-
-                            byte[]? pSync = null;
-                            if (_session.World.Pickups.Count > 0) {
-                                pSync = NetworkProtocol.WritePickupSync(dim, _session.World.Pickups);
-                            }
-
-                            _session.AddChatMessage($"Игрок {name} присоединился к игре!", Raylib_cs.Color.Yellow);
-                            _session.AddMessage($"Игрок {name} вошел в мир");
-
-                            initSyncTcs.SetResult((cSync, mSync, pSync));
                         });
 
-                        var (chunkSync, mobSync, pickupSync) = initSyncTcs.Task.GetAwaiter().GetResult();
+                        // Таймаут обязателен: если главный поток занят/остановлен, сокет-поток
+                        // не должен висеть вечно на ожидании результата.
+                        if (!initSyncTcs.Task.Wait(TimeSpan.FromSeconds(10))) {
+                            throw new TimeoutException("Главный поток не ответил на инициализацию мира");
+                        }
+                        var (chunkSync, mobSync, pickupSync) = initSyncTcs.Task.Result;
                         foreach (var chunkPacket in chunkSync) {
                             client.Send(chunkPacket);
                         }
@@ -462,13 +580,17 @@ public sealed class GameServer : IDisposable {
                                 }
                             } else if (action == InventoryActionType.Craft) {
                                 int recipeIdx = fromSlot;
-                                int craftTimes = amount; // Сколько раз скрафтили
-                                if (recipeIdx >= 0 && recipeIdx < GameData.CraftRecipes.Count && craftTimes > 0) {
+                                int craftTimes = Math.Clamp(amount, 1, 64 * 36); // Сколько раз скрафтили
+                                if (recipeIdx >= 0 && recipeIdx < GameData.CraftRecipes.Count) {
                                     var recipe = GameData.CraftRecipes[recipeIdx];
                                     
-                                    // Проверка наличия ингредиентов
+                                    // Проверка наличия ингредиентов и защита от переполнения
                                     bool canCraft = true;
+                                    if (recipe.Count > int.MaxValue / craftTimes) canCraft = false;
                                     foreach (var (reqItem, reqCount) in recipe.Ingredients) {
+                                        if (reqCount > int.MaxValue / craftTimes) {
+                                            canCraft = false; break;
+                                        }
                                         int have = inv.Entries.Where(e => e.Item.Definition == reqItem).Sum(e => e.Quantity);
                                         if (have < reqCount * craftTimes) {
                                             canCraft = false; break;
@@ -525,23 +647,19 @@ public sealed class GameServer : IDisposable {
                         float sat = reader.ReadSingle();
                         int slot = reader.ReadInt32();
                         byte invDim = reader.ReadByte();
-                        client.Dimension = (Dimension)invDim;
-                        client.PlayerData.Dimension = (Dimension)invDim;
 
-                        var pPos = new Vector3(px, py, pz);
-                        client.PlayerData.Position = pPos;
-                        if (client.Position == Vector3.Zero) {
-                            client.Position = pPos;
-                            client.TargetPosition = pPos;
+                        // Измерение, координаты и статы — только в разумных пределах:
+                        // NaN/бесконечность из клиента ломали физику и рендер.
+                        if (!float.IsFinite(px) || !float.IsFinite(py) || !float.IsFinite(pz) ||
+                            !float.IsFinite(yaw) || !float.IsFinite(pitch)) {
+                            break; // мусорный пакет — игнорируем целиком
                         }
-                        client.PlayerData.Yaw = yaw;
-                        client.PlayerData.Pitch = pitch;
-                        client.PlayerData.Health = hp;
-                        client.PlayerData.Hunger = hunger;
-                        client.PlayerData.Saturation = sat;
-                        client.PlayerData.SelectedSlot = slot;
+                        if (invDim > (byte)Dimension.Void) invDim = (byte)client.Dimension;
+                        if ((Dimension)invDim != client.Dimension && !IsNearPortal(client, (Dimension)invDim)) {
+                            invDim = (byte)client.Dimension;
+                        }
 
-                        int invCount = reader.ReadInt32();
+                        int invCount = Math.Clamp(reader.ReadInt32(), 0, client.PlayerData.Inventory.Capacity);
                         var newInvSlots = new Dictionary<int, ItemEntry>();
                         for (int i = 0; i < invCount; i++) {
                             int idx = reader.ReadInt32();
@@ -550,21 +668,24 @@ public sealed class GameServer : IDisposable {
                             int itDur = reader.ReadInt32();
                             if (GameData.Items.TryGetValue(itId, out var itDef) && idx >= 0 && idx < client.PlayerData.Inventory.Capacity) {
                                 var itemInst = GameData.NewItem(itDef);
-                                itemInst.Durability = itDur;
-                                newInvSlots[idx] = new ItemEntry(itemInst, itQty);
+                                int maxDur = GameData.GetMaxItemDurability(itDef.Id);
+                                if (maxDur > 0) itemInst.Durability = Math.Clamp(itDur, 1, maxDur);
+                                int qty = Math.Clamp(itQty, 1, itDef.MaxStack);
+                                newInvSlots[idx] = new ItemEntry(itemInst, qty);
                             }
                         }
 
-                        bool hasOffhand = reader.ReadBoolean();
                         ItemEntry? newOffhand = null;
-                        if (hasOffhand) {
+                        if (reader.ReadBoolean()) {
                             ushort offId = reader.ReadUInt16();
                             int offQty = reader.ReadInt32();
                             int offDur = reader.ReadInt32();
                             if (GameData.Items.TryGetValue(offId, out var offDef)) {
-                                var offInst = GameData.NewItem(offDef);
-                                offInst.Durability = offDur;
-                                newOffhand = new ItemEntry(offInst, offQty);
+                                var itemInst = GameData.NewItem(offDef);
+                                int maxDur = GameData.GetMaxItemDurability(offDef.Id);
+                                if (maxDur > 0) itemInst.Durability = Math.Clamp(offDur, 1, maxDur);
+                                int qty = Math.Clamp(offQty, 1, offDef.MaxStack);
+                                newOffhand = new ItemEntry(itemInst, qty);
                             }
                         }
 
@@ -575,14 +696,33 @@ public sealed class GameServer : IDisposable {
                                 int armQty = reader.ReadInt32();
                                 int armDur = reader.ReadInt32();
                                 if (GameData.Items.TryGetValue(armId, out var armDef)) {
-                                    var armInst = GameData.NewItem(armDef);
-                                    armInst.Durability = armDur;
-                                    newArmor[a] = new ItemEntry(armInst, armQty);
+                                    var itemInst = GameData.NewItem(armDef);
+                                    int maxDur = GameData.GetMaxItemDurability(armDef.Id);
+                                    if (maxDur > 0) itemInst.Durability = Math.Clamp(armDur, 1, maxDur);
+                                    int qty = Math.Clamp(armQty, 1, armDef.MaxStack);
+                                    newArmor[a] = new ItemEntry(itemInst, qty);
                                 }
                             }
                         }
 
                         EnqueueMainThreadAction(() => {
+                            client.Dimension = (Dimension)invDim;
+                            client.PlayerData.Dimension = (Dimension)invDim;
+
+                            var pPos = new Vector3(px, py, pz);
+                            client.PlayerData.Position = pPos;
+                            if (client.Position == Vector3.Zero) {
+                                client.Position = pPos;
+                                client.TargetPosition = pPos;
+                            }
+                            client.PlayerData.Yaw = yaw;
+                            client.PlayerData.Pitch = pitch;
+                            if (float.IsFinite(hp)) client.PlayerData.Health = Math.Clamp(hp, 0f, 20f);
+                            if (float.IsFinite(hunger)) client.PlayerData.Hunger = Math.Clamp(hunger, 0f, Player.MaxHunger);
+                            if (float.IsFinite(sat)) client.PlayerData.Saturation = Math.Clamp(sat, 0f, 20f);
+                            client.PlayerData.SelectedSlot = Math.Clamp(slot, 0, 8);
+
+                            // Обновляем инвентарь на главном потоке (потокобезопасно для SavePlayerData и ResolveClientWeaponId)
                             client.PlayerData.Inventory.Clear();
                             foreach (var (idx, entry) in newInvSlots) {
                                 client.PlayerData.Inventory.Slots[idx] = entry;
@@ -595,7 +735,8 @@ public sealed class GameServer : IDisposable {
                         break;
                     }
                     case PacketType.PlayerMovement: {
-                        int id = reader.ReadInt32();
+                        int id = clientId; // Аутентифицированный clientId
+                        reader.ReadInt32(); // Пропускаем client-supplied id
                         float x = reader.ReadSingle();
                         float y = reader.ReadSingle();
                         float z = reader.ReadSingle();
@@ -610,17 +751,34 @@ public sealed class GameServer : IDisposable {
                             !float.IsFinite(yaw) || !float.IsFinite(pitch) || dim > 3) {
                             break;
                         }
-                        client.Dimension = (Dimension)dim;
-                        // Серверная валидация перемещения: ограничение аномальных скачков позиции
+
+                        if ((Dimension)dim != client.Dimension) {
+                            if (IsNearPortal(client, (Dimension)dim)) {
+                                client.Dimension = (Dimension)dim;
+                                client.PlayerData.Dimension = (Dimension)dim;
+                            } else {
+                                dim = (byte)client.Dimension;
+                            }
+                        }
+
+                        // Серверная валидация перемещения: ограничение скорости по времени
+                        var now = DateTime.UtcNow;
+                        float elapsed = (float)(now - client.LastMovementTime).TotalSeconds;
+                        client.LastMovementTime = now;
+                        if (elapsed <= 0f) elapsed = 0.001f;
+                        if (elapsed > 1.0f) elapsed = 1.0f;
+
                         if (client.Position == Vector3.Zero) {
                             client.Position = newPos;
                             client.TargetPosition = newPos;
                         } else {
-                            float maxAllowedStep = ((flags & 4) != 0 ? 35f : 18f); // 35 м/с при полёте, 18 м/с при спринте
+                            float maxAllowedSpeed = ((flags & 4) != 0 ? 35f : 18f); // 35 м/с при полёте, 18 м/с при спринте
+                            float maxAllowedDist = maxAllowedSpeed * elapsed + 3.0f;
                             float dist = Vector3.Distance(client.Position, newPos);
-                            if (dist > maxAllowedStep * 2.0f && dist > 10.0f) {
+                            if (dist > maxAllowedDist && dist > 8.0f) {
                                 // Аномальный прыжок/телепорт — корректируем на сервере
                                 newPos = client.Position;
+                                client.Send(NetworkProtocol.WritePlayerMovement(clientId, client.Position, client.Yaw, client.Pitch, false, false, false, false, client.Health, (byte)client.Dimension));
                             } else {
                                 client.Position = newPos;
                                 client.TargetPosition = newPos;
@@ -632,10 +790,10 @@ public sealed class GameServer : IDisposable {
                         client.IsSneaking = (flags & 2) != 0;
                         client.IsFlying = (flags & 4) != 0;
                         client.IsBlocking = (flags & 8) != 0;
-                        client.Health = Math.Clamp(hp, 0f, 20f);
+                        client.Health = float.IsFinite(hp) ? Math.Clamp(hp, 0f, 20f) : client.Health;
 
                         // Broadcast movement with actual target newPos and authenticated clientId
-                        var moveP = NetworkProtocol.WritePlayerMovement(clientId, newPos, yaw, pitch, client.IsMoving, client.IsSneaking, client.IsFlying, client.IsBlocking, client.Health, dim);
+                        var moveP = NetworkProtocol.WritePlayerMovement(clientId, newPos, yaw, pitch, client.IsMoving, client.IsSneaking, client.IsFlying, client.IsBlocking, client.Health, (byte)client.Dimension);
                         Broadcast(moveP, exceptClientId: clientId);
                         break;
                     }
@@ -657,15 +815,26 @@ public sealed class GameServer : IDisposable {
                             client.HurtTimer = 1.0f;
                         } else if (action == PlayerActionType.DropItem && itemId > 0 && GameData.Items.TryGetValue((ushort)itemId, out var dropDef)) {
                             EnqueueMainThreadAction(() => {
+                                // Дроп берём из серверного инвентаря: раньше клиент мог
+                                // spawn'ить предметы «из воздуха» в любом количестве.
+                                var inv = client.PlayerData.Inventory;
+                                int have = inv.CountOf(dropDef);
+                                if (have <= 0) return;
+                                int qty = Math.Clamp(quantity, 1, have);
+                                if (!inv.TryRemove(dropDef, qty)) return;
+
                                 var dropPos = client.Position + new Vector3(0f, 0.6f, 0f);
                                 var fwd = new Vector3(-MathF.Sin(client.Yaw), 0f, MathF.Cos(client.Yaw));
                                 var itemInst = GameData.NewItem(dropDef);
-                                if (durability > 0) itemInst.Durability = durability;
-                                var pickup = new ItemPickup(itemInst, Math.Max(1, quantity), dropPos) {
+                                int maxDur = GameData.GetMaxItemDurability(dropDef.Id);
+                                if (maxDur > 0) itemInst.Durability = Math.Clamp(durability, 1, maxDur);
+                                var pickup = new ItemPickup(itemInst, qty, dropPos) {
                                     PickupDelay = 1.2f,
                                     Velocity = fwd * 4.5f + new Vector3(0f, 2.0f, 0f)
                                 };
                                 _session.GetWorld(client.Dimension).Pickups.Add(pickup);
+                                // Синхронизируем урезанный инвентарь клиенту.
+                                client.Send(NetworkProtocol.WritePlayerInventoryUpdate(client.PlayerData, (byte)client.Dimension));
                             });
                         } else if (action == PlayerActionType.ShootArrow) {
                             EnqueueMainThreadAction(() => {
@@ -683,14 +852,15 @@ public sealed class GameServer : IDisposable {
                         uint pickupId = reader.ReadUInt32();
                         int collectorId = reader.ReadInt32();
                         EnqueueMainThreadAction(() => {
+                            // Запрещаем уничтожение чужих дропов: сервер собирает пикапы сам в Update().
+                            if (collectorId != client.Id) return;
                             var targetWorld = _session.GetWorld(client.Dimension);
                             var p = targetWorld.Pickups.Find(x => x.Id == pickupId);
-                            if (p != null) {
-                                if (collectorId == client.Id) {
-                                    client.PlayerData.Inventory.TryInsert(p.Item, p.Quantity);
-                                }
-                                targetWorld.Pickups.Remove(p);
-                            }
+                            // Собирать можно только то, что реально рядом: иначе клиент
+                            // «подбирал» любой дроп на карте по id.
+                            if (p == null || Vector3.Distance(client.Position, p.Position) > 3.0f) return;
+                            if (!client.PlayerData.Inventory.TryInsert(p.Item, p.Quantity)) return;
+                            targetWorld.Pickups.Remove(p);
                             var collectP = NetworkProtocol.WritePickupCollect(pickupId, collectorId);
                             Broadcast(collectP);
                         });
@@ -704,7 +874,7 @@ public sealed class GameServer : IDisposable {
                         EnqueueMainThreadAction(() => {
                             var targetWorld = _session.GetWorld(client.Dimension);
                             // Серверный расчёт допустимого урона и проверка дистанции
-                            ushort toolId = (ushort)client.SelectedItemId;
+                            ushort toolId = ResolveClientWeaponId(client);
                             float actualDmg = GameData.GetWeaponDamage(toolId);
                             
                             // Критический урон (упрощенная серверная эвристика: если игрок падает)
@@ -722,6 +892,17 @@ public sealed class GameServer : IDisposable {
                                         if (mob.Health <= 0f) {
                                             mob.Die(targetWorld, _session);
                                         }
+                                    }
+                                } else if (entityId == BossEntityIds.EndSlime) {
+                                    // Боссы не лежат в списке мобов — у них свои зарезервированные id.
+                                    var boss = targetWorld.EndBoss;
+                                    if (boss is { Alive: true } && Vector3.Distance(client.Position, boss.Position) <= 8.0f) {
+                                        boss.TakeDamage(validDmg, targetWorld, _session);
+                                    }
+                                } else if (entityId == BossEntityIds.TrueEndSlime) {
+                                    var boss = targetWorld.TrueVoidBoss;
+                                    if (boss is { Alive: true } && Vector3.Distance(client.Position, boss.Position) <= 8.0f) {
+                                        boss.TakeDamage(validDmg, targetWorld, _session);
                                     }
                                 }
                             } else {
@@ -742,13 +923,23 @@ public sealed class GameServer : IDisposable {
                         break;
                     }
                     case PacketType.SpawnProjectile: {
-                        int shooterId = reader.ReadInt32();
+                        int shooterId = clientId; // Аутентифицированный id стрелка
+                        reader.ReadInt32(); // Пропускаем client-supplied shooterId
                         float px = reader.ReadSingle(), py = reader.ReadSingle(), pz = reader.ReadSingle();
                         float vx = reader.ReadSingle(), vy = reader.ReadSingle(), vz = reader.ReadSingle();
                         byte pTypeFlags = reader.ReadByte();
                         byte pDim = reader.ReadByte();
+                        // Защита от NaN / бесконечности
+                        if (!float.IsFinite(px) || !float.IsFinite(py) || !float.IsFinite(pz) ||
+                            !float.IsFinite(vx) || !float.IsFinite(vy) || !float.IsFinite(vz)) {
+                            break;
+                        }
                         EnqueueMainThreadAction(() => {
+                            // Валидация: снаряд должен создаваться рядом с игроком и в его измерении.
+                            if ((Dimension)pDim != client.Dimension) return;
+                            if (Vector3.Distance(client.Position, new Vector3(px, py, pz)) > 8f) return;
                             var targetWorld = _session.GetWorld((Dimension)pDim);
+                            if (targetWorld == null) return;
                             var arr = new ArrowProjectile(new Vector3(px, py, pz), new Vector3(vx, vy, vz), null) {
                                 IsSlimeSpit = (pTypeFlags & 1) != 0,
                                 IsEnderPearl = (pTypeFlags & 2) != 0,
@@ -757,9 +948,9 @@ public sealed class GameServer : IDisposable {
                                 Damage = 7f
                             };
                             targetWorld.Arrows.Add(arr);
+                            var spawnProjP = NetworkProtocol.WriteSpawnProjectile(shooterId, new Vector3(px, py, pz), new Vector3(vx, vy, vz), pTypeFlags, pDim);
+                            Broadcast(spawnProjP, exceptClientId: clientId);
                         });
-                        var spawnProjP = NetworkProtocol.WriteSpawnProjectile(shooterId, new Vector3(px, py, pz), new Vector3(vx, vy, vz), pTypeFlags, pDim);
-                        Broadcast(spawnProjP, exceptClientId: clientId);
                         break;
                     }
                     case PacketType.Explosion: {
@@ -769,12 +960,16 @@ public sealed class GameServer : IDisposable {
                         byte eDim = reader.ReadByte();
 
                         EnqueueMainThreadAction(() => {
-                            if (Vector3.Distance(client.Position, new Vector3(ex, ey, ez)) <= 8.0f) {
-                                var targetWorld = _session.GetWorld((Dimension)eDim);
-                                GameWorld.CreateExplosion(new Vector3(ex, ey, ez), radius, maxDmg, _session);
-                                var expP = NetworkProtocol.WriteExplosion(new Vector3(ex, ey, ez), radius, maxDmg, eDim);
-                                Broadcast(expP, exceptClientId: clientId);
-                            }
+                            // Валидация взрыва: только в своём измерении, рядом с игроком и с кулдауном.
+                            if ((Dimension)eDim != client.Dimension) return;
+                            double now = _session.TotalPlaySeconds;
+                            if (now - client.LastExplosionTime < 1.0) return;
+                            if (Vector3.Distance(client.Position, new Vector3(ex, ey, ez)) > 8.0f) return;
+                            client.LastExplosionTime = now;
+                            var targetWorld = _session.GetWorld((Dimension)eDim);
+                            GameWorld.CreateExplosion(targetWorld, new Vector3(ex, ey, ez), radius, maxDmg, _session);
+                            var expP = NetworkProtocol.WriteExplosion(new Vector3(ex, ey, ez), radius, maxDmg, eDim);
+                            Broadcast(expP, exceptClientId: clientId);
                         });
                         break;
                     }
@@ -783,6 +978,8 @@ public sealed class GameServer : IDisposable {
                         bool isSleeping = reader.ReadBoolean();
                         int bedX = reader.ReadInt32(), bedY = reader.ReadInt32(), bedZ = reader.ReadInt32();
                         EnqueueMainThreadAction(() => {
+                            // Спать можно только в обычном мире; иначе это способ манипуляции временем.
+                            if (client.Dimension != Dimension.Overworld) return;
                             _session.DayNight.TimeOfDay = 0.25f;
                             _session.Weather = WeatherType.Clear;
                             var timePacket = NetworkProtocol.WriteTimeWeatherSync(_session.DayNight.TimeOfDay, (int)_session.Weather);
@@ -795,8 +992,13 @@ public sealed class GameServer : IDisposable {
                         int cx = reader.ReadInt32(), cy = reader.ReadInt32(), cz = reader.ReadInt32();
                         byte cDim = reader.ReadByte();
                         EnqueueMainThreadAction(() => {
+                            if ((Dimension)cDim != client.Dimension) return;
                             var targetWorld = _session.GetWorld((Dimension)cDim);
-                            var chest = targetWorld.GetOrCreateChest(new Vec3i(cx, cy, cz));
+                            var cPos = new Vec3i(cx, cy, cz);
+                            // Сундук должен реально существовать и быть рядом: иначе
+                            // клиент открывал контейнеры в любой точке карты.
+                            if (!CanReachContainer(targetWorld, client, cPos, GameData.BChest.Id)) return;
+                            var chest = targetWorld.GetOrCreateChest(cPos);
                             var chestPacket = NetworkProtocol.WriteChestSync(cx, cy, cz, chest, cDim);
                             client.Send(chestPacket);
                         });
@@ -806,8 +1008,10 @@ public sealed class GameServer : IDisposable {
                         int fx = reader.ReadInt32(), fy = reader.ReadInt32(), fz = reader.ReadInt32();
                         byte fDim = reader.ReadByte();
                         EnqueueMainThreadAction(() => {
+                            if ((Dimension)fDim != client.Dimension) return;
                             var targetWorld = _session.GetWorld((Dimension)fDim);
                             var fPos = new Vec3i(fx, fy, fz);
+                            if (!CanReachContainer(targetWorld, client, fPos, GameData.BFurnace.Id)) return;
                             var f = targetWorld.GetOrCreateFurnace(fPos);
                             var inItem = f.Input.HasValue ? (f.Input.Value.Item.Definition.Id, f.Input.Value.Quantity) : ((ushort, int)?)null;
                             var fuelItem = f.Fuel.HasValue ? (f.Fuel.Value.Item.Definition.Id, f.Fuel.Value.Quantity) : ((ushort, int)?)null;
@@ -828,66 +1032,102 @@ public sealed class GameServer : IDisposable {
                         if (reader.ReadBoolean()) {
                             ushort id = reader.ReadUInt16();
                             int qty = reader.ReadInt32();
-                            if (GameData.Items.TryGetValue(id, out var def)) inItem = new ItemEntry(GameData.NewItem(def), qty);
+                            if (GameData.Items.TryGetValue(id, out var def) && qty > 0) inItem = new ItemEntry(GameData.NewItem(def), Math.Clamp(qty, 1, def.MaxStack));
                         }
                         ItemEntry? fItem = null;
                         if (reader.ReadBoolean()) {
                             ushort id = reader.ReadUInt16();
                             int qty = reader.ReadInt32();
-                            if (GameData.Items.TryGetValue(id, out var def)) fItem = new ItemEntry(GameData.NewItem(def), qty);
+                            if (GameData.Items.TryGetValue(id, out var def) && qty > 0) fItem = new ItemEntry(GameData.NewItem(def), Math.Clamp(qty, 1, def.MaxStack));
                         }
                         ItemEntry? outItem = null;
                         if (reader.ReadBoolean()) {
                             ushort id = reader.ReadUInt16();
                             int qty = reader.ReadInt32();
-                            if (GameData.Items.TryGetValue(id, out var def)) outItem = new ItemEntry(GameData.NewItem(def), qty);
+                            if (GameData.Items.TryGetValue(id, out var def) && qty > 0) outItem = new ItemEntry(GameData.NewItem(def), Math.Clamp(qty, 1, def.MaxStack));
                         }
 
                         EnqueueMainThreadAction(() => {
+                            if ((Dimension)fDim != client.Dimension) return;
                             var targetWorld = _session.GetWorld((Dimension)fDim);
+                            if (targetWorld == null) return;
                             var fPos = new Vec3i(fx, fy, fz);
+                            if (!CanReachContainer(targetWorld, client, fPos, GameData.BFurnace.Id)) return;
                             var f = targetWorld.GetOrCreateFurnace(fPos);
-                            f.FuelTimer = fuelTimer;
-                            f.MaxFuelTimer = maxFuelTimer;
-                            f.SmeltTimer = smeltTimer;
-                            f.Input = inItem;
-                            f.Fuel = fItem;
-                            f.Output = outItem;
+                            f.FuelTimer = float.IsFinite(fuelTimer) ? Math.Clamp(fuelTimer, 0f, 600f) : 0f;
+                            f.MaxFuelTimer = float.IsFinite(maxFuelTimer) ? Math.Clamp(maxFuelTimer, 0f, 600f) : 0f;
+                            f.SmeltTimer = float.IsFinite(smeltTimer) ? Math.Clamp(smeltTimer, 0f, 600f) : 0f;
 
-                            var inT = inItem.HasValue ? (inItem.Value.Item.Definition.Id, inItem.Value.Quantity) : ((ushort, int)?)null;
-                            var fuelT = fItem.HasValue ? (fItem.Value.Item.Definition.Id, fItem.Value.Quantity) : ((ushort, int)?)null;
-                            var outT = outItem.HasValue ? (outItem.Value.Item.Definition.Id, outItem.Value.Quantity) : ((ushort, int)?)null;
-                            var fPacket = NetworkProtocol.WriteFurnaceSync(fx, fy, fz, fuelTimer, maxFuelTimer, smeltTimer, inT, fuelT, outT, fDim);
-                            Broadcast(fPacket, exceptClientId: clientId);
+                            // Валидация печи: Output слот нельзя увеличивать клиенту (он производится только плавкой)!
+                            if (outItem.HasValue) {
+                                if (f.Output.HasValue && f.Output.Value.Item.Definition.Id == outItem.Value.Item.Definition.Id) {
+                                    int allowedQty = Math.Min(f.Output.Value.Quantity, outItem.Value.Quantity);
+                                    if (allowedQty > 0) f.Output = f.Output.Value with { Quantity = allowedQty };
+                                    else f.Output = null;
+                                }
+                            } else {
+                                f.Output = null;
+                            }
+
+                            // Валидация Input и Fuel слотов (нельзя положить больше, чем есть у игрока + было в печи)
+                            var playerInv = client.PlayerData.Inventory;
+                            if (inItem.HasValue) {
+                                ushort inId = inItem.Value.Item.Definition.Id;
+                                int prevIn = (f.Input.HasValue && f.Input.Value.Item.Definition.Id == inId) ? f.Input.Value.Quantity : 0;
+                                int availIn = prevIn + playerInv.Entries.Where(e => e.Item.Definition.Id == inId).Sum(e => e.Quantity);
+                                int allowedIn = Math.Clamp(inItem.Value.Quantity, 0, Math.Min(inItem.Value.Item.Definition.MaxStack, availIn));
+                                if (allowedIn > 0) f.Input = inItem.Value with { Quantity = allowedIn };
+                                else f.Input = null;
+                            } else {
+                                f.Input = null;
+                            }
+
+                            if (fItem.HasValue) {
+                                ushort fId = fItem.Value.Item.Definition.Id;
+                                int prevF = (f.Fuel.HasValue && f.Fuel.Value.Item.Definition.Id == fId) ? f.Fuel.Value.Quantity : 0;
+                                int availF = prevF + playerInv.Entries.Where(e => e.Item.Definition.Id == fId).Sum(e => e.Quantity);
+                                int allowedF = Math.Clamp(fItem.Value.Quantity, 0, Math.Min(fItem.Value.Item.Definition.MaxStack, availF));
+                                if (allowedF > 0) f.Fuel = fItem.Value with { Quantity = allowedF };
+                                else f.Fuel = null;
+                            } else {
+                                f.Fuel = null;
+                            }
+
+                            var inT = f.Input.HasValue ? (f.Input.Value.Item.Definition.Id, f.Input.Value.Quantity) : ((ushort, int)?)null;
+                            var fuelT = f.Fuel.HasValue ? (f.Fuel.Value.Item.Definition.Id, f.Fuel.Value.Quantity) : ((ushort, int)?)null;
+                            var outT = f.Output.HasValue ? (f.Output.Value.Item.Definition.Id, f.Output.Value.Quantity) : ((ushort, int)?)null;
+                            var fPacket = NetworkProtocol.WriteFurnaceSync(fx, fy, fz, f.FuelTimer, f.MaxFuelTimer, f.SmeltTimer, inT, fuelT, outT, fDim);
+                            Broadcast(fPacket);
                         });
                         break;
                     }
                     case PacketType.PlayerHit: {
-                        int attackerId = reader.ReadInt32();
+                        int attackerId = clientId; // Аутентифицированный id нападающего
+                        reader.ReadInt32(); // Пропускаем client-supplied attackerId
                         int targetId = reader.ReadInt32();
                         float ignoredClientDmg = reader.ReadSingle();
 
-                        ushort toolId = (ushort)client.SelectedItemId;
-                        float actualDmg = GameData.GetWeaponDamage(toolId);
-                        float validDmg = Math.Clamp(actualDmg, 1f, actualDmg * 1.5f + 1f);
+                        EnqueueMainThreadAction(() => {
+                            ushort toolId = ResolveClientWeaponId(client);
+                            float actualDmg = GameData.GetWeaponDamage(toolId);
+                            float validDmg = Math.Clamp(actualDmg, 1f, actualDmg * 1.5f + 1f);
 
-                        if (targetId == 1) {
-                            var attackerPos = client.Position;
-                            EnqueueMainThreadAction(() => {
+                            if (targetId == 1) {
+                                var attackerPos = client.Position;
                                 if (Vector3.Distance(attackerPos, _session.Player.Position) <= 6.0f) {
                                     _session.Player.ApplyDamage(validDmg, _session, attackerPos, cause: client.Name);
                                     _session.Player.HurtTimer = 1.0f;
                                     BroadcastHostAction(PlayerActionType.Hurt, 0);
                                 }
-                            });
-                        } else {
-                            if (_clients.TryGetValue(targetId, out var targetClient)) {
-                                if (Vector3.Distance(client.Position, targetClient.Position) <= 6.0f) {
-                                    var hitPacket = NetworkProtocol.WritePlayerHit(attackerId, targetId, validDmg);
-                                    Broadcast(hitPacket, exceptClientId: clientId);
+                            } else {
+                                if (_clients.TryGetValue(targetId, out var targetClient)) {
+                                    if (Vector3.Distance(client.Position, targetClient.Position) <= 6.0f) {
+                                        var hitPacket = NetworkProtocol.WritePlayerHit(attackerId, targetId, validDmg);
+                                        Broadcast(hitPacket, exceptClientId: clientId);
+                                    }
                                 }
                             }
-                        }
+                        });
                         break;
                     }
                     case PacketType.BlockChange: {
@@ -991,22 +1231,50 @@ public sealed class GameServer : IDisposable {
                         int cy = reader.ReadInt32();
                         int cz = reader.ReadInt32();
                         byte dim = reader.ReadByte();
-                        int cCount = reader.ReadInt32();
+                        int cCount = Math.Clamp(reader.ReadInt32(), 0, GameWorld.ChestCapacity);
                         var items = new List<(int idx, ushort id, int qty, int dur)>();
                         for (int i = 0; i < cCount; i++) {
                             items.Add((reader.ReadInt32(), reader.ReadUInt16(), reader.ReadInt32(), reader.ReadInt32()));
                         }
 
                         EnqueueMainThreadAction(() => {
+                            if ((Dimension)dim != client.Dimension) return;
                             var targetWorld = _session.GetWorld((Dimension)dim);
+                            if (targetWorld == null) return;
                             var cPos = new Vec3i(cx, cy, cz);
+                            if (!CanReachContainer(targetWorld, client, cPos, GameData.BChest.Id)) return;
                             var chest = targetWorld.GetOrCreateChest(cPos);
+
+                            // Валидация сохранения предметов: предметы в сундуке могут браться только
+                            // из существующего содержимого сундука или инвентаря игрока.
+                            var playerInv = client.PlayerData.Inventory;
+                            var available = new Dictionary<ushort, int>();
+                            for (int i = 0; i < chest.Capacity; i++) {
+                                if (chest.Slots[i] is { } ce && ce.Quantity > 0) {
+                                    ushort id = ce.Item.Definition.Id;
+                                    available[id] = available.GetValueOrDefault(id) + ce.Quantity;
+                                }
+                            }
+                            for (int i = 0; i < playerInv.Capacity; i++) {
+                                if (playerInv.Slots[i] is { } pe && pe.Quantity > 0) {
+                                    ushort id = pe.Item.Definition.Id;
+                                    available[id] = available.GetValueOrDefault(id) + pe.Quantity;
+                                }
+                            }
+
                             for (int i = 0; i < chest.Capacity; i++) chest.RemoveAt(i);
                             foreach (var item in items) {
                                 if (GameData.Items.TryGetValue(item.id, out var def)) {
+                                    if (item.idx < 0 || item.idx >= chest.Capacity) continue;
+                                    int maxAvail = available.GetValueOrDefault(item.id, 0);
+                                    int qty = Math.Clamp(item.qty, 0, Math.Min(def.MaxStack, maxAvail));
+                                    if (qty <= 0) continue;
+                                    available[item.id] -= qty;
+
                                     var inst = GameData.NewItem(def);
-                                    inst.Durability = item.dur;
-                                    chest.InsertAt(item.idx, new ItemEntry(inst, item.qty));
+                                    int maxDur = GameData.GetMaxItemDurability(def.Id);
+                                    if (maxDur > 0) inst.Durability = Math.Clamp(item.dur, 1, maxDur);
+                                    chest.InsertAt(item.idx, new ItemEntry(inst, qty));
                                 }
                             }
                             var chestPacket = NetworkProtocol.WriteChestSync(cx, cy, cz, chest, dim);
@@ -1015,11 +1283,12 @@ public sealed class GameServer : IDisposable {
                         break;
                     }
                     case PacketType.ChatMessage: {
-                        string sender = reader.ReadString();
+                        reader.ReadString(); // Пропускаем client-supplied sender для защиты от подмены имени
                         string msg = reader.ReadString();
                         byte r = reader.ReadByte();
                         byte g = reader.ReadByte();
                         byte b = reader.ReadByte();
+                        string sender = client.Name;
                         EnqueueMainThreadAction(() => {
                             _session.AddChatMessage($"<{sender}> {msg}", new Raylib_cs.Color(r, g, b, (byte)255));
                         });
@@ -1034,12 +1303,56 @@ public sealed class GameServer : IDisposable {
         } finally {
             _clients.TryRemove(clientId, out _);
             client.Close();
-            SaveSystem.SavePlayerData(client.Name, client.PlayerData);
-            _session.AddChatMessage($"Игрок {client.Name} покинул игру.", Raylib_cs.Color.Yellow);
-            _session.AddMessage($"Игрок {client.Name} вышел");
-            var leaveP = NetworkProtocol.WritePlayerLeave(clientId);
-            Broadcast(leaveP);
+            Interlocked.Decrement(ref _activeClientConnections);
+            // Списки чата/сообщений итерирует главный поток в HUD — мутировать их
+            // из сокет-потока нельзя (InvalidOperationException в отрисовке).
+            // Сохранение тоже уходит в главный поток: инвентарь меняется именно там.
+            if (handshaked) {
+                EnqueueMainThreadAction(() => {
+                    SaveSystem.SavePlayerData(client.Name, client.PlayerData);
+                    _session.AddChatMessage($"Игрок {client.Name} покинул игру.", Raylib_cs.Color.Yellow);
+                    _session.AddMessage($"Игрок {client.Name} вышел");
+                });
+                var leaveP = NetworkProtocol.WritePlayerLeave(clientId);
+                Broadcast(leaveP);
+            }
         }
+    }
+
+    /// <summary>
+    /// Можно ли клиенту трогать контейнер в этой точке: блок нужного типа реально
+    /// существует в мире, клиент в том же измерении и не дальше 6 блоков.
+    /// </summary>
+    private static bool CanReachContainer(GameWorld world, ConnectedClient client, Vec3i pos, ushort expectedBlockId) {
+        if (client.Dimension != world.Dimension) return false;
+        if (world.GetVoxel(pos).TypeId != expectedBlockId) return false;
+        var center = new Vector3(pos.X + 0.5f, pos.Y + 0.5f, pos.Z + 0.5f);
+        return Vector3.Distance(client.Position, center) <= 6.0f;
+    }
+
+    private bool IsNearPortal(ConnectedClient client, Dimension targetDim) {
+        var world = _session.GetWorld(client.Dimension);
+        if (world == null) return false;
+        ushort requiredPortal = targetDim switch {
+            Dimension.Nether => GameData.BNetherPortal.Id,
+            Dimension.End => GameData.BEndPortal.Id,
+            Dimension.Overworld => (client.Dimension == Dimension.Nether ? GameData.BNetherPortal.Id : GameData.BEndPortal.Id),
+            _ => 0
+        };
+        if (requiredPortal == 0) return true;
+        int cx = (int)MathF.Floor(client.Position.X);
+        int cy = (int)MathF.Floor(client.Position.Y);
+        int cz = (int)MathF.Floor(client.Position.Z);
+        for (int dx = -6; dx <= 6; dx++) {
+            for (int dy = -6; dy <= 6; dy++) {
+                for (int dz = -6; dz <= 6; dz++) {
+                    if (world.GetVoxel(new Vec3i(cx + dx, cy + dy, cz + dz)).TypeId == requiredPortal) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     public void TeleportClient(int clientId, Vector3 pos) {

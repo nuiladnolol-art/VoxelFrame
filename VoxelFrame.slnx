@@ -5,4 +5,12 @@
     <Project Path="src/VoxelFrame.Installer/VoxelFrame.Installer.csproj" />
     <Project Path="src/VoxelFrame.Launcher/VoxelFrame.Launcher.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/api-check/ApiCheck.csproj" />
+    <Project Path="tools/IconGen/IconGen.csproj" />
+    <Project Path="tools/mesh-diag/MeshDiag.csproj" />
+    <Project Path="tools/render-diag/RenderDiag.csproj" />
+    <Project Path="tools/SelfCheck/SelfCheck.csproj" />
+    <Project Path="tools/test-sig/TestSig.csproj" />
+  </Folder>
 </Solution>

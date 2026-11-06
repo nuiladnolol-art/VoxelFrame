@@ -20,6 +20,11 @@ public sealed class FireSystem {
 
     public FireSystem(GameWorld world) => _world = world;
 
+    // Переиспользуемые снимки ключей: ToList() в горячем пути давал мусор каждый кадр.
+    private readonly List<Vec3i> _burningSnapshot = new();
+    private readonly List<Vec3i> _campfireSnapshot = new();
+    private readonly List<Vec3i> _lavaSnapshot = new();
+
     public void RegisterCampfire(Vec3i pos) => Campfires.Add(pos);
     public void UnregisterCampfire(Vec3i pos) => Campfires.Remove(pos);
 
@@ -57,7 +62,9 @@ public sealed class FireSystem {
         }
 
         if (Burning.Count == 0) return;
-        foreach (var pos in Burning.Keys.ToList()) {
+        _burningSnapshot.Clear();
+        _burningSnapshot.AddRange(Burning.Keys);
+        foreach (var pos in _burningSnapshot) {
             if (!Burning.TryGetValue(pos, out float timeRemaining)) continue;
             float remaining = timeRemaining - dt;
             if (remaining > 0f) {
@@ -70,13 +77,17 @@ public sealed class FireSystem {
 
     private void Spread() {
         // Поджигание от костров (соседние блоки)
-        foreach (var camp in Campfires.ToList()) {
+        _campfireSnapshot.Clear();
+        _campfireSnapshot.AddRange(Campfires);
+        foreach (var camp in _campfireSnapshot) {
             foreach (var d in WorldGridDirs) {
                 TryIgnite(camp + d);
             }
         }
         // Распространение от горящих блоков и огня
-        foreach (var pos in Burning.Keys.ToList()) {
+        _burningSnapshot.Clear();
+        _burningSnapshot.AddRange(Burning.Keys);
+        foreach (var pos in _burningSnapshot) {
             // Проверяем соседей в радиусе 1 блока во все стороны
             foreach (var d in WorldGridDirs) {
                 var target = pos + d;
@@ -105,7 +116,9 @@ public sealed class FireSystem {
             }
         }
         // Поджигание от лавы
-        foreach (var lavaPos in _world.Fluids.ActiveLava.ToList()) {
+        _lavaSnapshot.Clear();
+        _lavaSnapshot.AddRange(_world.Fluids.ActiveLava);
+        foreach (var lavaPos in _lavaSnapshot) {
             foreach (var d in WorldGridDirs) {
                 var np = lavaPos + d;
                 var block = _world.GetBlockType(np);

@@ -35,6 +35,11 @@ namespace VoxelFrame.Game;
         new[] { (0, 0, 0, 0f, 1f), (0, 1, 0, 0f, 0f), (1, 1, 0, 1f, 0f), (1, 0, 0, 1f, 1f) },
     };
 
+    private static readonly (float X0, float Z0, float X1, float Z1)[] CrossPlanes = {
+        (0.12f, 0.12f, 0.88f, 0.88f),
+        (0.12f, 0.88f, 0.88f, 0.12f)
+    };
+
     [ThreadStatic] private static List<float>? _tVerts;
     [ThreadStatic] private static List<float>? _tNorms;
     [ThreadStatic] private static List<float>? _tUvs;
@@ -73,6 +78,22 @@ namespace VoxelFrame.Game;
             }
         }
 
+        // Буфер для умной триангуляции квада: объявлен вне циклов,
+        // иначе stackalloc в цикле копил бы стек (CA2014).
+        Span<float> cornerLightSums = stackalloc float[4];
+
+        // Биом нужен для травы/листвы/жидкостей, но вызывался на каждую грань.
+        // Внутри GetBiome — до десятка сэмплов шума, поэтому кэшируем по колонке.
+        var biomeByColumn = new byte[Chunk.SizeX * Chunk.SizeZ]; // 255 = ещё не считали
+        BiomeType BiomeAt(int lx, int lz) {
+            int ci = lx * Chunk.SizeZ + lz;
+            byte cached = biomeByColumn[ci];
+            if (cached != byte.MaxValue) return (BiomeType)cached;
+            var b = world.Generator.GetBiome(gc.Coord.X * Chunk.SizeX + lx, 40, gc.Coord.Z * Chunk.SizeZ + lz);
+            biomeByColumn[ci] = (byte)b;
+            return b;
+        }
+
         for (int pass = 0; pass < 2; pass++) {
             currentResult = pass == 0 ? resultOpaque : resultTranslucent;
             for (int lx = 0; lx < Chunk.SizeX; lx++) {
@@ -96,9 +117,7 @@ namespace VoxelFrame.Game;
                     if (isFoliage) {
                         byte foliageTile;
                         if (v.TypeId == GameData.BTallGrass.Id) {
-                            int wx = gc.Coord.X * Chunk.SizeX + lx;
-                            int wz = gc.Coord.Z * Chunk.SizeZ + lz;
-                            var biome = world.Generator.GetBiome(wx, 40, wz);
+                            var biome = BiomeAt(lx, lz);
                             foliageTile = biome switch {
                                 BiomeType.Plains => (byte)TextureAtlas.TTallGrassPlains,
                                 BiomeType.Savanna => (byte)TextureAtlas.TTallGrassSavanna,
@@ -129,12 +148,7 @@ namespace VoxelFrame.Game;
                         float worldOffsetY = gc.Coord.Y * Chunk.SizeY;
                         float worldOffsetZ = gc.Coord.Z * Chunk.SizeZ;
 
-                        (float X0, float Z0, float X1, float Z1)[] crossPlanes = {
-                            (0.12f, 0.12f, 0.88f, 0.88f),
-                            (0.12f, 0.88f, 0.88f, 0.12f)
-                        };
-
-                        foreach (var plane in crossPlanes) {
+                        foreach (var plane in CrossPlanes) {
                             if (verts.Count / 3 + 8 > MaxVertices) Flush();
                             int bv = verts.Count / 3;
 
@@ -264,9 +278,7 @@ namespace VoxelFrame.Game;
                     if (isFluid) {
                         ushort aboveType = GetTypeIdAtOffset(neighbors, gc, lx, ly, lz, 0, 1, 0);
                         float selfH = (aboveType == v.TypeId) ? 1.0f : GetFluidHeight(v.TypeId, v.SubGridLayerMask);
-                        int wx = gc.Coord.X * Chunk.SizeX + lx;
-                        int wz = gc.Coord.Z * Chunk.SizeZ + lz;
-                        var biome = world.Generator.GetBiome(wx, 40, wz);
+                        var biome = BiomeAt(lx, lz);
                         byte fluidTile = (byte)(isWater
                             ? (biome == BiomeType.Swamp ? TextureAtlas.TWaterSwamp : TextureAtlas.TWater)
                             : TextureAtlas.TLava);
@@ -441,9 +453,7 @@ namespace VoxelFrame.Game;
                         int baseVertex = verts.Count / 3;
                         byte tile = GetRotatedFaceTile(tiles, v.TypeId, v.SubGridLayerMask, f);
                         if (v.TypeId == GameData.BLeaves.Id) {
-                            int wx = gc.Coord.X * Chunk.SizeX + lx;
-                            int wz = gc.Coord.Z * Chunk.SizeZ + lz;
-                            var biome = world.Generator.GetBiome(wx, 40, wz);
+                            var biome = BiomeAt(lx, lz);
                             tile = biome switch {
                                 BiomeType.Plains => TextureAtlas.TLeavesPlains,
                                 BiomeType.Savanna => TextureAtlas.TLeavesSavanna,
@@ -451,9 +461,7 @@ namespace VoxelFrame.Game;
                                 _ => TextureAtlas.TLeaves
                             };
                         } else if (v.TypeId == GameData.BGrass.Id) {
-                            int wx = gc.Coord.X * Chunk.SizeX + lx;
-                            int wz = gc.Coord.Z * Chunk.SizeZ + lz;
-                            var biome = world.Generator.GetBiome(wx, 40, wz);
+                            var biome = BiomeAt(lx, lz);
                             if (f == 2) { // Верх (+Y)
                                 tile = biome switch {
                                     BiomeType.Plains => (byte)TextureAtlas.TGrassTopPlains,
@@ -484,7 +492,6 @@ namespace VoxelFrame.Game;
                         byte shadeDir = (byte)(255f * faceDir);
 
                         bool useSmooth = SaveSystem.FancyGraphics && !isFluid;
-                        float[] cornerLightSums = new float[4];
 
                         for (int vi = 0; vi < 4; vi++) {
                             var (fx, fy, fz, fu, fv) = FaceVerts[f][vi];

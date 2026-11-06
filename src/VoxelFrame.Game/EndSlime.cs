@@ -82,6 +82,7 @@ public sealed class EndSlime {
         HurtTime -= dt;
         AttackCooldown -= dt;
         LeapCooldown -= dt;
+        SlamCooldown -= dt;
 
         // Телеграф ударной волны гаснет со временем
         if (SlamWarningTimer > 0f) SlamWarningTimer -= dt;
@@ -175,16 +176,16 @@ public sealed class EndSlime {
         if (LeapCooldown <= 0f) {
             LeapCooldown = leapCd + (float)_random.NextDouble() * 1.0f;
             LeapBurstCounter++;
+            float flatDistSq = toPlayer.X * toPlayer.X + toPlayer.Z * toPlayer.Z;
+            var dir = flatDistSq > 0.0001f ? new Vector3(toPlayer.X, 0f, toPlayer.Z) / MathF.Sqrt(flatDistSq) : Vector3.Zero;
             if (playerCampingHigh) {
                 // Высотный сокрушительный прыжок прямо на верхушку столба
-                var dir = Vector3.Normalize(new Vector3(toPlayer.X, 0f, toPlayer.Z));
                 Velocity.X = dir.X * 18f;
                 Velocity.Z = dir.Z * 18f;
                 Velocity.Y = MathF.Max(18f, MathF.Sqrt(2f * 26f * (toPlayer.Y + 2.5f)));
                 SoundSystem.PlaySplash();
                 session.ShowTitle("СОКРУШИТЕЛЬНЫЙ ПРЫЖОК", "Слизень Края сметает опору под вами!", 2.0f, new Color(100, 255, 180, 255));
             } else if (dist > 1.0f) {
-                var dir = Vector3.Normalize(new Vector3(toPlayer.X, 0f, toPlayer.Z));
                 Velocity.X = dir.X * leapSpeed;
                 Velocity.Z = dir.Z * leapSpeed;
                 Velocity.Y = phase == 3 ? 15f : 13f;
@@ -230,7 +231,8 @@ public sealed class EndSlime {
             float slamDmg = 4.0f * (1f - Math.Min(dist, 9f) / 9f);   // нерф: было 5.95
             player.ApplyDamage(slamDmg, session, Position);
             session.AddMessage($"Ударная волна Слизня Края! -{slamDmg:F0} HP");
-            var kb = Vector3.Normalize(new Vector3(toPlayer.X, 0f, toPlayer.Z)) * 8f;
+            float kbFlatSq = toPlayer.X * toPlayer.X + toPlayer.Z * toPlayer.Z;
+            var kb = (kbFlatSq > 0.0001f ? new Vector3(toPlayer.X, 0f, toPlayer.Z) / MathF.Sqrt(kbFlatSq) : Vector3.UnitX) * 8f;
             player.Velocity += new Vector3(kb.X, 4f, kb.Z);
             world.SpawnCrit(Position + new Vector3(0f, HalfSizeY, 0f), 22);
             SoundSystem.PlayExplosion();
@@ -249,7 +251,8 @@ public sealed class EndSlime {
         var toCenter = _islandCenter - Position;
         float centerDist = toCenter.Length();
         if (centerDist > 46f) {
-            var dirCenter = Vector3.Normalize(new Vector3(toCenter.X, 0.0f, toCenter.Z));
+            float cFlatSq = toCenter.X * toCenter.X + toCenter.Z * toCenter.Z;
+            var dirCenter = cFlatSq > 0.0001f ? new Vector3(toCenter.X, 0.0f, toCenter.Z) / MathF.Sqrt(cFlatSq) : Vector3.Zero;
             Velocity.X += dirCenter.X * 60f * dt;
             Velocity.Z += dirCenter.Z * 60f * dt;
             if (centerDist > 80f) {

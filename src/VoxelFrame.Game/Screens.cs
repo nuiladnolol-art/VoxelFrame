@@ -39,6 +39,13 @@ public static partial class Screens {
     public static bool SettingsOpenedFromGame = false;
     public static int ActiveRebindIndex = -1;
 
+    private static List<SaveSystem.WorldSaveInfo>? _cachedWorlds;
+    public static void InvalidateWorldsCache() => _cachedWorlds = null;
+    public static List<SaveSystem.WorldSaveInfo> GetCachedWorlds() {
+        if (_cachedWorlds == null) _cachedWorlds = SaveSystem.GetAllWorlds();
+        return _cachedWorlds;
+    }
+
     private static readonly string[] BindLabels = {
         "Вперед",
         "Назад",
@@ -294,6 +301,7 @@ public static partial class Screens {
                 SaveSystem.CurrentWorldPath = SaveSystem.CreateWorldSavePath(name);
                 CustomWorldSeed = GameData.ParseSeed(WorldSeedInput);
                 action = MenuAction.NewGame;
+                InvalidateWorldsCache();
                 InCreateWorldScreen = false;
                 InWorldSelectScreen = false;
             }
@@ -303,7 +311,7 @@ public static partial class Screens {
         } else if (InWorldSelectScreen) {
             Fonts.DrawTitle3D("ВЫБОР МИРА", w / 2f, h * 0.08f, 44f);
 
-            var worlds = SaveSystem.GetAllWorlds();
+            var worlds = GetCachedWorlds();
             if (worlds.Count > 0) {
                 float wheel = Raylib.GetMouseWheelMove();
                 if (wheel > 0) WorldListScrollOffset = Math.Max(0, WorldListScrollOffset - 1);
@@ -381,6 +389,7 @@ public static partial class Screens {
                 } else {
                     ConfirmDeleteWorld = false;
                     SaveSystem.DeleteSave(worlds[SelectedWorldListIndex].FilePath);
+                    InvalidateWorldsCache();
                     if (SelectedWorldListIndex >= worlds.Count - 1) SelectedWorldListIndex = Math.Max(0, worlds.Count - 2);
                 }
             }
@@ -400,6 +409,7 @@ public static partial class Screens {
             float gapY = 12f;
 
             if (Button(w / 2f - btnW / 2f, cy, btnW, btnH, "Одиночная игра", true)) {
+                InvalidateWorldsCache();
                 InWorldSelectScreen = true;
             }
             if (Button(w / 2f - btnW / 2f, cy + btnH + gapY, btnW, btnH, "Сетевая игра", true)) {
@@ -423,7 +433,7 @@ public static partial class Screens {
             var verRec = new Rectangle(14f, h - 34f, 195f, 24f);
             Raylib.DrawRectangleRec(verRec, new Color(20, 24, 34, 180));
             Raylib.DrawRectangleLinesEx(verRec, 1f, new Color(50, 60, 80, 180));
-            Fonts.Draw("VoxelFrame 1.0.1", 22f, h - 30f, 14f, new Color(190, 205, 230, 220));
+            Fonts.Draw($"VoxelFrame {Program.Version}", 22f, h - 30f, 14f, new Color(190, 205, 230, 220));
 
             // Правый копирайт
             var copyRec = new Rectangle(w - 200f, h - 34f, 186f, 24f);
@@ -461,6 +471,7 @@ public static partial class Screens {
 
         if (Button(leftX, cy + btnH + gapY, btnW, btnH, "Управление...", true)) {
             InControlsScreen = true;
+            ActiveRebindIndex = -1;
         }
 
         // Выбор цвета персонажа
@@ -1016,6 +1027,9 @@ public static partial class Screens {
 
     public static void Reset() {
         Held = null;
+        // Сетки крафта — статическое состояние: без очистки их содержимое
+        // переезжало в следующий мир (дубли предметов).
+        ClearCraftingGrids();
     }
 
     /// Возврат предмета из руки и сеток крафта в инвентарь (при закрытии окна).
@@ -1088,7 +1102,7 @@ public static partial class Screens {
         int gridW = cols * slot + (cols - 1) * gap; // 500px
         int panelW = 1020;
         int panelH = 340;
-        float px = w / 2f - panelW / 2f, py = (h - panelH) / 2f;
+        float px = MathF.Max(4f, (w - panelW) / 2f), py = MathF.Max(4f, (h - panelH) / 2f);
         DrawPanel(px, py, panelW, panelH);
 
         // 1. Слоты экипировки брони слева (Шлем, Нагрудник, Поножи, Ботинки)
@@ -1185,8 +1199,8 @@ public static partial class Screens {
         int cols = 9, mainRows = 3;
         int panelW = 1020;
         int panelH = 340;
-        float px = Ui.Vw / 2f - panelW / 2f;
-        float py = (Ui.Vh - panelH) / 2f;
+        float px = MathF.Max(4f, (Ui.Vw - panelW) / 2f);
+        float py = MathF.Max(4f, (Ui.Vh - panelH) / 2f);
 
         float armorX = px + 18f;
         float armorY = py + 34f;
@@ -1265,8 +1279,8 @@ public static partial class Screens {
         int cols = 9, mainRows = 3;
         int panelW = 1020;
         int panelH = 340;
-        float px = Ui.Vw / 2f - panelW / 2f;
-        float py = (Ui.Vh - panelH) / 2f;
+        float px = MathF.Max(4f, (Ui.Vw - panelW) / 2f);
+        float py = MathF.Max(4f, (Ui.Vh - panelH) / 2f);
 
         float armorX = px + 18f;
         float armorY = py + 34f;
@@ -1473,11 +1487,41 @@ public static partial class Screens {
         }
     }
 
+    private static double _lastSlotClickTime = 0;
+    private static int _lastSlotClickIndex = -1;
+
     private static bool SlotClicked(GameSession session, VoxelFrame.Core.Inventory.Container inv,
                                     float x, float y, int idx, bool rightClick) {
         var rect = new Rectangle(x, y, 52, 52);
         var mouse = Ui.Mouse();
         if (!Raylib.CheckCollisionPointRec(mouse, rect)) return false;
+
+        // Двойной клик ЛКМ: сбор всех одинаковых предметов из инвентаря в курсор (до MaxStack)
+        if (!rightClick) {
+            double now = Raylib.GetTime();
+            bool isDoubleClick = (now - _lastSlotClickTime < 0.35) && (_lastSlotClickIndex == idx);
+            _lastSlotClickTime = now;
+            _lastSlotClickIndex = idx;
+
+            if (isDoubleClick && Held.HasValue && Held.Value.Quantity < Held.Value.Item.Definition.MaxStack) {
+                var heldDef = Held.Value.Item.Definition;
+                int maxStack = heldDef.MaxStack;
+                for (int i = 0; i < inv.Slots.Length && Held.Value.Quantity < maxStack; i++) {
+                    var slotItem = inv.Slots[i];
+                    if (slotItem.HasValue && slotItem.Value.Item.Definition == heldDef) {
+                        int canTake = Math.Min(maxStack - Held.Value.Quantity, slotItem.Value.Quantity);
+                        Held = Held.Value with { Quantity = Held.Value.Quantity + canTake };
+                        if (slotItem.Value.Quantity - canTake <= 0) {
+                            inv.RemoveAt(i);
+                        } else {
+                            inv.InsertAt(i, slotItem.Value with { Quantity = slotItem.Value.Quantity - canTake });
+                        }
+                    }
+                }
+                SoundSystem.PlayPop();
+                return true;
+            }
+        }
 
         var entryInSlot = inv.Slots[idx];
         bool shift = Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift);
@@ -1722,6 +1766,7 @@ public static partial class Screens {
     private static void DrawRecipeBookGrid(GameSession session, float rx, float ry, float rw, float rh, ItemEntry?[] targetGrid, bool is3x3) {
         var mouse = Ui.Mouse();
         bool leftClick = Raylib.IsMouseButtonPressed(MouseButton.Left);
+        bool rightClick = Raylib.IsMouseButtonPressed(MouseButton.Right);
         bool shiftHeld = Raylib.IsKeyDown(KeyboardKey.LeftShift) || Raylib.IsKeyDown(KeyboardKey.RightShift);
         var inv = session.Player.Inventory;
 
@@ -1904,8 +1949,10 @@ public static partial class Screens {
                         if (shiftHeld) {
                             QuickCraftStack(session, recipe, is3x3);
                         } else {
-                            AutoFillRecipe(session, recipe, targetGrid, is3x3);
+                            QuickCraftOnce(session, recipe, is3x3);
                         }
+                    } else if (rightClick) {
+                        AutoFillRecipe(session, recipe, targetGrid, is3x3);
                     }
                 }
             } else {
@@ -1963,8 +2010,9 @@ public static partial class Screens {
             lines.Add(($" • {ing.Name}: {have}/{count}", ingCol));
         }
 
-        lines.Add(("ЛКМ — выложить в сетку", new Color(170, 175, 185, 200)));
-        lines.Add(("Shift+ЛКМ — скрафтить стак", new Color(130, 215, 150, 220)));
+        lines.Add(("ЛКМ — быстрый крафт (1 шт.)", new Color(170, 225, 185, 220)));
+        lines.Add(("Shift+ЛКМ — скрафтить стак", new Color(255, 215, 100, 220)));
+        lines.Add(("ПКМ — выложить в сетку", new Color(170, 175, 185, 200)));
 
         float maxW = 0f;
         foreach (var (t, _) in lines) maxW = MathF.Max(maxW, Fonts.Measure(t, 12f));
@@ -1981,6 +2029,39 @@ public static partial class Screens {
             Fonts.Draw(t, bx + 8f, curY, 12f, c);
             curY += 17f;
         }
+    }
+
+    private static void QuickCraftOnce(GameSession session, GameData.CraftRecipe recipe, bool is3x3) {
+        if (recipe.Needs3x3 && !is3x3) {
+            session.AddMessage("Этот рецепт требует Верстак 3×3!");
+            return;
+        }
+        var inv = session.Player.Inventory;
+        foreach (var (item, count) in recipe.Ingredients) {
+            if (inv.CountOf(item) < count) {
+                session.AddMessage($"Не хватает ингредиентов для «{recipe.Name}»!");
+                return;
+            }
+        }
+
+        foreach (var (ing, count) in recipe.Ingredients) {
+            inv.TryRemove(ing, count);
+        }
+
+        var resItem = GameData.NewItem(recipe.Output);
+        if (!inv.TryInsert(resItem, recipe.Count)) {
+            var p = session.Player.Position + new Vector3(0f, 0.5f, 0f);
+            session.World.Pickups.Add(new ItemPickup(resItem, recipe.Count, p) {
+                PickupDelay = 0.5f,
+                Velocity = session.Player.Forward * 2.5f + Vector3.UnitY * 2.0f
+            });
+        }
+
+        GameClient.Active?.SendInventoryAction(InventoryActionType.Craft, GameData.CraftRecipes.IndexOf(recipe), 0, 1);
+        GameClient.Active?.SendInventoryUpdate(session.Player, (byte)session.World.Dimension);
+
+        SoundSystem.PlayPop();
+        session.AddMessage($"Скрафчено: {recipe.Output.Name} ×{recipe.Count}");
     }
 
     private static void QuickCraftStack(GameSession session, GameData.CraftRecipe recipe, bool is3x3) {

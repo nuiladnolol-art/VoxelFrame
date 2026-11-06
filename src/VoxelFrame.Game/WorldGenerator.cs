@@ -286,16 +286,16 @@ public sealed class WorldGenerator {
         // 3D-жилы руд
         PlaceOreVeins(chunk, ox, oy, oz);
 
-        // Деревья на поверхности
-        PlaceTrees(chunk, ox, oz);
-
-        // Растительность (2D трава)
-        PlaceFoliage(chunk, ox, oz);
-
-        // Деревни, порталы и крепости размещаются в чанках, пересекающих зону поверхности.
-        // Диапазон 0..maxSurfaceChunkY охватывает и низины (Y=0), и высокие горы (Y=4).
+        // Деревни, порталы, крепости, деревья и растительность размещаются в чанках, пересекающих зону поверхности.
+        // Диапазон 0..maxSurfaceChunkY охватывает и низины (Y=0), и высокие горы.
         int maxSurfaceChunkY = (BaseHeight + HeightAmplitude + 20) / Chunk.SizeY + 1;
         if (chunk.Origin.Y >= 0 && chunk.Origin.Y <= maxSurfaceChunkY) {
+            // Деревья на поверхности
+            PlaceTrees(chunk, ox, oz);
+
+            // Растительность (2D трава)
+            PlaceFoliage(chunk, ox, oz);
+
             PlaceVillages(chunk, ox, oz);
             PlaceRuinedPortals(chunk, ox, oy, oz);
             PlaceEndStrongholds(chunk, ox, oy, oz);
@@ -800,6 +800,8 @@ public sealed class WorldGenerator {
         for (int lx = 0; lx < Chunk.SizeX; lx++) {
             for (int lz = 0; lz < Chunk.SizeZ; lz++) {
                 int wx = ox + lx, wz = oz + lz;
+                var biome = GetBiome(wx, BaseHeight, wz);
+                int maxGoldY = (biome == BiomeType.Desert) ? 56 : 32;
 
                 for (int ly = 0; ly < Chunk.SizeY; ly++) {
                     int wy = oy + ly;
@@ -829,8 +831,6 @@ public sealed class WorldGenerator {
                     }
 
                     // Золото (Gold) — жилы на глубине Y=5..32 (и до 56 в пустынях)
-                    var biome = GetBiome(wx, BaseHeight, wz);
-                    int maxGoldY = (biome == BiomeType.Desert) ? 56 : 32;
                     if (wy <= maxGoldY) {
                         float goldN = _goldNoise.Fractal(wx * 0.22f + 700f, wy * 0.22f, wz * 0.22f, 2, 0.5f);
                         if (goldN > 0.81f) {
@@ -1682,7 +1682,7 @@ public sealed class WorldGenerator {
                 // Вход-колодец с поверхности
                 for (int dx = -1; dx <= 1; dx++) {
                     for (int dz = -1; dz <= 1; dz++) {
-                        for (int wy = surface; wy >= cy + 5; wy--) {
+                        for (int wy = surface; wy >= cy + 4; wy--) {
                             SetWorldBlock(chunk, ox, oy, oz, cx + dx, wy, cz + dz, 0);
                         }
                         SetWorldBlock(chunk, ox, oy, oz, cx + dx, surface, cz + dz, 0);
@@ -1731,17 +1731,8 @@ public sealed class WorldGenerator {
                     }
                 }
 
-                // Центральная вертикальная шахта вниз к секретной сокровищнице
+                // Сокровищница 7x7x4 (строится до шахты, чтобы потолок не перекрывал её)
                 int vaultY = surface - 10;
-                for (int y = surface; y >= vaultY; y--) {
-                    for (int dx = -1; dx <= 1; dx++) {
-                        for (int dz = -1; dz <= 1; dz++) {
-                            SetWorldBlock(chunk, ox, oy, oz, cx + dx, y, cz + dz, 0);
-                        }
-                    }
-                }
-
-                // Сокровищница 7x7x4
                 for (int dx = -3; dx <= 3; dx++) {
                     for (int dz = -3; dz <= 3; dz++) {
                         for (int dy = 0; dy <= 4; dy++) {
@@ -1752,6 +1743,15 @@ public sealed class WorldGenerator {
                             } else {
                                 SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, 0);
                             }
+                        }
+                    }
+                }
+
+                // Центральная вертикальная шахта вниз к секретной сокровищнице
+                for (int y = surface; y >= vaultY + 1; y--) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        for (int dz = -1; dz <= 1; dz++) {
+                            SetWorldBlock(chunk, ox, oy, oz, cx + dx, y, cz + dz, 0);
                         }
                     }
                 }
@@ -1823,7 +1823,7 @@ public sealed class WorldGenerator {
                     // Аутентичные Адские крепости (Nether Fortress)
                     int fortSectorX = (int)MathF.Floor(wx / 160f);
                     int fortSectorZ = (int)MathF.Floor(wz / 160f);
-                    int fortHash = Math.Abs(fortSectorX * 73856093 ^ fortSectorZ * 83492791 ^ Seed ^ 0x5EEDF087);
+                    int fortHash = (fortSectorX * 73856093 ^ fortSectorZ * 83492791 ^ Seed ^ (int)0x5EEDF087) & 0x7FFFFFFF;
                     if (fortHash % 100 < 55) { // 55% секторов содержат крепость
                         int fcX = fortSectorX * 160 + 80;
                         int fcZ = fortSectorZ * 160 + 80;
@@ -1913,7 +1913,7 @@ public sealed class WorldGenerator {
         // Детерминированные высоты колонн взаимозависимы от мира, но не меняются при перерисовании чанка
         var pillarHeights = new int[pillarCount];
         for (int i = 0; i < pillarCount; i++) {
-            pillarHeights[i] = 56 + (Math.Abs((Seed + i * 53) * 40503 ^ (i * 1777)) % 36); // 56..92
+            pillarHeights[i] = 56 + ((((Seed + i * 53) * 40503 ^ (i * 1777)) & 0x7FFFFFFF) % 36); // 56..92
         }
 
         for (int lx = 0; lx < Chunk.SizeX; lx++) {
@@ -1930,7 +1930,7 @@ public sealed class WorldGenerator {
                     int ciX = (int)MathF.Floor((wx + 100f) / 200f);
                     int ciZ = (int)MathF.Floor((wz + 100f) / 200f);
                     int cX = ciX * 200 - 100, cZ = ciZ * 200 - 100;
-                    int hc = Math.Abs(ciX * 73856093 ^ ciZ * 83492791 ^ Seed * 92821);
+                    int hc = (ciX * 73856093 ^ ciZ * 83492791 ^ Seed * 92821) & 0x7FFFFFFF;
                     if (hc % 100 < 55) {
                         float fdx = wx - cX, fdz = wz - cZ;
                         float fr = MathF.Sqrt(fdx * fdx + fdz * fdz);

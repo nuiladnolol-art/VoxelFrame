@@ -5,7 +5,9 @@ namespace VoxelFrame.Core.Inventory;
 /// Единый путь проверки HasSpaceFor/TryInsert.
 /// </summary>
 public sealed class Container {
-    private readonly ItemEntry?[] _slots = new ItemEntry?[36];
+    public const int DefaultCapacity = 36;
+
+    private readonly ItemEntry?[] _slots;
 
     public IReadOnlyList<ItemEntry> Entries {
         get {
@@ -23,7 +25,12 @@ public sealed class Container {
         for (int i = 0; i < _slots.Length; i++) _slots[i] = null;
     }
 
-    public Container() { }
+    public Container() : this(DefaultCapacity) { }
+
+    public Container(int capacity) {
+        if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
+        _slots = new ItemEntry?[capacity];
+    }
 
     public bool HasSpaceFor(ItemDefinition def, int quantity = 1) {
         int remaining = quantity;
@@ -85,6 +92,16 @@ public sealed class Container {
     public void InsertAt(int index, ItemEntry entry) {
         if (index < 0 || index >= _slots.Length) return;
         _slots[index] = entry;
+    }
+
+    /// <summary>
+    /// Кладёт предмет в конкретный слот, а если индекс вне диапазона (старый сейв с
+    /// большим контейнером) — пакует в свободные слоты, чтобы предмет не потерялся.
+    /// Возвращает true при успешной вставке или упаковке, false если контейнер переполнен.
+    /// </summary>
+    public bool InsertAtOrPack(int index, ItemEntry entry) {
+        if (index >= 0 && index < _slots.Length) { _slots[index] = entry; return true; }
+        return TryInsert(entry.Item, entry.Quantity);
     }
 
     public int CountOf(ItemDefinition def) {

@@ -14,7 +14,9 @@ public sealed class WorldRenderer : IDisposable {
     private GameWorld _world => _session.World;
     private Dimension _lastDimension = Dimension.Overworld;
     private readonly List<GameChunk> _rebuildQueue = new();
+    private readonly HashSet<GameChunk> _rebuildSet = new();
     private readonly List<GameChunk> _drainBuf = new();
+    private GameWorld? _hookedWorld;
     private Material _material;
     private bool _materialReady;
 
@@ -106,6 +108,10 @@ public sealed class WorldRenderer : IDisposable {
             } else if (dimension == 2) { // End
                 ambientColor = vec3(0.12, 0.08, 0.18);
                 sunLightColor = vec3(0.85, 0.75, 1.0);
+            } else if (dimension == 3) { // Void
+                ambientColor = vec3(0.08, 0.04, 0.14);
+                torchColor = vec3(0.85, 0.65, 1.0);
+                sunLightColor = vec3(0.70, 0.50, 0.95);
             }
 
             vec3 totalLight = (sunLightColor * sunCurve + torchColor * blockCurve + ambientColor) * faceDir;
@@ -152,6 +158,7 @@ public sealed class WorldRenderer : IDisposable {
         public bool IsCrit;
         public bool IsHealBeam; // летит к Target без гравитации
         public Vector3 Target;
+        public byte AmbientType; // 0=None, 1=Firefly, 2=Leaf, 3=Ember, 4=Bubble
     }
 
     private readonly List<VoxelParticle> _particles = new();
@@ -199,11 +206,27 @@ public sealed class WorldRenderer : IDisposable {
     }
 
     private void HookWorldEvents(GameWorld world) {
+        UnhookWorldEvents();
+        _hookedWorld = world;
         world.OnBlockRemoved += SpawnBlockParticles;
         world.OnDustSpawned += SpawnDustParticles;
         world.OnCritSpawned += SpawnCritParticles;
         world.OnEatParticlesSpawned += SpawnEatParticles;
         world.OnHealBeamSpawned += SpawnHealBeamParticles;
+        world.OnSplashSpawned += SpawnSplashParticles;
+        world.OnBlockDustSpawned += SpawnBlockDustParticles;
+    }
+
+    private void UnhookWorldEvents() {
+        if (_hookedWorld == null) return;
+        _hookedWorld.OnBlockRemoved -= SpawnBlockParticles;
+        _hookedWorld.OnDustSpawned -= SpawnDustParticles;
+        _hookedWorld.OnCritSpawned -= SpawnCritParticles;
+        _hookedWorld.OnEatParticlesSpawned -= SpawnEatParticles;
+        _hookedWorld.OnHealBeamSpawned -= SpawnHealBeamParticles;
+        _hookedWorld.OnSplashSpawned -= SpawnSplashParticles;
+        _hookedWorld.OnBlockDustSpawned -= SpawnBlockDustParticles;
+        _hookedWorld = null;
     }
 
     public int MeshQueueCount => _rebuildQueue.Count;
@@ -212,33 +235,41 @@ public sealed class WorldRenderer : IDisposable {
         if (_lastDimension != _world.Dimension) {
             _lastDimension = _world.Dimension;
             _rebuildQueue.Clear();
+            _rebuildSet.Clear();
             _drainBuf.Clear();
             HookWorldEvents(_world);
             foreach (var gc in _world.Chunks) {
                 gc.MeshDirty = true;
-                _rebuildQueue.Add(gc);
+                if (_rebuildSet.Add(gc)) _rebuildQueue.Add(gc);
             }
         }
 
         _world.CollectMeshDirty(_drainBuf);
         if (_drainBuf.Count > 0) {
             foreach (var gc in _drainBuf) {
-                if (!_rebuildQueue.Contains(gc)) _rebuildQueue.Add(gc);
+                if (_rebuildSet.Add(gc)) _rebuildQueue.Add(gc);
             }
             _drainBuf.Clear();
             var playerPos = _session.Player.Position;
             int pcx = (int)MathF.Floor(playerPos.X / Chunk.SizeX);
             int pcz = (int)MathF.Floor(playerPos.Z / Chunk.SizeZ);
+            // Сортируем по убыванию расстояния: ближайшие окажутся в конце,
+            // что позволяет извлекать их за O(1) через RemoveAt(_rebuildQueue.Count - 1).
             _rebuildQueue.Sort((a, b) => {
                 int distA = Math.Abs(a.Coord.X - pcx) + Math.Abs(a.Coord.Z - pcz) + Math.Abs(a.Coord.Y - 1);
                 int distB = Math.Abs(b.Coord.X - pcx) + Math.Abs(b.Coord.Z - pcz) + Math.Abs(b.Coord.Y - 1);
-                return distA.CompareTo(distB);
+                return distB.CompareTo(distA);
             });
         }
         int budget = _session.Ui == UiState.Loading ? 16 : 4;
         while (_rebuildQueue.Count > 0 && budget-- > 0) {
-            var gc = _rebuildQueue[0];
-            _rebuildQueue.RemoveAt(0);
+            int lastIdx = _rebuildQueue.Count - 1;
+            var gc = _rebuildQueue[lastIdx];
+            _rebuildQueue.RemoveAt(lastIdx);
+            _rebuildSet.Remove(gc);
+            // Чанк мог быть выгружен или заменён (ресинк от сервера) между постановкой
+            // в очередь и обработкой: сборка меша для отсоединённого объекта утекала в VRAM.
+            if (!ReferenceEquals(_world.TryGetChunk(gc.Coord), gc)) continue;
             gc.UnloadMesh();
             var (opaque, trans) = ChunkMesher.Build(gc, _world);
             gc.Meshes.AddRange(opaque);
@@ -350,10 +381,10 @@ public sealed class WorldRenderer : IDisposable {
             int pcz = (int)MathF.Floor(playerPos.Z / Chunk.SizeZ);
             int rDist = SaveSystem.RenderDistanceSetting;
             int maxDistSq = (rDist + 1) * (rDist + 1);
-            int unloadDistSq = (rDist + 3) * (rDist + 3);
 
             const float chunkRadius = 27.8f; // Радиус описанной сферы для 32×32×32 чанка
-            var camFwd = _session.Player.Forward;
+            var camDiff = _session.Camera.Target - _session.Camera.Position;
+            var camFwd = camDiff.LengthSquared() > 0.0001f ? Vector3.Normalize(camDiff) : _session.Player.Forward;
             float currentFov = _session.Camera.FovY;
             float aspect = (float)Raylib.GetScreenWidth() / Math.Max(1, Raylib.GetScreenHeight());
             float halfFovRad = currentFov * 0.5f * (MathF.PI / 180f);
@@ -365,11 +396,10 @@ public sealed class WorldRenderer : IDisposable {
                 int dz = gc.Coord.Z - pcz;
                 int dSq = dx * dx + dz * dz;
 
-                // Выгружаем меши далеких чанков из видеопамяти (VRAM cleanup)
-                if (dSq > unloadDistSq && gc.MeshUploaded) {
-                    gc.UnloadMesh();
-                    continue;
-                }
+                // Меши далёких чанков выгружает UnloadFarChunks вместе с самим чанком
+                // (renderDistance+2). Раньше здесь стояла отдельная выгрузка меша с
+                // меньшим радиусом: чанк оставался в мире без меша и больше никогда
+                // не пересобирался — навсегда невидимые дыры в мире.
 
                 if (!gc.MeshUploaded || dSq > maxDistSq) continue;
 
@@ -392,6 +422,7 @@ public sealed class WorldRenderer : IDisposable {
                     _translucentChunks.Add((gc, dSq));
                 }
             }
+            Rlgl.DisableBackfaceCulling();
         }
     }
 
@@ -432,6 +463,10 @@ public sealed class WorldRenderer : IDisposable {
             Raylib.ClearBackground(new Color(10, 6, 20, 255)); // Пурпурно-чёрная пустота Энда
             return;
         }
+        if (_world.Dimension == Dimension.Void) {
+            Raylib.ClearBackground(new Color(6, 2, 14, 255)); // Глубокая тьма Бездны
+            return;
+        }
         float f = _session.DayNight.SkyFactor;
         if (_session.Weather != WeatherType.Clear) {
             f *= 0.45f; // Пасмурное грозовое небо
@@ -458,6 +493,7 @@ public sealed class WorldRenderer : IDisposable {
     public void Draw3DSky(Camera3D camera) {
         if (_world.Dimension == Dimension.Nether) return;
         if (_world.Dimension == Dimension.End) return; // в Энде нет солнца/луны — только пустота
+        if (_world.Dimension == Dimension.Void) return; // в Бездне нет солнца/луны
         if (!SkyTextures.Ready) SkyTextures.Load();
 
         float f = _session.DayNight.SkyFactor;
@@ -761,7 +797,8 @@ public sealed class WorldRenderer : IDisposable {
     public void DrawDecorations(float dt) {
         unsafe {
             var camPos = _session.Camera.Position;
-            var camFwd = _session.Player.Forward;
+            var camDiff = _session.Camera.Target - _session.Camera.Position;
+            var camFwd = camDiff.LengthSquared() > 0.0001f ? Vector3.Normalize(camDiff) : _session.Player.Forward;
             const float maxDistSq = 48f * 48f; // Высокая производительность: отсечение удаленной растительности
 
             foreach (var pos in _world.DecorPositions) {
@@ -836,8 +873,15 @@ public sealed class WorldRenderer : IDisposable {
             if (v.TypeId != 0) {
                 var p = new Vector3(t.X + 0.5f, t.Y + 0.5f, t.Z + 0.5f);
                 Raylib.DrawCubeWires(p, 1.005f, 1.005f, 1.005f, Color.Black);
+
+                // Визуальные стадии разрушения блока (трещины)
+                if (_session.Player.BreakProgress > 0f && _session.Player.BreakDuration > 0f) {
+                    float ratio = Math.Clamp(_session.Player.BreakProgress / _session.Player.BreakDuration, 0f, 1f);
+                    DrawBlockDamageOverlay(p, ratio);
+                }
             }
         }
+        UpdateAmbientParticles(dt);
         DrawParticles(dt);
     }
 
@@ -852,6 +896,75 @@ public sealed class WorldRenderer : IDisposable {
         Raylib.DrawCube(pos + new Vector3(jx, 0.1f, jz), size * 0.5f * pulse, size * pulse, size * 0.5f * pulse, outer);
         Raylib.DrawCube(pos + new Vector3(-jx * 0.5f, 0.16f, -jz * 0.5f), size * 0.3f * pulse, size * 0.55f * pulse, size * 0.3f * pulse, inner);
         Raylib.EndBlendMode();
+    }
+
+    private static readonly (Vector2 A, Vector2 B)[] CrackPattern = new (Vector2, Vector2)[] {
+        (new Vector2(-0.08f, -0.06f), new Vector2(0.04f, 0.08f)),
+        (new Vector2(0.04f, 0.08f), new Vector2(0.12f, -0.04f)),
+        (new Vector2(-0.08f, -0.06f), new Vector2(-0.14f, 0.05f)),
+        (new Vector2(0.04f, 0.08f), new Vector2(0.02f, 0.28f)),
+        (new Vector2(0.02f, 0.28f), new Vector2(-0.18f, 0.38f)),
+        (new Vector2(0.12f, -0.04f), new Vector2(0.32f, -0.15f)),
+        (new Vector2(-0.14f, 0.05f), new Vector2(-0.35f, -0.12f)),
+        (new Vector2(-0.08f, -0.06f), new Vector2(0.02f, -0.32f)),
+        (new Vector2(0.02f, 0.28f), new Vector2(0.24f, 0.44f)),
+        (new Vector2(-0.18f, 0.38f), new Vector2(-0.42f, 0.42f)),
+        (new Vector2(0.32f, -0.15f), new Vector2(0.44f, 0.12f)),
+        (new Vector2(0.32f, -0.15f), new Vector2(0.42f, -0.40f)),
+        (new Vector2(-0.35f, -0.12f), new Vector2(-0.45f, 0.18f)),
+        (new Vector2(-0.35f, -0.12f), new Vector2(-0.38f, -0.42f)),
+        (new Vector2(0.02f, -0.32f), new Vector2(0.18f, -0.45f)),
+        (new Vector2(0.02f, -0.32f), new Vector2(-0.22f, -0.44f)),
+        (new Vector2(-0.14f, 0.05f), new Vector2(-0.12f, 0.25f)),
+        (new Vector2(0.12f, -0.04f), new Vector2(0.15f, 0.18f)),
+        (new Vector2(-0.08f, -0.06f), new Vector2(-0.25f, -0.22f)),
+        (new Vector2(0.04f, 0.08f), new Vector2(0.25f, 0.22f)),
+        (new Vector2(0.24f, 0.44f), new Vector2(0.40f, 0.35f)),
+        (new Vector2(-0.38f, -0.42f), new Vector2(-0.15f, -0.45f)),
+        (new Vector2(0.42f, -0.40f), new Vector2(0.25f, -0.42f)),
+        (new Vector2(-0.42f, 0.42f), new Vector2(-0.45f, -0.10f)),
+        (new Vector2(0.44f, 0.12f), new Vector2(0.10f, 0.45f)),
+        (new Vector2(-0.22f, -0.44f), new Vector2(-0.42f, -0.30f)),
+        (new Vector2(0.18f, -0.45f), new Vector2(0.40f, -0.25f)),
+        (new Vector2(-0.25f, -0.22f), new Vector2(-0.35f, 0.05f))
+    };
+
+    /// <summary>Отрисовка стадий трещин (разрушения блока) на всех 6 гранях.</summary>
+    private static void DrawBlockDamageOverlay(Vector3 pos, float ratio) {
+        int count = Math.Clamp((int)(ratio * CrackPattern.Length), 2, CrackPattern.Length);
+        float offset = 0.503f;
+
+        Rlgl.SetTexture(0);
+        Rlgl.EnableDepthTest();
+        Rlgl.Color4ub(15, 15, 15, 230);
+        Rlgl.Begin((int)DrawMode.Lines);
+
+        for (int i = 0; i < count; i++) {
+            var (a, b) = CrackPattern[i];
+            // +Z
+            Rlgl.Vertex3f(pos.X + a.X, pos.Y + a.Y, pos.Z + offset);
+            Rlgl.Vertex3f(pos.X + b.X, pos.Y + b.Y, pos.Z + offset);
+            // -Z
+            Rlgl.Vertex3f(pos.X - a.X, pos.Y + a.Y, pos.Z - offset);
+            Rlgl.Vertex3f(pos.X - b.X, pos.Y + b.Y, pos.Z - offset);
+            // +X
+            Rlgl.Vertex3f(pos.X + offset, pos.Y + a.Y, pos.Z + a.X);
+            Rlgl.Vertex3f(pos.X + offset, pos.Y + b.Y, pos.Z + b.X);
+            // -X
+            Rlgl.Vertex3f(pos.X - offset, pos.Y + a.Y, pos.Z - a.X);
+            Rlgl.Vertex3f(pos.X - offset, pos.Y + b.Y, pos.Z - b.X);
+            // +Y
+            Rlgl.Vertex3f(pos.X + a.X, pos.Y + offset, pos.Z + a.Y);
+            Rlgl.Vertex3f(pos.X + b.X, pos.Y + offset, pos.Z + b.Y);
+            // -Y
+            Rlgl.Vertex3f(pos.X + a.X, pos.Y - offset, pos.Z - a.Y);
+            Rlgl.Vertex3f(pos.X + b.X, pos.Y - offset, pos.Z - b.Y);
+        }
+        Rlgl.End();
+
+        // Затемняющий полупрозрачный куб стадии поломки
+        byte alpha = (byte)(15 + ratio * 65);
+        Raylib.DrawCube(pos, 1.002f, 1.002f, 1.002f, new Color((byte)10, (byte)10, (byte)10, alpha));
     }
 
     private Vector3 GetLightFactor(Vector3 pos) {
@@ -892,7 +1005,9 @@ public sealed class WorldRenderer : IDisposable {
             ? new Color(45, 10, 10, 255)
             : _world.Dimension == Dimension.End
                 ? new Color(24, 12, 44, 255)
-                : LerpColor(C(16, 18, 40, 255), C(178, 208, 244, 255), f);
+                : _world.Dimension == Dimension.Void
+                    ? new Color(14, 6, 26, 255)
+                    : LerpColor(C(16, 18, 40, 255), C(178, 208, 244, 255), f);
     }
 
     public float GetFogFactor(Vector3 pos) {
@@ -900,8 +1015,9 @@ public sealed class WorldRenderer : IDisposable {
         float maxRenderDist = SaveSystem.RenderDistanceSetting * (float)Chunk.SizeX;
         bool nether = _world.Dimension == Dimension.Nether;
         bool end = _world.Dimension == Dimension.End;
-        float fogStart = nether ? 20.0f : end ? 40.0f : MathF.Max(15.0f, maxRenderDist * 0.60f);
-        float fogEnd = nether ? 68.0f : end ? 140.0f : MathF.Max(28.0f, maxRenderDist * 0.96f);
+        bool voidDim = _world.Dimension == Dimension.Void;
+        float fogStart = nether ? 20.0f : end ? 40.0f : voidDim ? 35.0f : MathF.Max(15.0f, maxRenderDist * 0.60f);
+        float fogEnd = nether ? 68.0f : end ? 140.0f : voidDim ? 110.0f : MathF.Max(28.0f, maxRenderDist * 0.96f);
         float fogFactor = Math.Clamp((dist - fogStart) / (fogEnd - fogStart), 0.0f, 1.0f);
         return MathF.Pow(fogFactor, 1.35f);
     }
@@ -952,6 +1068,121 @@ public sealed class WorldRenderer : IDisposable {
         return null;
     }
 
+    private static Color GetBlockMaterialColor(ushort blockId) {
+        if (blockId == GameData.BGrass.Id) return new Color(95, 170, 60, 255);
+        if (blockId == GameData.BDirt.Id || blockId == GameData.BFarmland.Id) return new Color(134, 96, 67, 255);
+        if (blockId == GameData.BStone.Id || blockId == GameData.BBedrock.Id) return new Color(128, 128, 128, 255);
+        if (blockId == GameData.BCobblestone.Id || blockId == GameData.BMossyCobblestone.Id) return new Color(110, 110, 115, 255);
+        if (blockId == GameData.BLog.Id) return new Color(103, 76, 45, 255);
+        if (blockId == GameData.BPlanks.Id || blockId == GameData.BDoorLower.Id || blockId == GameData.BDoorUpper.Id) return new Color(185, 148, 90, 255);
+        if (blockId == GameData.BLeaves.Id || blockId == GameData.BSapling.Id) return new Color(50, 140, 45, 255);
+        if (blockId == GameData.BSand.Id || blockId == GameData.BChiseledSandstone.Id) return new Color(225, 210, 145, 255);
+        if (blockId == GameData.BGravel.Id) return new Color(140, 135, 135, 255);
+        if (blockId == GameData.BGlass.Id) return new Color(210, 240, 255, 180);
+        if (blockId == GameData.BWater.Id) return new Color(60, 120, 235, 200);
+        if (blockId == GameData.BLava.Id || blockId == GameData.BFire.Id) return new Color(255, 110, 20, 255);
+        if (blockId == GameData.BCoalOre.Id) return new Color(45, 45, 45, 255);
+        if (blockId == GameData.BIronOre.Id) return new Color(190, 165, 145, 255);
+        if (blockId == GameData.BGoldOre.Id) return new Color(245, 215, 50, 255);
+        if (blockId == GameData.BDiamondOre.Id) return new Color(85, 230, 245, 255);
+        if (blockId == GameData.BObsidian.Id || blockId == GameData.BObsidianPillar.Id) return new Color(35, 25, 50, 255);
+        if (blockId == GameData.BWorkbench.Id) return new Color(150, 115, 70, 255);
+        if (blockId == GameData.BFurnace.Id) return new Color(105, 105, 110, 255);
+        if (blockId == GameData.BChest.Id) return new Color(165, 115, 55, 255);
+        if (blockId == GameData.BBed.Id || blockId == GameData.BBedHead.Id) return new Color(210, 45, 45, 255);
+        if (blockId == GameData.BTNT.Id) return new Color(220, 50, 40, 255);
+        if (blockId == GameData.BNetherrack.Id || blockId == GameData.BNetherBrick.Id) return new Color(125, 45, 45, 255);
+        if (blockId == GameData.BSoulSand.Id) return new Color(85, 60, 50, 255);
+        if (blockId == GameData.BGlowstone.Id) return new Color(245, 210, 100, 255);
+        if (blockId == GameData.BNetherQuartzOre.Id) return new Color(230, 225, 220, 255);
+        if (blockId == GameData.BEndStone.Id) return new Color(225, 228, 170, 255);
+        if (blockId == GameData.BEndPortalFrame.Id) return new Color(60, 100, 85, 255);
+        if (blockId == GameData.BEnderCrystal.Id) return new Color(220, 120, 255, 255);
+        if (blockId == GameData.BChorusPlant.Id || blockId == GameData.BChorusFlower.Id) return new Color(175, 125, 175, 255);
+        if (blockId == GameData.BWheatCrop.Id || blockId == GameData.BCarrotCrop.Id || blockId == GameData.BPotatoCrop.Id || blockId == GameData.BTallGrass.Id)
+            return new Color(110, 180, 55, 255);
+        if (blockId == GameData.BRedFlower.Id) return new Color(235, 45, 45, 255);
+        if (blockId == GameData.BYellowFlower.Id) return new Color(250, 225, 45, 255);
+        if (blockId == GameData.BJukebox.Id) return new Color(135, 95, 60, 255);
+        return new Color(145, 145, 150, 255);
+    }
+
+    private void DrawHeldItemModel(int itemId, Vector3 itemPos, Vector3 light, Vector3 worldPos, bool isOffhand = false) {
+        if (itemId <= 0) return;
+
+        // 1. Блок в руке
+        if (GameData.TryGetBlock((ushort)itemId, out var bDef) || (GameData.TryGetBlockByItem((ushort)itemId, out var bDef2) && (bDef = bDef2) != null)) {
+            if (bDef.Id == GameData.BTorch.Id) {
+                Raylib.DrawCube(itemPos, 0.05f, 0.26f, 0.05f, ShadeColor(new Color(135, 95, 55, 255), light, worldPos));
+                Raylib.DrawCube(itemPos + new Vector3(0f, 0.12f, 0f), 0.07f, 0.08f, 0.07f, new Color(255, 220, 70, 255));
+                Raylib.DrawCube(itemPos + new Vector3(0f, 0.13f, 0f), 0.04f, 0.06f, 0.04f, new Color(255, 110, 20, 255));
+            } else {
+                Color bCol = GetBlockMaterialColor(bDef.Id);
+                float bSz = isOffhand ? 0.16f : 0.22f;
+                Raylib.DrawCube(itemPos, bSz, bSz, bSz, ShadeColor(bCol, light, worldPos));
+            }
+            return;
+        }
+
+        // 2. Инструменты, оружие и предметы
+        if (GameData.Items.TryGetValue((ushort)itemId, out var idef)) {
+            Color matCol = idef.Name switch {
+                _ when idef.Name.Contains("Алмаз") => new Color(85, 230, 245, 255),
+                _ when idef.Name.Contains("Золот") => new Color(245, 215, 50, 255),
+                _ when idef.Name.Contains("Желез") => new Color(220, 220, 225, 255),
+                _ when idef.Name.Contains("Камен") => new Color(130, 130, 135, 255),
+                _ => new Color(165, 125, 75, 255)
+            };
+            Color handleCol = ShadeColor(new Color(125, 85, 45, 255), light, worldPos);
+            Color headCol = ShadeColor(matCol, light, worldPos);
+
+            if (idef.Name.Contains("меч")) {
+                Raylib.DrawCube(itemPos - new Vector3(0f, 0.08f, 0f), 0.04f, 0.14f, 0.04f, handleCol);
+                Raylib.DrawCube(itemPos, 0.14f, 0.03f, 0.06f, headCol);
+                Raylib.DrawCube(itemPos + new Vector3(0f, 0.18f, 0f), 0.07f, 0.34f, 0.03f, headCol);
+            } else if (idef.Name.Contains("кирка")) {
+                Raylib.DrawCube(itemPos, 0.04f, 0.38f, 0.04f, handleCol);
+                Raylib.DrawCube(itemPos + new Vector3(0f, 0.17f, 0f), 0.24f, 0.06f, 0.06f, headCol);
+            } else if (idef.Name.Contains("топор")) {
+                Raylib.DrawCube(itemPos, 0.04f, 0.38f, 0.04f, handleCol);
+                Raylib.DrawCube(itemPos + new Vector3(0.07f, 0.14f, 0f), 0.12f, 0.12f, 0.05f, headCol);
+            } else if (idef.Name.Contains("лопата")) {
+                Raylib.DrawCube(itemPos, 0.04f, 0.38f, 0.04f, handleCol);
+                Raylib.DrawCube(itemPos + new Vector3(0f, 0.17f, 0f), 0.11f, 0.12f, 0.03f, headCol);
+            } else if (idef.Name.Contains("мотыга")) {
+                Raylib.DrawCube(itemPos, 0.04f, 0.38f, 0.04f, handleCol);
+                Raylib.DrawCube(itemPos + new Vector3(0.06f, 0.17f, 0f), 0.12f, 0.05f, 0.04f, headCol);
+            } else if (itemId == GameData.BowItem.Id) {
+                Raylib.DrawCube(itemPos, 0.05f, 0.38f, 0.08f, handleCol);
+                Raylib.DrawCube(itemPos + new Vector3(0f, 0f, 0.04f), 0.02f, 0.36f, 0.01f, ShadeColor(Color.White, light, worldPos));
+            } else if (itemId == GameData.TorchItem.Id) {
+                Raylib.DrawCube(itemPos, 0.05f, 0.26f, 0.05f, handleCol);
+                Raylib.DrawCube(itemPos + new Vector3(0f, 0.12f, 0f), 0.07f, 0.08f, 0.07f, new Color(255, 220, 70, 255));
+                Raylib.DrawCube(itemPos + new Vector3(0f, 0.13f, 0f), 0.04f, 0.06f, 0.04f, new Color(255, 110, 20, 255));
+            } else if (itemId == GameData.AppleItem.Id || itemId == GameData.GoldenAppleItem.Id) {
+                Color aCol = itemId == GameData.GoldenAppleItem.Id ? new Color(255, 215, 0, 255) : new Color(225, 45, 40, 255);
+                Raylib.DrawCube(itemPos, 0.13f, 0.13f, 0.13f, ShadeColor(aCol, light, worldPos));
+                Raylib.DrawCube(itemPos + new Vector3(0f, 0.08f, 0f), 0.02f, 0.04f, 0.02f, handleCol);
+            } else if (itemId == GameData.BreadItem.Id) {
+                Raylib.DrawCube(itemPos, 0.11f, 0.09f, 0.22f, ShadeColor(new Color(205, 145, 75, 255), light, worldPos));
+            } else if (itemId == GameData.RawBeefItem.Id || itemId == GameData.CookedBeefItem.Id || itemId == GameData.RawPorkItem.Id || itemId == GameData.CookedPorkItem.Id) {
+                Color mCol = (itemId == GameData.CookedBeefItem.Id || itemId == GameData.CookedPorkItem.Id) ? new Color(145, 75, 50, 255) : new Color(215, 95, 95, 255);
+                Raylib.DrawCube(itemPos, 0.14f, 0.07f, 0.18f, ShadeColor(mCol, light, worldPos));
+            } else if (itemId == GameData.EnderPearlItem.Id || itemId == GameData.EyeOfEnderItem.Id) {
+                Color pCol = itemId == GameData.EyeOfEnderItem.Id ? new Color(75, 205, 145, 255) : new Color(35, 135, 125, 255);
+                Raylib.DrawCube(itemPos, 0.12f, 0.12f, 0.12f, ShadeColor(pCol, light, worldPos));
+            } else if (itemId == GameData.TotemItem.Id) {
+                Raylib.DrawCube(itemPos, 0.09f, 0.18f, 0.06f, new Color(255, 215, 40, 255));
+                Raylib.DrawCube(itemPos + new Vector3(0f, 0.04f, 0f), 0.18f, 0.05f, 0.04f, new Color(110, 225, 140, 255));
+            } else if (itemId == GameData.IronIngotItem.Id || itemId == GameData.GoldIngotItem.Id) {
+                Color ingCol = itemId == GameData.GoldIngotItem.Id ? new Color(250, 220, 50, 255) : new Color(225, 225, 230, 255);
+                Raylib.DrawCube(itemPos, 0.09f, 0.06f, 0.18f, ShadeColor(ingCol, light, worldPos));
+            } else {
+                Raylib.DrawCube(itemPos, 0.11f, 0.22f, 0.11f, ShadeColor(matCol, light, worldPos));
+            }
+        }
+    }
+
     private void DrawSinglePlayerModel(Camera3D camera, float time, string name, Vector3 pos, float yaw, float pitch, bool isMoving, bool isSneaking, float health, int selectedItemId, int offhandItemId, int helmetId, int chestId, int legsId, int bootsId, float armSwingTimer, float hurtTimer, string skinName, bool isBlocking = false) {
         DrawSoftShadow(pos - new Vector3(0f, 0.9f, 0f), 0.45f);
         var light = GetLightFactor(pos);
@@ -971,7 +1202,7 @@ public sealed class WorldRenderer : IDisposable {
 
         Rlgl.PushMatrix();
         Rlgl.Translatef(pos.X, pos.Y, pos.Z);
-        Rlgl.Rotatef(yaw * 180f / MathF.PI + 180f, 0f, 1f, 0f);
+        Rlgl.Rotatef(yaw * 180f / MathF.PI, 0f, 1f, 0f);
 
         if (isSneaking) {
             Rlgl.Translatef(0f, -0.15f, 0f);
@@ -1026,7 +1257,7 @@ public sealed class WorldRenderer : IDisposable {
                 Raylib.DrawCube(shieldPos + new Vector3(0f, 0f, 0.035f), 0.10f, 0.10f, 0.02f, ShadeColor(new Color(200, 200, 205, 255), light, pos));
             } else {
                 var offPos = lArmPos + new Vector3(0f, -0.22f, 0.20f);
-                Raylib.DrawCube(offPos, 0.14f, 0.14f, 0.14f, ShadeColor(new Color(140, 140, 150, 255), light, pos));
+                DrawHeldItemModel(offhandItemId, offPos, light, pos, isOffhand: true);
             }
         }
 
@@ -1038,20 +1269,7 @@ public sealed class WorldRenderer : IDisposable {
         // 3D предмет в правой руке
         if (selectedItemId > 0) {
             var itemPos = rArmPos + new Vector3(0f, -0.22f, 0.20f + armPunch * 0.2f);
-            if (GameData.TryGetBlock((ushort)selectedItemId, out var bDef) || (GameData.TryGetBlockByItem((ushort)selectedItemId, out var bDef2) && (bDef = bDef2) != null)) {
-                var bCol = ShadeColor(new Color(130, 140, 155, 255), light, pos);
-                Raylib.DrawCube(itemPos, 0.20f, 0.20f, 0.20f, bCol);
-            } else {
-                Color itemColor = selectedItemId switch {
-                    _ when GameData.Items.TryGetValue((ushort)selectedItemId, out var idef) && idef.Name.Contains("Алмаз") => new Color(90, 220, 240, 255),
-                    _ when GameData.Items.TryGetValue((ushort)selectedItemId, out var idef) && idef.Name.Contains("Золот") => new Color(240, 215, 60, 255),
-                    _ when GameData.Items.TryGetValue((ushort)selectedItemId, out var idef) && idef.Name.Contains("Желез") => new Color(220, 220, 225, 255),
-                    _ when GameData.Items.TryGetValue((ushort)selectedItemId, out var idef) && idef.Name.Contains("Камен") => new Color(130, 130, 135, 255),
-                    _ => new Color(175, 135, 80, 255)
-                };
-                Raylib.DrawCube(itemPos, 0.09f, 0.36f, 0.09f, ShadeColor(itemColor, light, pos));
-                Raylib.DrawCube(itemPos + new Vector3(0f, 0.11f, 0f), 0.20f, 0.07f, 0.10f, ShadeColor(itemColor, light, pos));
-            }
+            DrawHeldItemModel(selectedItemId, itemPos, light, pos, isOffhand: false);
         }
 
         // 4. Ноги
@@ -2024,12 +2242,104 @@ public sealed class WorldRenderer : IDisposable {
         }
     }
 
+    private float _ambientTimer;
+
+    private void UpdateAmbientParticles(float dt) {
+        if (SaveSystem.ParticlesMode == 0) return;
+        _ambientTimer -= dt;
+        if (_ambientTimer > 0f) return;
+        _ambientTimer = SaveSystem.ParticlesMode == 1 ? 0.45f : 0.22f;
+
+        var pPos = _session.Player.Position;
+        int px = (int)MathF.Floor(pPos.X);
+        int py = (int)MathF.Floor(pPos.Y);
+        int pz = (int)MathF.Floor(pPos.Z);
+
+        var eyeVox = _world.GetVoxel(new Vec3i((int)MathF.Floor(_session.Player.Eye.X), (int)MathF.Floor(_session.Player.Eye.Y), (int)MathF.Floor(_session.Player.Eye.Z)));
+        bool inWater = eyeVox.TypeId == GameData.BWater.Id;
+
+        // 1. Подводные пузырьки воздуха
+        if (inWater) {
+            float ox = (ParticleRng.NextSingle() - 0.5f) * 3.5f;
+            float oy = -0.5f + ParticleRng.NextSingle() * 1.5f;
+            float oz = (ParticleRng.NextSingle() - 0.5f) * 3.5f;
+            _particles.Add(new VoxelParticle {
+                Position = _session.Player.Eye + new Vector3(ox, oy, oz),
+                Velocity = new Vector3(0f, 1.4f, 0f),
+                Color = new Color(200, 235, 255, 170),
+                Size = 0.05f + ParticleRng.NextSingle() * 0.04f,
+                Lifetime = 1.2f + ParticleRng.NextSingle() * 0.8f,
+                MaxLifetime = 2.0f,
+                AmbientType = 4
+            });
+            return;
+        }
+
+        // 2. Нижний мир — восходящие адские искры
+        if (_world.Dimension == Dimension.Nether) {
+            float ox = (ParticleRng.NextSingle() - 0.5f) * 16.0f;
+            float oy = -2.0f + ParticleRng.NextSingle() * 8.0f;
+            float oz = (ParticleRng.NextSingle() - 0.5f) * 16.0f;
+            _particles.Add(new VoxelParticle {
+                Position = pPos + new Vector3(ox, oy, oz),
+                Velocity = new Vector3((ParticleRng.NextSingle() - 0.5f) * 0.5f, 1.0f + ParticleRng.NextSingle() * 1.5f, (ParticleRng.NextSingle() - 0.5f) * 0.5f),
+                Color = ParticleRng.NextDouble() < 0.6 ? new Color(255, 150, 30, 240) : new Color(255, 60, 20, 220),
+                Size = 0.06f + ParticleRng.NextSingle() * 0.05f,
+                Lifetime = 1.4f + ParticleRng.NextSingle() * 1.0f,
+                MaxLifetime = 2.4f,
+                AmbientType = 3
+            });
+            return;
+        }
+
+        // 3. Обычный мир: Ночные светлячки
+        if (_world.Dimension == Dimension.Overworld && _session.DayNight.SkyFactor < 0.22f) {
+            float ox = (ParticleRng.NextSingle() - 0.5f) * 20.0f;
+            float oz = (ParticleRng.NextSingle() - 0.5f) * 20.0f;
+            int gX = px + (int)ox, gZ = pz + (int)oz;
+            int surfY = _world.Generator.SurfaceHeight(gX, gZ);
+            float spawnY = surfY + 0.8f + ParticleRng.NextSingle() * 2.2f;
+            _particles.Add(new VoxelParticle {
+                Position = new Vector3(gX + ParticleRng.NextSingle(), spawnY, gZ + ParticleRng.NextSingle()),
+                Velocity = new Vector3((ParticleRng.NextSingle() - 0.5f) * 0.4f, (ParticleRng.NextSingle() - 0.5f) * 0.3f, (ParticleRng.NextSingle() - 0.5f) * 0.4f),
+                Color = new Color(210, 255, 90, 220),
+                Size = 0.07f + ParticleRng.NextSingle() * 0.04f,
+                Lifetime = 2.5f + ParticleRng.NextSingle() * 2.0f,
+                MaxLifetime = 4.5f,
+                AmbientType = 1
+            });
+        }
+
+        // 4. Обычный мир: падающие листья с крон деревьев
+        if (_world.Dimension == Dimension.Overworld) {
+            int rx = px + ParticleRng.Next(-8, 9);
+            int rz = pz + ParticleRng.Next(-8, 9);
+            int ry = py + ParticleRng.Next(-1, 8);
+            var checkVox = _world.GetVoxel(new Vec3i(rx, ry, rz));
+            if (checkVox.TypeId == GameData.BLeaves.Id) {
+                _particles.Add(new VoxelParticle {
+                    Position = new Vector3(rx + ParticleRng.NextSingle(), ry - 0.1f, rz + ParticleRng.NextSingle()),
+                    Velocity = new Vector3((ParticleRng.NextSingle() - 0.5f) * 0.6f, -0.35f, (ParticleRng.NextSingle() - 0.5f) * 0.6f),
+                    Color = ParticleRng.NextDouble() < 0.7 ? new Color(55, 140, 42, 230) : new Color(190, 135, 30, 230),
+                    Size = 0.08f + ParticleRng.NextSingle() * 0.04f,
+                    Lifetime = 3.0f + ParticleRng.NextSingle() * 2.0f,
+                    MaxLifetime = 5.0f,
+                    AmbientType = 2
+                });
+            }
+        }
+    }
+
     public void DrawParticles(float dt) {
         for (int i = _particles.Count - 1; i >= 0; i--) {
             var p = _particles[i];
             p.Lifetime -= dt;
             if (p.Lifetime <= 0f) {
-                _particles.RemoveAt(i);
+                // Swap-remove: RemoveAt сдвигал весь хвост списка на каждую
+                // просроченную частицу (O(n²) при взрыве с сотнями частиц).
+                int last = _particles.Count - 1;
+                _particles[i] = _particles[last];
+                _particles.RemoveAt(last);
                 continue;
             }
 
@@ -2039,6 +2349,35 @@ public sealed class WorldRenderer : IDisposable {
                     MathF.Sin(p.MaxLifetime * 23f + i) * 0.15f, 0f,
                     MathF.Cos(p.MaxLifetime * 19f + i) * 0.15f);
                 p.Position = Vector3.Lerp(p.Position, p.Target, 4.5f * dt) + jitter * dt;
+            } else if (p.AmbientType == 1) {
+                // Firefly (светлячок): плавное хаотическое парение без гравитации
+                p.Position += p.Velocity * dt;
+                p.Velocity.X += (ParticleRng.NextSingle() - 0.5f) * 1.5f * dt;
+                p.Velocity.Y += (ParticleRng.NextSingle() - 0.5f) * 1.5f * dt;
+                p.Velocity.Z += (ParticleRng.NextSingle() - 0.5f) * 1.5f * dt;
+                p.Velocity *= MathF.Exp(-1.2f * dt);
+            } else if (p.AmbientType == 2) {
+                // Leaf (падающий лист): медленный планирующий спуск с покачиванием
+                p.Position += p.Velocity * dt;
+                p.Position.X += MathF.Sin(p.Lifetime * 5.0f + i) * 0.4f * dt;
+                p.Position.Z += MathF.Cos(p.Lifetime * 4.0f + i) * 0.4f * dt;
+                p.Velocity.Y = Math.Clamp(p.Velocity.Y - 1.2f * dt, -0.65f, 0.5f);
+                p.Velocity.X *= MathF.Exp(-1.0f * dt);
+                p.Velocity.Z *= MathF.Exp(-1.0f * dt);
+            } else if (p.AmbientType == 3) {
+                // Nether ember (искра): подъем вверх с турбулентностью
+                p.Position += p.Velocity * dt;
+                p.Position.X += MathF.Sin(p.Lifetime * 6.0f + i) * 0.25f * dt;
+                p.Position.Z += MathF.Cos(p.Lifetime * 5.0f + i) * 0.25f * dt;
+                p.Velocity.Y += 0.8f * dt;
+                p.Velocity.X *= MathF.Exp(-1.0f * dt);
+                p.Velocity.Z *= MathF.Exp(-1.0f * dt);
+            } else if (p.AmbientType == 4) {
+                // Underwater bubble (пузырек воздуха): всплытие
+                p.Position += p.Velocity * dt;
+                p.Velocity.Y = 1.6f;
+                p.Position.X += MathF.Sin(p.Lifetime * 8.0f + i) * 0.15f * dt;
+                p.Position.Z += MathF.Cos(p.Lifetime * 8.0f + i) * 0.15f * dt;
             } else {
                 p.Position += p.Velocity * dt;
                 p.Velocity.Y -= 16f * dt;
@@ -2048,9 +2387,14 @@ public sealed class WorldRenderer : IDisposable {
             _particles[i] = p;
 
             float alphaRatio = Math.Clamp(p.Lifetime / p.MaxLifetime, 0f, 1f);
-            var col = new Color(p.Color.R, p.Color.G, p.Color.B, (byte)(p.Color.A * alphaRatio));
+            byte alpha = (byte)(p.Color.A * alphaRatio);
+            if (p.AmbientType == 1) {
+                float pulse = 0.6f + 0.4f * MathF.Sin(p.Lifetime * 8f);
+                alpha = (byte)(alpha * pulse);
+            }
+            var col = new Color(p.Color.R, p.Color.G, p.Color.B, alpha);
 
-            if (p.IsCrit) {
+            if (p.IsCrit || p.AmbientType == 1 || p.AmbientType == 3) {
                 Raylib.BeginBlendMode(BlendMode.Additive);
                 Raylib.DrawCube(p.Position, p.Size, p.Size, p.Size, col);
                 Raylib.EndBlendMode();
@@ -2082,6 +2426,55 @@ public sealed class WorldRenderer : IDisposable {
         _ => new Color(150, 150, 155, 255),
     };
 
+    public void SpawnSplashParticles(Vector3 pos, int count = 8) {
+        int actualCount = SaveSystem.ParticlesMode == 0 ? count / 2 : count;
+        for (int i = 0; i < actualCount; i++) {
+            float angle = ParticleRng.NextSingle() * MathF.Tau;
+            float r = 0.8f + ParticleRng.NextSingle() * 2.2f;
+            float vx = MathF.Cos(angle) * r;
+            float vy = 1.6f + ParticleRng.NextSingle() * 2.2f;
+            float vz = MathF.Sin(angle) * r;
+            float size = 0.06f + ParticleRng.NextSingle() * 0.05f;
+            float life = 0.35f + ParticleRng.NextSingle() * 0.25f;
+            _particles.Add(new VoxelParticle {
+                Position = pos + new Vector3((ParticleRng.NextSingle() - 0.5f) * 0.3f, 0.05f, (ParticleRng.NextSingle() - 0.5f) * 0.3f),
+                Velocity = new Vector3(vx, vy, vz),
+                Color = new Color(185, 225, 255, 220),
+                Size = size,
+                Lifetime = life,
+                MaxLifetime = life,
+                IsCrit = false
+            });
+        }
+    }
+
+    public void SpawnBlockDustParticles(Vector3 pos, ushort blockId, int count = 6) {
+        int actualCount = SaveSystem.ParticlesMode == 0 ? count / 2 : count;
+        var baseColor = BlockTint(blockId);
+        for (int i = 0; i < actualCount; i++) {
+            float vx = (ParticleRng.NextSingle() - 0.5f) * 1.6f;
+            float vy = 0.6f + ParticleRng.NextSingle() * 1.4f;
+            float vz = (ParticleRng.NextSingle() - 0.5f) * 1.6f;
+            int d = ParticleRng.Next(-16, 17);
+            var col = new Color(
+                (byte)Math.Clamp(baseColor.R + d, 0, 255),
+                (byte)Math.Clamp(baseColor.G + d, 0, 255),
+                (byte)Math.Clamp(baseColor.B + d, 0, 255),
+                (byte)255);
+            float size = 0.07f + ParticleRng.NextSingle() * 0.06f;
+            float life = 0.35f + ParticleRng.NextSingle() * 0.25f;
+            _particles.Add(new VoxelParticle {
+                Position = pos + new Vector3((ParticleRng.NextSingle() - 0.5f) * 0.4f, 0.05f, (ParticleRng.NextSingle() - 0.5f) * 0.4f),
+                Velocity = new Vector3(vx, vy, vz),
+                Color = col,
+                Size = size,
+                Lifetime = life,
+                MaxLifetime = life,
+                IsCrit = false
+            });
+        }
+    }
+
     public void SpawnEatParticles(Vector3 pos, Color color, int count = 6) {
         for (int i = 0; i < count; i++) {
             float vx = (ParticleRng.NextSingle() - 0.5f) * 1.6f;
@@ -2108,10 +2501,7 @@ public sealed class WorldRenderer : IDisposable {
     }
 
     public void Dispose() {
-        _world.OnBlockRemoved -= SpawnBlockParticles;
-        _world.OnDustSpawned -= SpawnDustParticles;
-        _world.OnCritSpawned -= SpawnCritParticles;
-        _world.OnEatParticlesSpawned -= SpawnEatParticles;
+        UnhookWorldEvents();
         if (_materialReady) {
             unsafe {
                 _material.Maps[(int)MaterialMapIndex.Albedo].Texture = default;

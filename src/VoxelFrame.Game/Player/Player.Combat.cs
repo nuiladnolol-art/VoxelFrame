@@ -152,6 +152,9 @@ public sealed partial class Player {
                     if (dot > 0.25f) {
                         other.Health -= dmg * 0.5f;
                         other.HurtTime = 0.35f;
+                        // Без этого сервер не знал о вторичной цели: его MobSync
+                        // перезатирал HP, и «круговой срез» в мультиплеере не работал.
+                        GameClient.Active?.SendAttackEntity(other.Id, dmg * 0.5f, true);
                         var sPush = Vector2.Normalize(new Vector2(toOther.X, toOther.Z));
                         other.Velocity += new Vector3(sPush.X * 4.0f, 1.5f, sPush.Y * 4.0f);
                         world.SpawnCrit(other.Position + new Vector3(0f, 0.6f, 0f), 5);
@@ -194,6 +197,7 @@ public sealed partial class Player {
         }
 
         boss.TakeDamage(dmg, world, session);
+        GameClient.Active?.SendAttackEntity(BossEntityIds.EndSlime, dmg, true);
 
         if (isStrong) SoundSystem.PlayStrongAttack();
         else SoundSystem.PlayWeakAttack();
@@ -222,6 +226,7 @@ public sealed partial class Player {
         }
 
         boss.TakeDamage(dmg, world, session);
+        GameClient.Active?.SendAttackEntity(BossEntityIds.TrueEndSlime, dmg, true);
 
         if (isStrong) SoundSystem.PlayStrongAttack();
         else SoundSystem.PlayWeakAttack();
@@ -231,6 +236,7 @@ public sealed partial class Player {
     /// <summary>Снимает 1 прочность с инструмента/оружия в выбранном слоте; ломает при нуле.</summary>
     public void DamageSelectedTool(GameSession session, int damage = 1) {
         if (session.GameMode == GameMode.Creative) return;
+        if (SelectedSlot < 0 || SelectedSlot >= 9) return;
         var entry = Inventory.Slots[SelectedSlot];
         if (entry == null) return;
         var def = entry.Value.Item.Definition;

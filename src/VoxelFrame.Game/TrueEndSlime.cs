@@ -119,8 +119,9 @@ public sealed class TrueEndSlime {
             }
         } else {
             // Активное постоянное движение к игроку (не стоит на месте!)
-            if (dist > 1.5f) {
-                var crawlDir = Vector3.Normalize(new Vector3(toPlayer.X, 0f, toPlayer.Z));
+            float flatSq = toPlayer.X * toPlayer.X + toPlayer.Z * toPlayer.Z;
+            if (dist > 1.5f && flatSq > 0.0001f) {
+                var crawlDir = new Vector3(toPlayer.X, 0f, toPlayer.Z) / MathF.Sqrt(flatSq);
                 float crawlSpeed = phase == 3 ? 12f : 9f;
                 Velocity.X += crawlDir.X * crawlSpeed * dt;
                 Velocity.Z += crawlDir.Z * crawlSpeed * dt;
@@ -144,8 +145,8 @@ public sealed class TrueEndSlime {
             if (LeapCooldown <= 0f) {
                 LeapCooldown = leapCd + (float)_random.NextDouble() * 0.7f;
                 AttackBurstCounter++;
-                if (dist > 1.2f) {
-                    var dir = Vector3.Normalize(new Vector3(toPlayer.X, 0f, toPlayer.Z));
+                if (dist > 1.2f && flatSq > 0.0001f) {
+                    var dir = new Vector3(toPlayer.X, 0f, toPlayer.Z) / MathF.Sqrt(flatSq);
                     Velocity.X = dir.X * leapSpeed;
                     Velocity.Z = dir.Z * leapSpeed;
                     Velocity.Y = phase == 3 ? 16f : 13f;
@@ -198,7 +199,8 @@ public sealed class TrueEndSlime {
             float slamDmg = (phase == 3 ? 12f : 8f) * (1f - dist / 12f);
             player.ApplyDamage(slamDmg, session, Position);
             session.AddMessage($"Ударная волна Истинного Слизня! -{slamDmg:F0} HP");
-            var kb = Vector3.Normalize(new Vector3(toPlayer.X, 0f, toPlayer.Z)) * 10f;
+            float kbFlatSq = toPlayer.X * toPlayer.X + toPlayer.Z * toPlayer.Z;
+            var kb = (kbFlatSq > 0.0001f ? new Vector3(toPlayer.X, 0f, toPlayer.Z) / MathF.Sqrt(kbFlatSq) : Vector3.UnitX) * 10f;
             player.Velocity += new Vector3(kb.X, 5f, kb.Z);
             world.SpawnCrit(Position + new Vector3(0f, HalfSizeY, 0f), 30);
             SoundSystem.PlayExplosion();
@@ -208,7 +210,8 @@ public sealed class TrueEndSlime {
         var toCenter = _arenaCenter - Position;
         float centerDist = toCenter.Length();
         if (centerDist > 40f) {
-            var dirCenter = Vector3.Normalize(new Vector3(toCenter.X, 0.0f, toCenter.Z));
+            float cFlatSq = toCenter.X * toCenter.X + toCenter.Z * toCenter.Z;
+            var dirCenter = cFlatSq > 0.0001f ? new Vector3(toCenter.X, 0.0f, toCenter.Z) / MathF.Sqrt(cFlatSq) : Vector3.Zero;
             Velocity.X += dirCenter.X * 70f * dt;
             Velocity.Z += dirCenter.Z * 70f * dt;
             if (centerDist > 70f) {

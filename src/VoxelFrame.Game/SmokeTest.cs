@@ -43,6 +43,7 @@ internal static class SmokeTest {
             Timed("endsave", TestEndSaveLoad);
             Timed("multi", TestMultiWorldSaveLoad);
             Timed("network", TestMultiplayerConnectionAndSync);
+            Timed("regressions", TestBugFixes);
         } catch (Exception ex) {
             Fail($"необработанное исключение: {ex}");
         }
@@ -731,6 +732,89 @@ internal static class SmokeTest {
         Check(loaded.OverworldWorld != null && loaded.NetherWorld != null && loaded.EndWorld != null, "все три мира восстановлены");
         Check(loaded.OverworldWorld!.GetBlockType(new Vec3i(3, owY, 0))?.Id == GameData.BPlanks.Id, "блок в Обычном мире сохранён");
 
+        File.Delete(path);
+    }
+
+    // ── 16. Регрессии по найденным багам ─────────────────────────────────────
+
+    private static void TestBugFixes() {
+        Console.WriteLine("[16] Регрессии: контейнеры, Бездна, взрыв, стриминг");
+
+        // Сундук: интерфейс рисует 3×9 слотов, поэтому и контейнер должен быть на 27 —
+        // иначе shift-click складывал предметы в невидимые слоты 27..35.
+        var s = NewSession(4242);
+        var chestPos = s.World.SpawnBlock + new Vec3i(2, 0, 0);
+        s.World.PlacePlacedBlock(chestPos, GameData.BChest);
+        var chest = s.World.GetOrCreateChest(chestPos);
+        Check(GameWorld.ChestCapacity == 27 && chest.Capacity == 27, $"сундук вмещает 27 слотов (сейчас {chest.Capacity})");
+        int inserted = 0;
+        for (int i = 0; i < 40; i++) {
+            if (chest.TryInsert(GameData.NewItem(GameData.DirtItem), 64)) inserted++;
+        }
+        Check(inserted == 27, $"в сундук влезает ровно 27 стаков (влезло {inserted})");
+
+        // Взрыв бьёт только по переданному миру, а не по текущему измерению хоста.
+        var s3 = NewSession(555);
+        var overworld = s3.World;
+        var bombCell = overworld.SpawnBlock + new Vec3i(3, 0, 0);
+        overworld.PlacePlacedBlock(bombCell, GameData.BStone);
+        s3.SwitchDimension(Dimension.Nether);
+        GameWorld.CreateExplosion(s3.World, new Vector3(bombCell.X + 0.5f, bombCell.Y + 0.5f, bombCell.Z + 0.5f), 4f, 10f, s3);
+        Check(overworld.GetBlockType(bombCell)?.Id == GameData.BStone.Id, "взрыв в Нижнем мире не разрушает блоки Обычного мира");
+
+        // Пакетный пересчёт света: после взрыва навес исчезает, и свет должен вернуться
+        // (раньше свет считался на каждый блок, теперь — один раз на всю операцию).
+        var ow2 = s3.OverworldWorld!;
+        int rx = ow2.SpawnBlock.X, rz = ow2.SpawnBlock.Z;
+        int roofY = ow2.SpawnBlock.Y + 6;
+        for (int dx = -2; dx <= 2; dx++)
+            for (int dz = -2; dz <= 2; dz++)
+                ow2.PlacePlacedBlock(new Vec3i(rx + dx, roofY, rz + dz), GameData.BStone);
+        var under = new Vec3i(rx, roofY - 1, rz);
+        byte dark = ow2.GetSunLight(under);
+        GameWorld.CreateExplosion(ow2, new Vector3(rx + 0.5f, roofY + 0.5f, rz + 0.5f), 4f, 1f, null);
+        byte lit = ow2.GetSunLight(under);
+        Check(lit > dark, $"после взрыва свет пересчитан (было {dark}, стало {lit})");
+
+        // Стриминг: неизменённый чанк выгружается, изменённый — остаётся (его нужно сохранить).
+        var s4 = NewSession(888);
+        s4.World.EnsureLoadedAroundSync(s4.Player.Position, 3);
+        var markedCell = s4.World.SpawnBlock + new Vec3i(0, 3, 0);
+        s4.World.PlacePlacedBlock(markedCell, GameData.BPlanks);
+        // Даём свету и мешам досчитаться: грязные чанки выгрузка намеренно не трогает.
+        Tick(s4, 3f);
+        // В headless нет рендерера, который вычерпывает очередь мешей, — делаем это вручную.
+        var drain = new List<GameChunk>();
+        s4.World.CollectMeshDirty(drain);
+        drain.Clear();
+        int before = s4.World.Chunks.Count;
+        int modified = s4.World.GetModifiedChunksSnapshot().Count;
+        int removed = s4.World.UnloadFarChunks(new Vec3i(500, 1, 500), 2);
+        Check(s4.World.Chunks.Count < before, $"дальние неизменённые чанки выгружаются ({before} → {s4.World.Chunks.Count}, изменённых {modified}, выгружено {removed})");
+        Check(s4.World.TryGetChunk(Chunk.CoordOf(markedCell)) != null, "изменённый чанк остаётся в памяти до сохранения");
+
+        // Повторный вход в выгруженный чанк не должен заселять его животными заново.
+        var s5 = NewSession(999);
+        s5.World.EnsureLoadedAroundSync(s5.Player.Position, 2);
+        Tick(s5, 1f);
+        int animalsBefore = s5.World.Animals.Count;
+        s5.World.UnloadFarChunks(new Vec3i(900, 1, 900), 2);
+        s5.World.EnsureLoadedAroundSync(s5.Player.Position, 2);
+        Check(s5.World.Animals.Count == animalsBefore, $"повторная загрузка чанков не дублирует животных ({animalsBefore} → {s5.World.Animals.Count})");
+
+        // Бездна: мир и позиция игрока сохраняются (раньше позиция сохранялась,
+        // а мир — нет, и игрок появлялся внутри камня Обычного мира).
+        var s2 = NewSession(777);
+        s2.EnterVoid();
+        var voidPos = s2.Player.Position;
+        s2.World.PlacePlacedBlock(new Vec3i(1, 13, -14), GameData.BPlanks);
+        string path = Path.Combine(Path.GetTempPath(), $"voxelframe_void_{Guid.NewGuid():N}.dat");
+        s2.SaveTo(path);
+        var loaded = SaveSystem.Load(path, headless: true);
+        Check(loaded.Dimension == Dimension.Void, "измерение Бездны восстановлено из сейва");
+        Check(loaded.VoidWorld != null, "мир Бездны загружен");
+        Check(loaded.Player.Position == voidPos, $"позиция в Бездне восстановлена ({loaded.Player.Position})");
+        Check(loaded.VoidWorld?.GetBlockType(new Vec3i(1, 13, -14))?.Id == GameData.BPlanks.Id, "блок в Бездне сохранён");
         File.Delete(path);
     }
 

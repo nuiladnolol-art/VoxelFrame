@@ -23,10 +23,12 @@ public static class LightEngine {
     [ThreadStatic] private static Queue<int>[]? _tSunBuckets;
     [ThreadStatic] private static GameChunk?[]? _tFaceNeighbors;
     [ThreadStatic] private static GameChunk?[]? _tColumnSections;
+    [ThreadStatic] private static Queue<(int X, int Y, int Z, byte Level)>? _tBlockQueue;
 
     private static Queue<int>[] SunBuckets => _tSunBuckets ??= CreateSunBuckets();
     private static GameChunk?[] FaceNeighbors => _tFaceNeighbors ??= new GameChunk?[6];
     private static GameChunk?[] ColumnSections => _tColumnSections ??= new GameChunk?[6];
+    private static Queue<(int X, int Y, int Z, byte Level)> BlockQueue => _tBlockQueue ??= new();
 
     private static Queue<int>[] CreateSunBuckets() {
         var b = new Queue<int>[14];
@@ -75,9 +77,9 @@ public static class LightEngine {
         var coord = gc.Coord;
         for (int i = 0; i < 6; i++)
             FaceNeighbors[i] = world.TryGetChunk(new Vec3i(coord.X + Dirs6[i].X, coord.Y + Dirs6[i].Y, coord.Z + Dirs6[i].Z));
-        // Секции вертикальной колонки: индекс s ↔ dy = s - 3 (диапазон -2..3).
+        // Секции вертикальной колонки: индекс s ↔ dy = s - 2 (диапазон -2..3).
         for (int s = 0; s < 6; s++)
-            ColumnSections[s] = s == 3 ? gc : world.TryGetChunk(new Vec3i(coord.X, coord.Y + (s - 3), coord.Z));
+            ColumnSections[s] = s == 2 ? gc : world.TryGetChunk(new Vec3i(coord.X, coord.Y + (s - 2), coord.Z));
 
         ProfSw?.Restart();
 
@@ -213,7 +215,8 @@ public static class LightEngine {
     public static void RecomputeBlock(GameChunk gc, GameWorld world) {
         Array.Clear(gc.BlockLight);
 
-        var queue = new Queue<(int X, int Y, int Z, byte Level)>();
+        var queue = BlockQueue;
+        queue.Clear();
         // Источники внутри чанка.
         for (int lx = 0; lx < Chunk.SizeX; lx++) {
             for (int ly = 0; ly < Chunk.SizeY; ly++) {

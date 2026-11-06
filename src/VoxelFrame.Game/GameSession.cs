@@ -365,6 +365,7 @@ public sealed class GameSession {
             }
         }
         Player.Dimension = World.Dimension;
+        Player.HighestYInAir = Player.Position.Y;
     }
 
     public GameWorld GetWorld(Dimension dim) {
@@ -676,11 +677,11 @@ public sealed class GameSession {
                 ? Vector3.Normalize(new Vector3(-fwdH.Z, 0f, fwdH.X)) 
                 : new Vector3(1f, 0f, 0f);
 
-            // Наклон камеры при получении урона (Hurt Tilt)
+            // Наклон камеры только при получении урона (Hurt Tilt). Горизонт строго стабилен.
             if (Player.HurtTimer > 0f) {
                 float tiltFactor = MathF.Sin(Player.HurtTimer / 0.5f * MathF.PI);
-                float tiltAngle = tiltFactor * (Player.HurtDirection * 0.12f); // ~7 градусов
-                var rot = Matrix4x4.CreateFromAxisAngle(Vector3.Normalize(Player.Forward), tiltAngle);
+                float hurtTilt = tiltFactor * (Player.HurtDirection * 0.12f); // ~7 градусов
+                var rot = Matrix4x4.CreateFromAxisAngle(Vector3.Normalize(Player.Forward), hurtTilt);
                 Camera.Up = Vector3.Transform(Vector3.UnitY, rot);
             } else {
                 Camera.Up = Vector3.UnitY;

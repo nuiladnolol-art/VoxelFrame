@@ -415,7 +415,7 @@ public static class TextureAtlas {
         _atlas = Raylib.LoadTextureFromImage(atlasImage);
         unsafe { Raylib.UnloadImage(atlasImage); }
         Raylib.GenTextureMipmaps(ref _atlas);
-        Raylib.SetTextureFilter(_atlas, TextureFilter.Point);
+        Raylib.SetTextureFilter(_atlas, TextureFilter.Anisotropic4X);
         _ready = true;
     }
 

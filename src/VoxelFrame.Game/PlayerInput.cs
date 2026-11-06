@@ -21,6 +21,7 @@ public struct PlayerInput {
     public bool Crouch;
     public bool Sprint;
     public bool Drop;
+    public bool PickBlock;       // СКМ: выбор блока в прицеле (Pick Block)
 
     public static PlayerInput Idle => default;
 }

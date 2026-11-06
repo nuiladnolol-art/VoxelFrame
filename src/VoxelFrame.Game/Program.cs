@@ -4,9 +4,23 @@ using VoxelFrame.Core.World;
 
 namespace VoxelFrame.Game;
 
-internal static class Program {
+public static class Program {
     public const int WindowW = 1280, WindowH = 720;
     public static string PlayerName = "Player";
+    public static readonly string Version = GetVersionString();
+
+    private static string GetVersionString() {
+        try {
+            var asm = typeof(Program).Assembly;
+            var info = asm.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false);
+            if (info.Length > 0 && info[0] is System.Reflection.AssemblyInformationalVersionAttribute iv && !string.IsNullOrWhiteSpace(iv.InformationalVersion)) {
+                return iv.InformationalVersion.Split('+')[0].Trim();
+            }
+            var v = asm.GetName().Version;
+            if (v != null) return $"{v.Major}.{v.Minor}.{v.Build}";
+        } catch { }
+        return "1.0.4";
+    }
 
     // Кольцевой буфер диагностики в памяти: кадр больше НЕ пишет на диск
     // (раньше было ~11 синхронных записей файла за кадр — источник статтеров).
@@ -60,17 +74,20 @@ internal static class Program {
         }
         AppDomain.CurrentDomain.UnhandledException += (_, e) => FlushCrashLog(e.ExceptionObject as Exception);
 
+        SaveSystem.LoadSettings();
+
         string? autoshotFile = null;
         int autoshotFrames = 0;
         for (int i = 0; i < args.Length - 2; i++) {
             if (args[i] == "--autoshot") {
                 autoshotFile = args[i + 1];
-                autoshotFrames = int.Parse(args[i + 2]);
+                int.TryParse(args[i + 2], out autoshotFrames);
             }
         }
 
-        bool startFullscreen = false;
-        int launchWidth = 1280, launchHeight = 720;
+        bool startFullscreen = SaveSystem.SavedFullscreen;
+        int launchWidth = SaveSystem.SavedWidth > 0 ? Math.Clamp(SaveSystem.SavedWidth, 640, 7680) : 1280;
+        int launchHeight = SaveSystem.SavedHeight > 0 ? Math.Clamp(SaveSystem.SavedHeight, 480, 4320) : 720;
         try {
             for (int i = 0; i < args.Length; i++) {
                 if (args[i] == "--username" && i + 1 < args.Length) PlayerName = args[i + 1];
@@ -82,15 +99,17 @@ internal static class Program {
             if (!args.Any(a => a == "--username" || a == "--fullscreen")) {
                 string configPath = Path.Combine(SaveSystem.SaveDirectory, "launcher.json");
                 if (File.Exists(configPath)) {
-                    string text = File.ReadAllText(configPath);
-                    if (text.Contains("\"Fullscreen\": true")) startFullscreen = true;
-                    if (text.Contains("\"Username\":")) {
-                        int s2 = text.IndexOf("\"Username\":") + 11;
-                        int e2 = text.IndexOf(",", s2);
-                        if (e2 == -1) e2 = text.IndexOf("}", s2);
-                        string nm = text.Substring(s2, e2 - s2).Replace("\"", "").Trim();
-                        if (!string.IsNullOrEmpty(nm)) PlayerName = nm;
-                    }
+                    try {
+                        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath));
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("Fullscreen", out var fsElem) && fsElem.ValueKind == System.Text.Json.JsonValueKind.True) {
+                            startFullscreen = true;
+                        }
+                        if (root.TryGetProperty("Username", out var userElem)) {
+                            string? nm = userElem.GetString();
+                            if (!string.IsNullOrWhiteSpace(nm)) PlayerName = nm.Trim();
+                        }
+                    } catch { }
                 }
             }
         } catch { }
@@ -114,7 +133,6 @@ internal static class Program {
         Raylib.SetTargetFPS(60);
         Raylib.SetExitKey(KeyboardKey.Null);   // ESC обрабатывается игрой
 
-        SaveSystem.LoadSettings();
         if (!string.IsNullOrEmpty(PlayerName) && PlayerName != "Player") {
             Screens.PlayerNick = PlayerName;
         } else if (!string.IsNullOrEmpty(Screens.PlayerNick)) {
@@ -129,6 +147,8 @@ internal static class Program {
         GameSession? session = null;
         WorldRenderer? renderer = null;
         int frames = 0;
+        // Кадры после TakeScreenshot: файл пишется только на следующем EndDrawing.
+        int _autoshotDrainFrames = 0;
         bool cursorCaptured = false;
         float pauseDebounce = 0f;
         float clientInvSyncTimer = 0f;
@@ -172,7 +192,7 @@ internal static class Program {
                     if (Raylib.IsKeyPressed(KeyBinds.Pause)) {
                         if (Screens.InGraphicsScreen) { Screens.InGraphicsScreen = false; SaveSystem.SaveSettings(); }
                         else if (Screens.InAudioScreen) { Screens.InAudioScreen = false; SaveSystem.SaveSettings(); }
-                        else if (Screens.InControlsScreen) { Screens.InControlsScreen = false; SaveSystem.SaveSettings(); }
+                        else if (Screens.InControlsScreen) { Screens.InControlsScreen = false; Screens.ActiveRebindIndex = -1; SaveSystem.SaveSettings(); }
                         else Screens.InSettingsScreen = false;
                     }
                 } else {
@@ -244,14 +264,11 @@ internal static class Program {
             if (session.Ui == UiState.Loading) {
                 renderer!.ProcessMeshQueue();
                 session.LoadDone = Math.Min(session.LoadDone + 4, session.LoadTotal);
-                if (!PostProcessing.BeginScene(session)) {
-                    Raylib.BeginDrawing();
-                }
+                Raylib.BeginDrawing();
                 Raylib.ClearBackground(new Color(10, 12, 20, 255));
                 Ui.Begin();
                 Screens.DrawLoading(session);
                 Ui.End();
-                PostProcessing.EndScene();
                 Raylib.EndDrawing();
                 if (session.LoadDone >= session.LoadTotal) {
                     session.Ui = UiState.Playing;
@@ -272,24 +289,21 @@ internal static class Program {
                     GameClient.Active?.UpdateRemotePlayers(dt);
                 }
 
-                if (!PostProcessing.BeginScene(session)) {
-                    Raylib.BeginDrawing();
-                }
-
                 if (Screens.InSettingsScreen) {
+                    Raylib.BeginDrawing();
+                    Raylib.ClearBackground(new Color(10, 12, 20, 255));
                     Ui.Begin();
                     if (Screens.InGraphicsScreen) Screens.DrawGraphics();
                     else if (Screens.InAudioScreen) Screens.DrawAudio();
                     else if (Screens.InControlsScreen) Screens.DrawControls();
                     else Screens.DrawSettings();
                     Ui.End();
-                    PostProcessing.EndScene();
                     Raylib.EndDrawing();
                     if (pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause)) {
                         pauseDebounce = 0.25f;
                         if (Screens.InGraphicsScreen) { Screens.InGraphicsScreen = false; SaveSystem.SaveSettings(); }
                         else if (Screens.InAudioScreen) { Screens.InAudioScreen = false; SaveSystem.SaveSettings(); }
-                        else if (Screens.InControlsScreen) { Screens.InControlsScreen = false; SaveSystem.SaveSettings(); }
+                        else if (Screens.InControlsScreen) { Screens.InControlsScreen = false; Screens.ActiveRebindIndex = -1; SaveSystem.SaveSettings(); }
                         else Screens.InSettingsScreen = false;
                     }
                     continue;
@@ -299,10 +313,11 @@ internal static class Program {
                     if (GameClient.Active != null) {
                         Screens.InOpenToLanScreen = false;
                     } else {
+                        Raylib.BeginDrawing();
+                        Raylib.ClearBackground(new Color(10, 12, 20, 255));
                         Ui.Begin();
                         Screens.DrawOpenToLan(session);
                         Ui.End();
-                        PostProcessing.EndScene();
                         Raylib.EndDrawing();
                         if (pauseDebounce <= 0f && Raylib.IsKeyPressed(KeyBinds.Pause)) {
                             pauseDebounce = 0.25f;
@@ -310,6 +325,10 @@ internal static class Program {
                         }
                         continue;
                     }
+                }
+
+                if (!PostProcessing.BeginScene(session)) {
+                    Raylib.BeginDrawing();
                 }
                 
                 Raylib.ClearBackground(new Color(10, 12, 20, 255));
@@ -347,6 +366,9 @@ internal static class Program {
                 } else if (pauseAction == PauseAction.SaveAndExit) {
                     SoundSystem.StopTotem();
                     SoundSystem.StopDisc();
+                    // Предметы из «руки» и сеток крафта возвращаем в инвентарь до сохранения,
+                    // иначе они остаются в статике Screens и могут уехать в следующий мир.
+                    Screens.ReturnHeld(session);
                     bool wasClient = GameClient.Active != null;
                     GameClient.Disconnect(session.Player);
                     GameServer.Stop();
@@ -354,6 +376,7 @@ internal static class Program {
                         session.SaveTo(SaveSystem.SavePath);
                     }
                     session.Ui = UiState.Playing;
+                    renderer?.Dispose();
                     session = null;
                     renderer = null;
                 }
@@ -426,11 +449,6 @@ internal static class Program {
             // Отрисовка 2D-никнеймов игроков над головами
             renderer.DrawRemotePlayerNameTags(session.Camera);
 
-            // Защита от X-Ray (если камера внутри непрозрачного блока — черная заглушка)
-            var camCell = new VoxelFrame.Core.Vec3i((int)MathF.Floor(session.Camera.Position.X), (int)MathF.Floor(session.Camera.Position.Y), (int)MathF.Floor(session.Camera.Position.Z));
-            if (session.World.IsOpaqueAt(camCell)) {
-                Raylib.DrawRectangle(0, 0, Raylib.GetScreenWidth(), Raylib.GetScreenHeight(), new Color(16, 14, 13, 255));
-            }
 
             // UI рисуется в виртуальных координатах (масштаб интерфейса)
             Ui.Begin();
@@ -449,6 +467,7 @@ internal static class Program {
                             SoundSystem.StopDisc();
                             session.SaveTo(SaveSystem.SavePath);
                             session.Ui = UiState.Playing;
+                            renderer?.Dispose();
                             session = null;
                             renderer = null;
                         } else {
@@ -457,7 +476,7 @@ internal static class Program {
                     }
                     break;
                 case UiState.Playing:
-                    if (Raylib.IsKeyPressed(KeyboardKey.T)) {
+                    if (Raylib.IsKeyPressed(KeyBinds.Chat)) {
                         session.Ui = UiState.Chat;
                         session.ChatInput = "";
                         if (cursorCaptured) { Raylib.EnableCursor(); cursorCaptured = false; }
@@ -503,11 +522,98 @@ internal static class Program {
                     if (Raylib.IsKeyPressed(KeyboardKey.Backspace) && session.ChatInput.Length > 0) {
                         session.ChatInput = session.ChatInput[..^1];
                     }
+                    // История команд: Стрелка Вверх
+                    if (Raylib.IsKeyPressed(KeyboardKey.Up) && _chatHistory.Count > 0) {
+                        if (_chatHistoryIndex == -1) {
+                            _savedChatDraft = session.ChatInput;
+                            _chatHistoryIndex = _chatHistory.Count - 1;
+                        } else if (_chatHistoryIndex > 0) {
+                            _chatHistoryIndex--;
+                        }
+                        session.ChatInput = _chatHistory[_chatHistoryIndex];
+                    }
+                    // История команд: Стрелка Вниз
+                    else if (Raylib.IsKeyPressed(KeyboardKey.Down)) {
+                        if (_chatHistoryIndex != -1) {
+                            _chatHistoryIndex++;
+                            if (_chatHistoryIndex >= _chatHistory.Count) {
+                                _chatHistoryIndex = -1;
+                                session.ChatInput = _savedChatDraft;
+                            } else {
+                                session.ChatInput = _chatHistory[_chatHistoryIndex];
+                            }
+                        }
+                    }
+                    // Автодополнение команд и ников по клавише Tab
+                    if (Raylib.IsKeyPressed(KeyboardKey.Tab)) {
+                        string curInput = session.ChatInput;
+                        if (curInput.StartsWith("/")) {
+                            var parts = curInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                            if (parts.Length <= 1) {
+                                string prefix = curInput.ToLowerInvariant();
+                                var match = _knownCommands.FirstOrDefault(c => c.StartsWith(prefix));
+                                if (match != null) session.ChatInput = match + " ";
+                            } else if (parts[0].Equals("/gamemode", StringComparison.OrdinalIgnoreCase) || parts[0].Equals("/gm", StringComparison.OrdinalIgnoreCase)) {
+                                string sub = parts.Length > 1 ? parts[1].ToLowerInvariant() : "";
+                                var modes = new[] { "survival", "creative" };
+                                var match = modes.FirstOrDefault(m => m.StartsWith(sub));
+                                if (match != null) session.ChatInput = parts[0] + " " + match;
+                            } else if (parts[0].Equals("/time", StringComparison.OrdinalIgnoreCase)) {
+                                if (parts.Length == 2 && "set".StartsWith(parts[1].ToLowerInvariant())) {
+                                    session.ChatInput = "/time set ";
+                                } else if (parts.Length > 2) {
+                                    var times = new[] { "day", "night", "noon", "midnight" };
+                                    var match = times.FirstOrDefault(t => t.StartsWith(parts[2].ToLowerInvariant()));
+                                    if (match != null) session.ChatInput = "/time set " + match;
+                                }
+                            } else if (parts[0].Equals("/weather", StringComparison.OrdinalIgnoreCase)) {
+                                var weathers = new[] { "clear", "rain", "thunder" };
+                                string sub = parts.Length > 1 ? parts[1].ToLowerInvariant() : "";
+                                var match = weathers.FirstOrDefault(w => w.StartsWith(sub));
+                                if (match != null) session.ChatInput = "/weather " + match;
+                            } else if (parts[0].Equals("/gamerule", StringComparison.OrdinalIgnoreCase)) {
+                                if (parts.Length == 2 && "keepinventory".StartsWith(parts[1].ToLowerInvariant())) {
+                                    session.ChatInput = "/gamerule keepInventory ";
+                                } else if (parts.Length > 2) {
+                                    var bools = new[] { "true", "false" };
+                                    var match = bools.FirstOrDefault(b => b.StartsWith(parts[2].ToLowerInvariant()));
+                                    if (match != null) session.ChatInput = "/gamerule keepInventory " + match;
+                                }
+                            } else if (parts[0].Equals("/tp", StringComparison.OrdinalIgnoreCase)) {
+                                string sub = parts.Length > 1 ? parts[1].ToLowerInvariant() : "";
+                                var playerNames = new List<string>();
+                                if (GameClient.Active != null) foreach (var rp in GameClient.Active.RemotePlayers) playerNames.Add(rp.Name);
+                                if (GameServer.Active != null) foreach (var cl in GameServer.Active.Clients) playerNames.Add(cl.Name);
+                                var match = playerNames.FirstOrDefault(n => n.ToLowerInvariant().StartsWith(sub));
+                                if (match != null) session.ChatInput = "/tp " + match;
+                            }
+                        } else if (!string.IsNullOrEmpty(curInput)) {
+                            string sub = curInput.Split(' ').Last().ToLowerInvariant();
+                            var playerNames = new List<string>();
+                            if (GameClient.Active != null) foreach (var rp in GameClient.Active.RemotePlayers) playerNames.Add(rp.Name);
+                            if (GameServer.Active != null) foreach (var cl in GameServer.Active.Clients) playerNames.Add(cl.Name);
+                            var match = playerNames.FirstOrDefault(n => n.ToLowerInvariant().StartsWith(sub));
+                            if (match != null) {
+                                int lastSpace = curInput.LastIndexOf(' ');
+                                session.ChatInput = (lastSpace >= 0 ? curInput[..(lastSpace + 1)] : "") + match + ": ";
+                            }
+                        }
+                    }
                     if (Raylib.IsKeyPressed(KeyboardKey.Enter) || Raylib.IsKeyPressed(KeyboardKey.KpEnter)) {
+                        string text = session.ChatInput.Trim();
+                        if (!string.IsNullOrEmpty(text)) {
+                            if (_chatHistory.Count == 0 || _chatHistory[^1] != text) {
+                                _chatHistory.Add(text);
+                            }
+                        }
+                        _chatHistoryIndex = -1;
+                        _savedChatDraft = "";
                         session.ExecuteChatCommand(session.ChatInput);
                         session.ChatInput = "";
                         session.Ui = UiState.Playing;
                     } else if (Raylib.IsKeyPressed(KeyboardKey.Escape)) {
+                        _chatHistoryIndex = -1;
+                        _savedChatDraft = "";
                         session.ChatInput = "";
                         session.Ui = UiState.Playing;
                     }
@@ -526,6 +632,7 @@ internal static class Program {
                         SoundSystem.StopDisc();
                         session.SaveTo(SaveSystem.SavePath);
                         session.Ui = UiState.Playing;
+                        renderer?.Dispose();
                         session = null;
                         renderer = null;
                     }
@@ -572,14 +679,23 @@ internal static class Program {
             frames++;
             if (autoshotFile != null && frames >= autoshotFrames) {
                 Raylib.TakeScreenshot(autoshotFile);
-                break;
+                // raylib пишет PNG на следующем EndDrawing, а не в момент вызова:
+                // без нескольких дополнительных кадров файл просто не создавался.
+                autoshotFile = null;
+                _autoshotDrainFrames = 3;
             }
+            if (_autoshotDrainFrames > 0 && --_autoshotDrainFrames == 0) break;
         }
 
         // Сохранение при закрытии окна/выходе: текущее измерение (в т.ч. Энд) и
         // позиция игрока не теряются, даже если закрыть окно крестиком без паузы.
         if (session != null && session.World != null) {
-            try { session.SaveTo(SaveSystem.SavePath); } catch { /* не критично */ }
+            bool wasClient = GameClient.Active != null;
+            if (wasClient) {
+                try { GameClient.Disconnect(session.Player); } catch { }
+            } else {
+                try { session.SaveTo(SaveSystem.SavePath); } catch { /* не критично */ }
+            }
         }
 
         // Освобождаем GPU-ресурсы ДО CloseWindow: контекст OpenGL ещё текущий,
@@ -591,6 +707,7 @@ internal static class Program {
         SoundSystem.Shutdown();
         TextureAtlas.Unload();
         Fonts.Unload();
+        SkyTextures.Unload();
         PostProcessing.Unload();
         Raylib.CloseWindow();
         return 0;
@@ -598,6 +715,12 @@ internal static class Program {
 
     private static float _lastForwardPressTime = -10f;
     private static bool _doubleTapSprint = false;
+    private static readonly List<string> _chatHistory = new();
+    private static int _chatHistoryIndex = -1;
+    private static string _savedChatDraft = "";
+    private static readonly string[] _knownCommands = new[] {
+        "/gamemode", "/gamerule", "/give", "/tp", "/time", "/weather", "/locate", "/kill", "/clear", "/seed", "/help"
+    };
 
     private static PlayerInput ReadInput(UiState uiState, float pauseDebounce) {
         if (uiState == UiState.Chat) {
@@ -631,6 +754,7 @@ internal static class Program {
             Crouch = Raylib.IsKeyDown(KeyBinds.Crouch),
             Sprint = Raylib.IsKeyDown(KeyBinds.Sprint) || Raylib.IsKeyDown(KeyboardKey.LeftControl) || _doubleTapSprint,
             Drop = Raylib.IsKeyPressed(KeyBinds.Drop),
+            PickBlock = Raylib.IsMouseButtonPressed(MouseButton.Middle),
             AttackHeld = Raylib.IsMouseButtonDown(MouseButton.Left),
             AttackPressed = Raylib.IsMouseButtonPressed(MouseButton.Left),
             UsePressed = Raylib.IsMouseButtonPressed(MouseButton.Right),

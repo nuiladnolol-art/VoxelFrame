@@ -27,6 +27,7 @@ public sealed class Chunk {
     public ref VoxelData Get(int index) => ref _voxels[index];
 
     public void SetVoxel(int index, in VoxelData value) {
+        if ((uint)index >= (uint)_voxels.Length) return;
         if (_voxels[index].Equals(value)) return;
         _voxels[index] = value;
         Version++;

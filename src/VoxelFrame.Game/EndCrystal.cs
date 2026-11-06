@@ -66,7 +66,6 @@ public sealed class EndCrystalEntity {
         if (!Alive) return;
         Alive = false;
         world.RemoveBlock(Anchor);
-        GameWorld.CreateExplosion(Position, 3.5f, 26f, session);
-        SoundSystem.PlayExplosion();
+        GameWorld.CreateExplosion(world, Position, 3.5f, 26f, session);
     }
 }

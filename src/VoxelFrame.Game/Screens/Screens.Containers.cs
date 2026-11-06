@@ -24,7 +24,7 @@ public static partial class Screens {
 
         const int slotSz = 52;
         int panelW = 9 * 56 + 32;
-        int panelH = 4 * 56 + 180;
+        int panelH = 460;
         float px = w / 2f - panelW / 2f, py = (h - panelH) / 2f;
         DrawPanel(px, py, panelW, panelH);
 

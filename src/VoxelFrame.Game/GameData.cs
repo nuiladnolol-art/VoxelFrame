@@ -582,6 +582,16 @@ public static class GameData {
         return 0;
     }
 
+    /// <summary>
+    /// Тир добычи — какие блоки инструмент вообще может добыть. Золото быстрое, но
+    /// хрупкое: по «пробивной способности» оно на уровне железа, а не между железом и алмазом,
+    /// поэтому алмазная руда золотой киркой не добывается.
+    /// </summary>
+    public static int GetHarvestTier(ushort itemId) => GetToolTier(itemId) switch {
+        4 => 3, // золото = железо по добыче
+        var t => t
+    };
+
     public static int GetMaxToolDurability(ushort itemId) {
         if (itemId == WoodPickaxeItem.Id || itemId == WoodAxeItem.Id || itemId == WoodShovelItem.Id || itemId == WoodSwordItem.Id || itemId == WoodHoeItem.Id) return 59;
         if (itemId == StonePickaxeItem.Id || itemId == StoneAxeItem.Id || itemId == StoneShovelItem.Id || itemId == StoneSwordItem.Id || itemId == StoneHoeItem.Id) return 131;
@@ -617,7 +627,7 @@ public static class GameData {
     public static bool CanHarvestBlock(BlockType b, ushort toolId) {
         if (RequiresPickaxe(b.Id)) {
             if (!IsPickaxe(toolId)) return false;
-            return GetToolTier(toolId) >= GetRequiredTier(b.Id);
+            return GetHarvestTier(toolId) >= GetRequiredTier(b.Id);
         }
         // Дерево, доски, верстак, земля, песок, факелы и т.д. можно добыть рукой!
         return true;

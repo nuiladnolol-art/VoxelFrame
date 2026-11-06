@@ -709,6 +709,7 @@ public static class SoundSystem {
             Raylib.UnloadSound(_stepStone);
             Raylib.UnloadSound(_stepWood);
             Raylib.UnloadSound(_stepSand);
+            Raylib.UnloadSound(_stepGravel);
             Raylib.UnloadSound(_stepWater);
 
             Raylib.UnloadSound(_digGrass);
@@ -723,11 +724,18 @@ public static class SoundSystem {
             Raylib.UnloadSound(_bowShootSound);
             Raylib.UnloadSound(_arrowHitSound);
             Raylib.UnloadSound(_explosionSound);
+            Raylib.UnloadSound(_shieldBlockSound);
+            Raylib.UnloadSound(_babakherHissSound);
 
             Raylib.UnloadSound(_eatSound);
             Raylib.UnloadSound(_splashSound);
             Raylib.UnloadSound(_popSound);
             Raylib.UnloadSound(_chestSound);
+            Raylib.UnloadSound(_doorOpenSound);
+            Raylib.UnloadSound(_doorCloseSound);
+            Raylib.UnloadSound(_dupePoliceSound);
+            Raylib.UnloadSound(_totemSound);
+            Raylib.UnloadSound(_thunderSound);
 
             if (_musicLoaded) {
                 Raylib.StopMusicStream(_currentMusic);

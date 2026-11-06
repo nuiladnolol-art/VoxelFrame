@@ -256,7 +256,7 @@ public sealed class ItemPickup {
     }
 
     /// <summary>Притяжение к игроку и сбор в инвентарь (с задержкой подбора и деспавном через 5 мин).</summary>
-    public void Tick(float dt, GameWorld world, Player player) {
+    public void Tick(float dt, GameWorld world, Player? player) {
         Age += dt;
         if (Age >= 300f) {
             Quantity = 0; // Испарение / деспавн предметов, пролежавших на земле > 5 минут
@@ -276,31 +276,39 @@ public sealed class ItemPickup {
 
         if (PickupDelay > 0f) PickupDelay -= dt;
 
-        var to = player.Position - Position;
-        float dist = to.Length();
-        bool isAlive = player.Health > 0f;
-        bool canFitAny = isAlive && player.Inventory.HasSpaceFor(Item.Definition, 1);
-        if (PickupDelay <= 0f && canFitAny && dist < 3.2f && dist > 0.001f) {
-            Position += to / dist * MathF.Min(5f * dt, dist);
-            Velocity = Vector3.Zero;
+        if (player != null) {
+            var to = player.Position - Position;
+            float dist = to.Length();
+            bool isAlive = player.Health > 0f;
+            bool canFitAny = isAlive && player.Inventory.HasSpaceFor(Item.Definition, 1);
+            if (PickupDelay <= 0f && canFitAny && dist < 3.2f && dist > 0.001f) {
+                Position += to / dist * MathF.Min(5f * dt, dist);
+                Velocity = Vector3.Zero;
+            } else {
+                Velocity.Y -= 20.0f * dt;
+                Velocity.X *= MathF.Exp(-2f * dt);
+                Velocity.Z *= MathF.Exp(-2f * dt);
+                var half = new Vector3(0.15f, 0.15f, 0.15f);
+                Collision.Move(world, ref Position, half, ref Velocity, dt);
+            }
+            if (isAlive && PickupDelay <= 0f && dist < 1.5f) {
+                int fit = Quantity;
+                while (fit > 0) {
+                    if (player.Inventory.TryInsert(Item, fit)) {
+                        Quantity -= fit;
+                        SoundSystem.PlayPop();
+                        GameClient.Active?.SendPickupCollect(Id);
+                        break;
+                    }
+                    fit--;
+                }
+            }
         } else {
             Velocity.Y -= 20.0f * dt;
             Velocity.X *= MathF.Exp(-2f * dt);
             Velocity.Z *= MathF.Exp(-2f * dt);
             var half = new Vector3(0.15f, 0.15f, 0.15f);
             Collision.Move(world, ref Position, half, ref Velocity, dt);
-        }
-        if (isAlive && PickupDelay <= 0f && dist < 1.5f) {
-            int fit = Quantity;
-            while (fit > 0) {
-                if (player.Inventory.TryInsert(Item, fit)) {
-                    Quantity -= fit;
-                    SoundSystem.PlayPop();
-                    GameClient.Active?.SendPickupCollect(Id);
-                    break;
-                }
-                fit--;
-            }
         }
     }
 }
@@ -448,7 +456,8 @@ public sealed class Animal {
                 headingToMate = true;
                 float dist = MathF.Sqrt(bestDistSq);
                 var toMate = bestMate.Position - Position;
-                WanderDir = Vector2.Normalize(new Vector2(toMate.X, toMate.Z));
+                float mateSq = toMate.X * toMate.X + toMate.Z * toMate.Z;
+                WanderDir = mateSq > 0.0001f ? new Vector2(toMate.X, toMate.Z) / MathF.Sqrt(mateSq) : Vector2.Zero;
                 WanderTimer = 0.5f;
 
                 if (dist < 1.4f) {
@@ -475,7 +484,8 @@ public sealed class Animal {
             float dist = Vector3.Distance(Position, player.Position);
             if (isFood && dist < 10.0f && dist > 1.8f) {
                 var toP = player.Position - Position;
-                WanderDir = Vector2.Normalize(new Vector2(toP.X, toP.Z));
+                float pSq = toP.X * toP.X + toP.Z * toP.Z;
+                WanderDir = pSq > 0.0001f ? new Vector2(toP.X, toP.Z) / MathF.Sqrt(pSq) : Vector2.Zero;
                 WanderTimer = 0.8f;
             }
         }
