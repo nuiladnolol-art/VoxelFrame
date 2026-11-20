@@ -1028,7 +1028,24 @@ public sealed partial class GameWorld : IDisposable {
             LightEngine.RecomputeSun(gc, this);
             LightEngine.RecomputeBlock(gc, this);
             _meshDirty.Add(gc);
+            MarkBuiltNeighborsMeshDirty(gc.Coord);
         }
+    }
+
+    /// <summary>
+    /// Грани, AO и мягкий свет на краю чанка читают свет соседей (включая диагональных).
+    /// Если сосед был собран, пока свет этого чанка ещё не посчитан (массив нулей),
+    /// на шве оставалась тёмная полоса навсегда — видимые «линии» по границам чанков.
+    /// После пересчёта света перестраиваем уже собранных соседей.
+    /// </summary>
+    private void MarkBuiltNeighborsMeshDirty(Vec3i cc) {
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dy == 0 && dz == 0) continue;
+                    if (_chunks.TryGetValue(new Vec3i(cc.X + dx, cc.Y + dy, cc.Z + dz), out var n) && n.MeshUploaded)
+                        _meshDirty.Add(n);
+                }
     }
 
     public void TickGrassSpread(float dt) {

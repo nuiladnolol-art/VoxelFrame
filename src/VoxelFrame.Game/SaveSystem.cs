@@ -1147,7 +1147,7 @@ public static class SaveSystem {
     public static int CreaturesVolume = 100; // 0..100% (Мобы и животные)
     public static int WeatherVolume = 100; // 0..100% (Погода, гром, вода)
     public static int PlayerVolume = 100; // 0..100% (Игрок и интерфейс)
-    public static int RenderDistanceSetting = 5; // 2..20
+    public static int RenderDistanceSetting = 5; // 2..16 (как у ползунка в настройках)
     public static int MouseSensitivity = 100; // 20..200%
     public static int FovSetting = 70; // 50..110
     public static bool SmoothLighting = true;
@@ -1157,6 +1157,9 @@ public static class SaveSystem {
     public static int PostFxVignetteStrength = 35; // 0..60 %
     public static bool PostFxGoldenHour = true;
     public static bool PostFxBloom = true;
+    public static bool PostFxGodRays = true;   // объёмные солнечные лучи (screen-space)
+    /// <summary>Тени от солнца/луны (shadow map): 0 = выкл, 1 = средние (1024), 2 = высокие (2048).</summary>
+    public static int ShadowQuality = 1;
 
     public static string SelectedSkin = "cyan";
 
@@ -1208,6 +1211,8 @@ public static class SaveSystem {
                 ["PostFxVignetteStrength"] = PostFxVignetteStrength,
                 ["PostFxGoldenHour"] = PostFxGoldenHour,
                 ["PostFxBloom"] = PostFxBloom,
+                ["PostFxGodRays"] = PostFxGodRays,
+                ["ShadowQuality"] = ShadowQuality,
                 ["PlayerNick"] = Screens.PlayerNick,
                 ["SelectedSkin"] = SelectedSkin,
                 ["DirectConnectIp"] = Screens.DirectConnectIp,
@@ -1264,7 +1269,9 @@ public static class SaveSystem {
             R("CreaturesVolume", v => CreaturesVolume = Math.Clamp(v, 0, 100));
             R("WeatherVolume", v => WeatherVolume = Math.Clamp(v, 0, 100));
             R("PlayerVolume", v => PlayerVolume = Math.Clamp(v, 0, 100));
-            R("RenderDistanceSetting", v => RenderDistanceSetting = v);
+            // Ползунок ограничен 2..16; без зажима битое значение в settings.json
+            // (0, отрицательное, 999) ломало стриминг чанков и туман.
+            R("RenderDistanceSetting", v => RenderDistanceSetting = Math.Clamp(v, 2, 16));
             R("MouseSensitivity", v => MouseSensitivity = Math.Clamp(v, 20, 200));
             R("FovSetting", v => FovSetting = Math.Clamp(v, 50, 110));
             B("SmoothLighting", v => SmoothLighting = v);
@@ -1274,6 +1281,8 @@ public static class SaveSystem {
             R("PostFxVignetteStrength", v => PostFxVignetteStrength = Math.Clamp(v, 0, 60));
             B("PostFxGoldenHour", v => PostFxGoldenHour = v);
             B("PostFxBloom", v => PostFxBloom = v);
+            B("PostFxGodRays", v => PostFxGodRays = v);
+            R("ShadowQuality", v => ShadowQuality = Math.Clamp(v, 0, 2));
             S("PlayerNick", v => Screens.PlayerNick = v);
             S("SelectedSkin", v => {
                 SelectedSkin = v;

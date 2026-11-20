@@ -7,11 +7,26 @@ namespace VoxelFrame.Game;
 
     /// <summary>
     /// Строит GPU-меши чанка: отбрасывание скрытых граней, запечённый свет.
-    /// Цвет вершины: R = солнечный свет × AO, G = блочный свет × AO.
+    /// Цвет вершины: R = солнечный свет × AO, G = блочный свет × AO, B = направленное затенение,
+    /// A = код материала для шейдера (см. <see cref="Mat"/>): листва качается на ветру, вода
+    /// получает отражения и блики, лава/светокамень светятся (HDR → bloom).
     /// Фактор неба применяет шейдер через uniform skyFactor (без пересборки мешей).
     /// </summary>
     public static class ChunkMesher {
     public const ushort MaxVertices = 65000;   // лимит ushort-индексов raylib
+
+    /// <summary>Коды материалов в альфа-канале цвета вершины (читает шейдер мира).</summary>
+    public static class Mat {
+        public const byte Solid = 255;
+        public const byte Leaves = 254;
+        public const byte Plant = 253;     // крестовые растения: трава, цветы, посевы
+        public const byte Water = 252;
+        public const byte Lava = 251;
+        public const byte Portal = 250;
+        public const byte Glass = 249;
+        public const byte Fire = 248;
+        public const byte Emissive = 247;  // светящиеся непрозрачные блоки (светокамень)
+    }
 
     private static readonly (int X, int Y, int Z, float Nx, float Ny, float Nz)[] Faces = {
         (1, 0, 0, 1, 0, 0), (-1, 0, 0, -1, 0, 0),
@@ -141,6 +156,7 @@ namespace VoxelFrame.Game;
                         }
                         
                         var (u0, v0, u1, v1) = TileUv(foliageTile);
+                        byte plantMat = v.TypeId == GameData.BFire.Id ? Mat.Fire : Mat.Plant;
                         var (sun, blockL) = GetFaceLight(neighbors, gc, lx, ly, lz, 0, 0, 0);
                         byte shadeSun = (byte)(255f * MathF.Max(sun, 0.4f));
                         byte shadeBlock = (byte)(255f * blockL);
@@ -163,22 +179,22 @@ namespace VoxelFrame.Game;
                             verts.Add(x0); verts.Add(y0); verts.Add(z0);
                             norms.Add(0); norms.Add(1); norms.Add(0);
                             uvs.Add(u0); uvs.Add(v1);
-                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(230); cols.Add(255);
+                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(230); cols.Add(plantMat);
 
                             verts.Add(x1); verts.Add(y0); verts.Add(z1);
                             norms.Add(0); norms.Add(1); norms.Add(0);
                             uvs.Add(u1); uvs.Add(v1);
-                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(230); cols.Add(255);
+                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(230); cols.Add(plantMat);
 
                             verts.Add(x1); verts.Add(y1); verts.Add(z1);
                             norms.Add(0); norms.Add(1); norms.Add(0);
                             uvs.Add(u1); uvs.Add(v0);
-                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(230); cols.Add(255);
+                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(230); cols.Add(plantMat);
 
                             verts.Add(x0); verts.Add(y1); verts.Add(z0);
                             norms.Add(0); norms.Add(1); norms.Add(0);
                             uvs.Add(u0); uvs.Add(v0);
-                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(230); cols.Add(255);
+                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(230); cols.Add(plantMat);
 
                             // Лицевая сторона (Front face)
                             indices.Add((ushort)(bv + 0));
@@ -283,9 +299,7 @@ namespace VoxelFrame.Game;
                             ? (biome == BiomeType.Swamp ? TextureAtlas.TWaterSwamp : TextureAtlas.TWater)
                             : TextureAtlas.TLava);
                         var (u0, v0, u1, v1) = TileUv(fluidTile);
-                        byte alpha = isWater
-                            ? (biome == BiomeType.Swamp ? (byte)235 : (byte)210)
-                            : (byte)255;
+                        byte alpha = isWater ? Mat.Water : Mat.Lava;
 
                         float worldOffsetX = gc.Coord.X * Chunk.SizeX;
                         float worldOffsetY = gc.Coord.Y * Chunk.SizeY;
@@ -375,7 +389,7 @@ namespace VoxelFrame.Game;
                         float worldOffsetX = gc.Coord.X * Chunk.SizeX;
                         float worldOffsetY = gc.Coord.Y * Chunk.SizeY;
                         float worldOffsetZ = gc.Coord.Z * Chunk.SizeZ;
-                        const byte alpha = 200;
+                        const byte alpha = Mat.Portal;
 
                         for (int f = 0; f < 6; f++) {
                             var (dx, dy, dz, nx, ny, nz) = Faces[f];
@@ -491,7 +505,11 @@ namespace VoxelFrame.Game;
                         };
                         byte shadeDir = (byte)(255f * faceDir);
 
-                        bool useSmooth = SaveSystem.FancyGraphics && !isFluid;
+                        bool useSmooth = SaveSystem.SmoothLighting && !isFluid;
+                        byte faceMat = v.TypeId == GameData.BLeaves.Id ? Mat.Leaves
+                            : v.TypeId == GameData.BGlass.Id ? Mat.Glass
+                            : (block.LightLevel >= 10 && block.IsOpaque) ? Mat.Emissive
+                            : Mat.Solid;
 
                         for (int vi = 0; vi < 4; vi++) {
                             var (fx, fy, fz, fu, fv) = FaceVerts[f][vi];
@@ -526,7 +544,7 @@ namespace VoxelFrame.Game;
                             norms.Add(nx); norms.Add(ny); norms.Add(nz);
                             uvs.Add(u0 + (u1 - u0) * actualFu);
                             uvs.Add(v0 + (v1 - v0) * actualFv);
-                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(shadeDir); cols.Add((byte)255);
+                            cols.Add(shadeSun); cols.Add(shadeBlock); cols.Add(shadeDir); cols.Add(faceMat);
                         }
 
                         // Умная триангуляция для предотвращения анизотропных срезов освещения

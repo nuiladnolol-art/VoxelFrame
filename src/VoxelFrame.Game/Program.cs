@@ -156,6 +156,26 @@ public static class Program {
         if (autoshotFile != null) {
             session = GameSession.NewGame(12345, headless: false);
             renderer = new WorldRenderer(session);
+            // Отладочные параметры кадра: --shot-time 0..1, --shot-look yaw° pitch°, --shot-pos x y z
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            for (int i = 0; i < args.Length; i++) {
+                if (args[i] == "--shot-time" && i + 1 < args.Length && float.TryParse(args[i + 1], ci, out float tod))
+                    session.DayNight.TimeOfDay = Math.Clamp(tod, 0f, 0.9999f);
+                if (args[i] == "--shot-look" && i + 2 < args.Length
+                    && float.TryParse(args[i + 1], ci, out float yawDeg) && float.TryParse(args[i + 2], ci, out float pitchDeg)) {
+                    session.Player.Yaw = yawDeg * MathF.PI / 180f;
+                    session.Player.Pitch = pitchDeg * MathF.PI / 180f;
+                }
+                if (args[i] == "--shot-pos" && i + 3 < args.Length
+                    && float.TryParse(args[i + 1], ci, out float px) && float.TryParse(args[i + 2], ci, out float py)
+                    && float.TryParse(args[i + 3], ci, out float pz)) {
+                    session.Player.Position = new System.Numerics.Vector3(px, py, pz);
+                }
+                if (args[i] == "--shot-rain") session.Weather = WeatherType.Rain;
+                if (args[i] == "--shot-fly") { session.GameMode = GameMode.Creative; session.Player.IsFlying = true; }
+                if (args[i] == "--shot-shadows" && i + 1 < args.Length && int.TryParse(args[i + 1], out int shq)) SaveSystem.ShadowQuality = shq;
+                if (args[i] == "--shot-postfx" && i + 1 < args.Length && int.TryParse(args[i + 1], out int pfx)) SaveSystem.PostFxMode = pfx;
+            }
         }
 
         while (!Raylib.WindowShouldClose()) {
@@ -327,12 +347,14 @@ public static class Program {
                     }
                 }
 
+                renderer!.ProcessMeshQueue();
+                renderer.UpdateAtmosphere(dt);
+                renderer.RenderShadowPass();
                 if (!PostProcessing.BeginScene(session)) {
                     Raylib.BeginDrawing();
                 }
-                
+
                 Raylib.ClearBackground(new Color(10, 12, 20, 255));
-                renderer!.ProcessMeshQueue();
                 renderer.DrawSky();
                 Raylib.BeginMode3D(session.Camera);
                 renderer.Draw3DSky(session.Camera);
@@ -341,6 +363,9 @@ public static class Program {
                 renderer.DrawDecorations(dt);
                 renderer.DrawPickups(session.Camera);
                 renderer.DrawWorldTranslucent();
+                // Облака и осадки рисуются и на паузе — раньше они исчезали при открытии меню.
+                renderer.DrawClouds(session.Camera);
+                renderer.DrawWeather(session.Camera);
                 Raylib.EndMode3D();
 
                 // Пост-обработка до паузы-UI
@@ -418,14 +443,16 @@ public static class Program {
                 } catch { /* повторим на следующем тике */ }
             }
 
+            CrashDiag("03_pre_mesh");
+            renderer!.ProcessMeshQueue();
+            CrashDiag("04_post_mesh");
+            renderer.UpdateAtmosphere(dt);
+            renderer.RenderShadowPass();
+            CrashDiag("04b_post_shadows");
             if (!PostProcessing.BeginScene(session)) {
                 Raylib.BeginDrawing();
             }
             Raylib.ClearBackground(new Color(10, 12, 20, 255));
-
-            CrashDiag("03_pre_mesh");
-            renderer!.ProcessMeshQueue();
-            CrashDiag("04_post_mesh");
             renderer.DrawSky();
             Raylib.BeginMode3D(session.Camera);
             renderer.Draw3DSky(session.Camera);

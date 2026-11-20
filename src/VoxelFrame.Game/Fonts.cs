@@ -32,7 +32,14 @@ public static class Fonts {
             @"C:\Windows\Fonts\tahomabd.ttf",   // Tahoma Bold
             @"C:\Windows\Fonts\calibrib.ttf",   // Calibri Bold
             @"C:\Windows\Fonts\segoeui.ttf",
-            @"C:\Windows\Fonts\arial.ttf"
+            @"C:\Windows\Fonts\arial.ttf",
+            // Linux / macOS: без них кириллица уходила в пиксельный fallback с кривыми глифами
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            "/Library/Fonts/Arial Bold.ttf"
         };
 
         foreach (var path in candidatePaths) {

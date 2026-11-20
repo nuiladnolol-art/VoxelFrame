@@ -563,17 +563,26 @@ public static partial class Screens {
         };
         if (Button(leftX, startY, colW, rowH, gfxPresetText, true)) {
             SaveSystem.GraphicsQuality = (SaveSystem.GraphicsPreset)(((int)SaveSystem.GraphicsQuality + 1) % 3);
+            bool oldSmooth = SaveSystem.SmoothLighting;
             if (SaveSystem.GraphicsQuality == SaveSystem.GraphicsPreset.Fast) {
                 SaveSystem.CloudsMode = 1;
                 SaveSystem.ParticlesMode = 0;
                 SaveSystem.DynamicLighting = false;
                 SaveSystem.EntityShadows = false;
+                SaveSystem.SmoothLighting = false;
+                SaveSystem.ShadowQuality = 0;
+                SaveSystem.PostFxGodRays = false;
             } else {
+                bool ultra = SaveSystem.GraphicsQuality == SaveSystem.GraphicsPreset.Fabulous;
                 SaveSystem.CloudsMode = 2;
                 SaveSystem.ParticlesMode = 2;
                 SaveSystem.DynamicLighting = true;
                 SaveSystem.EntityShadows = true;
+                SaveSystem.SmoothLighting = true;
+                SaveSystem.ShadowQuality = ultra ? 2 : 1;
+                SaveSystem.PostFxGodRays = true;
             }
+            if (oldSmooth != SaveSystem.SmoothLighting) WorldRenderer.RequestFullRemesh();
         }
 
         // 2. Облака
@@ -596,10 +605,23 @@ public static partial class Screens {
             SaveSystem.ParticlesMode = (SaveSystem.ParticlesMode + 1) % 3;
         }
 
-        // 4. Мягкое освещение (Smooth Lighting)
-        string smoothLightText = SaveSystem.FancyGraphics ? "Мягкий свет: Вкл" : "Мягкий свет: Выкл (Быстро)";
+        // 4. Мягкое освещение (Smooth Lighting). Раньше кнопка переключала FancyGraphics,
+        // т.е. сбрасывала весь пресет (Ультра → Быстрая), а сохранённый SmoothLighting
+        // нигде не читался. Теперь — отдельная опция с пересборкой мешей.
+        string smoothLightText = SaveSystem.SmoothLighting ? "Мягкий свет: Вкл" : "Мягкий свет: Выкл (Быстро)";
         if (Button(leftX, startY + (rowH + gapY) * 3f, colW, rowH, smoothLightText, true)) {
-            SaveSystem.FancyGraphics = !SaveSystem.FancyGraphics;
+            SaveSystem.SmoothLighting = !SaveSystem.SmoothLighting;
+            WorldRenderer.RequestFullRemesh();
+        }
+
+        // 5. Тени от солнца и луны
+        string shadowText = SaveSystem.ShadowQuality switch {
+            0 => "Тени: Выкл (FPS+)",
+            1 => "Тени: Средние",
+            _ => "Тени: Высокие"
+        };
+        if (Button(leftX, startY + (rowH + gapY) * 4f, colW, rowH, shadowText, true)) {
+            SaveSystem.ShadowQuality = (SaveSystem.ShadowQuality + 1) % 3;
         }
 
         // Правая колонка
@@ -630,13 +652,19 @@ public static partial class Screens {
             Raylib.ToggleBorderlessWindowed();
         }
 
-        // 5. Кинематографичные эффекты (по центру на всю ширину)
+        // 5. Солнечные лучи (god rays)
+        string raysText = SaveSystem.PostFxGodRays ? "Солнечные лучи: Вкл" : "Солнечные лучи: Выкл";
+        if (Button(rightX, startY + (rowH + gapY) * 4f, colW, rowH, raysText, true)) {
+            SaveSystem.PostFxGodRays = !SaveSystem.PostFxGodRays;
+        }
+
+        // 6. Кинематографичные эффекты (по центру на всю ширину)
         float centerBtnW = colW * 2f + 20f;
         float centerBtnX = w / 2f - centerBtnW / 2f;
         string postFxText = SaveSystem.PostFxMode == 0
             ? "Кино-эффекты: Выкл (FPS+)"
-            : $"Кино-эффекты: Вкл ({(SaveSystem.PostFxVignette ? "виньетка" : "без виньетки")}{(SaveSystem.PostFxBloom ? ", bloom" : "")}{(SaveSystem.PostFxGoldenHour ? ", закат" : "")})";
-        if (Button(centerBtnX, startY + (rowH + gapY) * 4f, centerBtnW, rowH, postFxText, true)) {
+            : $"Кино-эффекты: Вкл (HDR, тонмаппинг, сглаживание{(SaveSystem.PostFxBloom ? ", bloom" : "")}{(SaveSystem.PostFxVignette ? ", виньетка" : "")})";
+        if (Button(centerBtnX, startY + (rowH + gapY) * 5f, centerBtnW, rowH, postFxText, true)) {
             SaveSystem.PostFxMode = SaveSystem.PostFxMode == 0 ? 1 : 0;
         }
 

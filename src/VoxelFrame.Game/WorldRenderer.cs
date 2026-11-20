@@ -22,20 +22,49 @@ public sealed class WorldRenderer : IDisposable {
 
     private static readonly Random ParticleRng = new(2026);
 
+    // ── Шейдер мира ─────────────────────────────────────────────────────────
+    // Альфа цвета вершины — код материала (ChunkMesher.Mat). Освещение: полусферический
+    // свет неба + направленный свет солнца/луны с картой теней + факельный свет; вода
+    // с волновыми нормалями, френелевским отражением неба и бликом солнца; листва и трава
+    // качаются на ветру; лава/огонь/светокамень светятся в HDR (подхватывает bloom).
     private const string VertexShaderSrc = """
         #version 330
         in vec3 vertexPosition;
         in vec2 vertexTexCoord;
+        in vec3 vertexNormal;
         in vec4 vertexColor;
         uniform mat4 mvp;
+        uniform float time;
+        uniform float windStrength;
         out vec2 fragTexCoord;
         out vec4 fragColor;
         out vec3 fragWorldPos;
+        out vec3 fragNormal;
+        flat out int fragMat;
         void main() {
+            vec3 p = vertexPosition;
+            int mat = int(vertexColor.a * 255.0 + 0.5);
+            if (windStrength > 0.0) {
+                if (mat == 254) {
+                    // Листва: смещение — функция позиции вершины, поэтому общие вершины
+                    // соседних блоков двигаются одинаково и щелей не появляется.
+                    float ph = p.x * 0.45 + p.z * 0.37 + p.y * 0.21;
+                    p.x += sin(time * 1.7 + ph) * 0.028 * windStrength;
+                    p.z += cos(time * 1.3 + ph * 1.27) * 0.028 * windStrength;
+                } else if (mat == 253 && fract(p.y) > 0.5) {
+                    // Трава/цветы: качается только верх стебля
+                    float ph = floor(p.x) * 0.9 + floor(p.z) * 1.37;
+                    float sway = sin(time * 2.1 + ph) * 0.6 + sin(time * 3.7 + ph * 2.3) * 0.25;
+                    p.x += sway * 0.07 * windStrength;
+                    p.z += cos(time * 1.9 + ph * 0.7) * 0.05 * windStrength;
+                }
+            }
             fragTexCoord = vertexTexCoord;
             fragColor = vertexColor;
-            fragWorldPos = vertexPosition;
-            gl_Position = mvp * vec4(vertexPosition, 1.0);
+            fragWorldPos = p;
+            fragNormal = vertexNormal;
+            fragMat = mat;
+            gl_Position = mvp * vec4(p, 1.0);
         }
         """;
 
@@ -44,12 +73,23 @@ public sealed class WorldRenderer : IDisposable {
         in vec2 fragTexCoord;
         in vec4 fragColor;
         in vec3 fragWorldPos;
+        in vec3 fragNormal;
+        flat in int fragMat;
         uniform sampler2D texture0;
         uniform vec4 colDiffuse;
-        uniform float skyFactor;
-        uniform float sunAngle;
         uniform float time;
         uniform int dimension;
+        uniform vec3 lightDir;
+        uniform vec3 lightColor;
+        uniform vec3 sunDir;
+        uniform vec3 ambientTop;
+        uniform vec3 ambientBottom;
+        uniform vec3 skyZenith;
+        uniform vec3 skyHorizon;
+        uniform vec3 sunsetColor;
+        uniform float sunsetAmount;
+        uniform float nightFactor;
+        uniform float overcast;
         uniform vec3 playerLightPos;
         uniform float playerLightRadius;
         uniform vec3 creeperLightPos;
@@ -58,94 +98,213 @@ public sealed class WorldRenderer : IDisposable {
         uniform vec3 fogColor;
         uniform float fogStart;
         uniform float fogEnd;
+        uniform int fogMode;          // 0 = атмосферный (цвет неба по направлению), 1 = плоский
+        uniform int shadowsOn;
+        uniform sampler2D shadowMap;
+        uniform mat4 lightVP;
+        uniform float shadowTexel;
+        uniform float hdr;            // 1 — кадр идёт в HDR-буфер пост-обработки
         out vec4 finalColor;
+
+        const int M_LEAVES = 254;
+        const int M_PLANT = 253;
+        const int M_WATER = 252;
+        const int M_LAVA = 251;
+        const int M_PORTAL = 250;
+        const int M_GLASS = 249;
+        const int M_FIRE = 248;
+        const int M_EMISSIVE = 247;
+
+        vec3 skyColor(vec3 d) {
+            float h = clamp(d.y, -1.0, 1.0);
+            vec3 c = mix(skyHorizon, skyZenith, (1.0 - exp(-max(h, 0.0) * 2.6)) / 0.9257);
+            if (sunsetAmount > 0.0) {
+                vec2 fd = normalize(d.xz + vec2(1e-4, 0.0));
+                vec2 fs = normalize(sunDir.xz + vec2(1e-4, 0.0));
+                float toward = dot(fd, fs) * 0.5 + 0.5;
+                float band = pow(1.0 - abs(h), 6.0);
+                c = mix(c, sunsetColor, sunsetAmount * band * (0.25 + 0.75 * toward * toward));
+            }
+            // Ореол рассеяния вокруг солнца (Ми) — тот же, что в шейдере неба
+            float mu = max(dot(d, sunDir), 0.0);
+            vec3 glowCol = mix(vec3(1.0, 0.92, 0.75), sunsetColor, sunsetAmount);
+            c += glowCol * (pow(mu, 8.0) * 0.22 + pow(mu, 64.0) * 0.35) * (1.0 - nightFactor) * (1.0 - overcast * 0.8);
+            return c;
+        }
+
+        float shadowTap(vec2 uv, float z) {
+            return z > texture(shadowMap, uv).r ? 0.0 : 1.0;
+        }
+
+        // PCF 3×3 с билинейным весом (4×4 выборки): мягкий край без «лесенки» текселей
+        float sampleShadow(vec3 wpos, vec3 n, float ndl) {
+            vec3 p = wpos + n * shadowTexel * (1.0 + 2.0 * (1.0 - ndl));
+            vec4 lp = lightVP * vec4(p, 1.0);
+            vec3 c = lp.xyz / lp.w * 0.5 + 0.5;
+            if (c.x <= 0.0 || c.x >= 1.0 || c.y <= 0.0 || c.y >= 1.0 || c.z >= 1.0) return 1.0;
+            float z = c.z - 0.00003;
+            vec2 size = vec2(textureSize(shadowMap, 0));
+            vec2 inv = 1.0 / size;
+            vec2 st = c.xy * size - 0.5;
+            vec2 base = floor(st);
+            vec2 f = st - base;
+            float s[16];
+            for (int y = 0; y < 4; y++)
+                for (int x = 0; x < 4; x++)
+                    s[y * 4 + x] = shadowTap((base + vec2(float(x) - 0.5, float(y) - 0.5)) * inv, z);
+            float sum = 0.0;
+            for (int y = 0; y < 3; y++) {
+                for (int x = 0; x < 3; x++) {
+                    float a = mix(s[y * 4 + x], s[y * 4 + x + 1], f.x);
+                    float b = mix(s[(y + 1) * 4 + x], s[(y + 1) * 4 + x + 1], f.x);
+                    sum += mix(a, b, f.y);
+                }
+            }
+            float edge = max(abs(c.x - 0.5), abs(c.y - 0.5)) * 2.0;
+            return mix(sum / 9.0, 1.0, smoothstep(0.82, 1.0, edge));
+        }
+
+        // Нормаль водной поверхности: сумма направленных волн (аналитический градиент)
+        vec3 waterNormal(vec2 p, float t) {
+            vec2 g = vec2(0.0);
+            vec2 d1 = vec2(0.80, 0.60);  float a1 = dot(d1, p) * 1.3 + t * 1.6;  g += d1 * cos(a1) * 0.055;
+            vec2 d2 = vec2(-0.45, 0.89); float a2 = dot(d2, p) * 2.1 + t * 2.2;  g += d2 * cos(a2) * 0.035;
+            vec2 d3 = vec2(0.97, -0.24); float a3 = dot(d3, p) * 3.7 + t * 2.9;  g += d3 * cos(a3) * 0.020;
+            vec2 d4 = vec2(-0.71, -0.70); float a4 = dot(d4, p) * 6.3 + t * 3.8; g += d4 * cos(a4) * 0.012;
+            return normalize(vec3(-g.x, 1.0, -g.y));
+        }
 
         void main() {
             vec4 texelColor = texture(texture0, fragTexCoord);
             if (texelColor.a < 0.05) discard;
 
-            float sun = fragColor.r;       // Солнечный свет [0..1]
-            float block = fragColor.g;     // Блочный (факельный) свет [0..1]
-            float faceDir = fragColor.b;   // Направленное затенение граней [0.55..1.0]
+            float sky = fragColor.r;       // свет неба (с запечённым AO) [0..1]
+            float block = fragColor.g;     // блочный (факельный) свет [0..1]
+            float faceShade = fragColor.b; // классическое затенение граней [0.55..1.0]
+            vec3 n = normalize(fragNormal);
+            vec3 toCam = cameraPos - fragWorldPos;
+            float dist = length(toCam);
+            vec3 V = toCam / max(dist, 1e-4);
 
-            // Динамический свет от факела в руке игрока (сила 14/15, как у настенного факела)
+            // Динамический свет от факела в руке и раздувающегося бабахера (квадратичный спад)
             if (playerLightRadius > 0.1) {
-                float d = distance(fragWorldPos, playerLightPos);
-                if (d < playerLightRadius) {
-                    float handLight = clamp(1.0 - (d / playerLightRadius), 0.0, 1.0);
-                    block = max(block, handLight * (14.0 / 15.0));
-                }
+                float k = clamp(1.0 - distance(fragWorldPos, playerLightPos) / playerLightRadius, 0.0, 1.0);
+                block = max(block, k * (14.0 / 15.0));
             }
-
-            // Динамический свет от взрывающегося бабахера
             if (creeperLightRadius > 0.1) {
-                float d = distance(fragWorldPos, creeperLightPos);
-                if (d < creeperLightRadius) {
-                    float creepLight = clamp(1.0 - (d / creeperLightRadius), 0.0, 1.0);
-                    block = max(block, creepLight * 1.0);
-                }
+                float k = clamp(1.0 - distance(fragWorldPos, creeperLightPos) / creeperLightRadius, 0.0, 1.0);
+                block = max(block, k);
             }
 
-            // Нелинейная гамма-кривая освещенности
-            float sunCurve = pow(sun * max(skyFactor, 0.04), 1.28);
-            float blockCurve = pow(block, 1.20);
+            bool isPlant = fragMat == M_PLANT || fragMat == M_FIRE;
+            bool foliage = isPlant || fragMat == M_LEAVES;
 
-            // Суточная цветовая температура солнца / луны (Golden hour на рассвете/закате и лунное серебро ночью)
-            float horizonGlow = clamp(1.0 - abs(sin(sunAngle)) * 2.8, 0.0, 1.0);
-            vec3 daySunCol = vec3(1.0, 0.98, 0.92);
-            vec3 goldenHourCol = vec3(1.0, 0.65, 0.38);
-            vec3 nightMoonCol = vec3(0.55, 0.70, 1.0);
+            // ── Рассеянный свет неба (полусфера) ──
+            float skyL = pow(sky, 1.4);
+            float hemi = isPlant ? 0.85 : (n.y * 0.2 + 0.8);
+            vec3 ambient = mix(ambientBottom, ambientTop, hemi);
+            if (dimension == 0) ambient *= skyL;
+            // Лёгкая классическая разница сторон X/Z — блоки остаются «читаемыми»
+            ambient *= mix(1.0, faceShade, 0.35);
 
-            vec3 sunLightColor = mix(daySunCol, goldenHourCol, horizonGlow * smoothstep(0.1, 0.6, skyFactor));
-            sunLightColor = mix(nightMoonCol, sunLightColor, smoothstep(0.08, 0.25, skyFactor));
-
-            vec3 torchColor = vec3(1.0, 0.82, 0.52);
-            vec3 ambientColor = mix(vec3(0.06, 0.08, 0.14), vec3(0.14, 0.14, 0.16), skyFactor);
-
-            if (dimension == 1) { // Nether
-                ambientColor = vec3(0.20, 0.06, 0.06);
-                torchColor = vec3(1.0, 0.72, 0.40);
-            } else if (dimension == 2) { // End
-                ambientColor = vec3(0.12, 0.08, 0.18);
-                sunLightColor = vec3(0.85, 0.75, 1.0);
-            } else if (dimension == 3) { // Void
-                ambientColor = vec3(0.08, 0.04, 0.14);
-                torchColor = vec3(0.85, 0.65, 1.0);
-                sunLightColor = vec3(0.70, 0.50, 0.95);
+            // ── Прямой свет солнца / луны ──
+            vec3 L = normalize(lightDir);
+            float ndl = isPlant ? (0.55 + 0.45 * max(L.y, 0.0)) : max(dot(n, L), 0.0);
+            float outdoor = smoothstep(0.45, 0.92, sky);
+            float shadow = 1.0;
+            if (shadowsOn == 1 && ndl > 0.0 && outdoor > 0.0) shadow = sampleShadow(fragWorldPos, isPlant ? vec3(0.0, 1.0, 0.0) : n, ndl);
+            vec3 direct = lightColor * ndl * shadow * outdoor;
+            // Отражённый от освещённой земли свет на стенах (bounce), смягчает теневые стороны
+            if (dimension == 0 && n.y < 0.5) direct += lightColor * (0.16 * max(L.y, 0.0)) * skyL;
+            // Просвечивание листвы и травы на контровом свете
+            if (foliage) {
+                float back = isPlant ? 0.35 : max(dot(-n, L), 0.0) * 0.45;
+                direct += lightColor * back * shadow * outdoor * 0.6;
             }
 
-            vec3 totalLight = (sunLightColor * sunCurve + torchColor * blockCurve + ambientColor) * faceDir;
-            totalLight = clamp(totalLight, 0.06, 1.0);
+            // ── Факелы ──
+            vec3 torchColor = vec3(1.0, 0.74, 0.42);
+            if (dimension == 1) torchColor = vec3(1.0, 0.66, 0.36);
+            else if (dimension == 3) torchColor = vec3(0.85, 0.62, 1.0);
+            vec3 torch = torchColor * pow(block, 1.7) * 1.3;
 
-            // Легкий процедурный блик/каустика на воде на верхних гранях
-            if (faceDir > 0.95 && texelColor.a < 0.98) {
-                float wave = sin(fragWorldPos.x * 2.5 + time * 2.0) * cos(fragWorldPos.z * 2.5 + time * 2.0);
-                totalLight += vec3(0.06, 0.08, 0.10) * clamp(wave, 0.0, 1.0) * skyFactor;
+            // Минимальная подсветка пещер, чтобы полная тьма не была «чёрной дырой»
+            vec3 caveFloor = vec3(0.028, 0.030, 0.040);
+            vec3 totalLight = ambient + direct + torch + caveFloor;
+
+            vec3 albedo = texelColor.rgb * colDiffuse.rgb;
+            vec3 color = albedo * totalLight;
+            float alpha = texelColor.a;
+
+            // ── Светящиеся материалы (HDR → bloom) ──
+            float emissiveBoost = mix(1.0, 1.8, hdr);
+            if (fragMat == M_LAVA) {
+                float pulse = 0.85 + 0.15 * sin(time * 1.4 + fragWorldPos.x * 0.6 + fragWorldPos.z * 0.45);
+                color = albedo * 1.25 * pulse * emissiveBoost;
+            } else if (fragMat == M_FIRE || fragMat == M_EMISSIVE) {
+                color = albedo * 1.15 * emissiveBoost;
+            } else if (fragMat == M_PORTAL) {
+                float pulse = 0.8 + 0.2 * sin(time * 2.3 + fragWorldPos.y * 1.7);
+                color = mix(color, albedo * 1.3 * emissiveBoost, 0.7 * pulse);
             }
 
-            vec4 lightedColor = texelColor * colDiffuse * vec4(totalLight, 1.0);
+            // ── Вода: отражение неба по Френелю + блик солнца ──
+            if (fragMat == M_WATER && n.y > 0.5) {
+                vec3 wn = waterNormal(fragWorldPos.xz, time);
+                float viewAbove = step(fragWorldPos.y, cameraPos.y);
+                float ndv = clamp(dot(wn, V), 0.0, 1.0);
+                float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
+                vec3 R = reflect(-V, wn);
+                R.y = abs(R.y);
+                vec3 refl = skyColor(R);
+                if (dimension != 0) refl = fogColor;
+                float reflAmt = fres * viewAbove * (0.25 + 0.75 * outdoor);
+                vec3 deep = albedo * totalLight * vec3(0.55, 0.80, 0.95);
+                color = mix(deep, refl * (0.55 + 0.45 * outdoor), clamp(reflAmt, 0.0, 0.92));
+                float spec = pow(max(dot(R, L), 0.0), 220.0);
+                color += lightColor * spec * shadow * outdoor * viewAbove * mix(2.0, 9.0, hdr);
+                alpha = mix(alpha, 1.0, clamp(fres * 0.85 * viewAbove, 0.0, 0.85));
+            } else if (fragMat == M_GLASS) {
+                vec3 R = reflect(-V, n);
+                float fres = 0.04 + 0.96 * pow(1.0 - clamp(dot(n, V), 0.0, 1.0), 5.0);
+                color += skyColor(R) * fres * 0.35 * outdoor;
+            }
 
-            // Плавный дистанционный туман
-            float dist = distance(fragWorldPos, cameraPos);
-            float fogFactor = clamp((dist - fogStart) / max(fogEnd - fogStart, 0.01), 0.0, 1.0);
-            fogFactor = smoothstep(0.0, 1.0, fogFactor);
+            if (hdr < 0.5) color = min(color, vec3(1.0));
 
-            finalColor = vec4(mix(lightedColor.rgb, fogColor, fogFactor), lightedColor.a);
+            // ── Туман и воздушная перспектива ──
+            float lin = clamp((dist - fogStart) / max(fogEnd - fogStart, 0.01), 0.0, 1.0);
+            float fogF = lin * lin * (3.0 - 2.0 * lin);
+            vec3 fogCol = fogColor;
+            if (fogMode == 0) {
+                fogCol = skyColor(-V);
+                float haze = 1.0 - exp(-dist * (0.0016 + overcast * 0.004));
+                fogF = max(fogF, haze * 0.28);
+            }
+            finalColor = vec4(mix(color, fogCol, fogF), alpha);
         }
         """;
 
-    private int _skyFactorLoc = -1;
-    private int _sunAngleLoc = -1;
-    private int _timeLoc = -1;
-    private int _dimensionLoc = -1;
-    private int _playerLightPosLoc = -1;
-    private int _playerLightRadiusLoc = -1;
-    private int _creeperLightPosLoc = -1;
-    private int _creeperLightRadiusLoc = -1;
-    private int _cameraPosLoc = -1;
-    private int _fogColorLoc = -1;
-    private int _fogStartLoc = -1;
-    private int _fogEndLoc = -1;
+    private readonly Dictionary<string, int> _locs = new();
+    private int Loc(string name) => _locs.TryGetValue(name, out int l) ? l : -1;
+    private static readonly string[] UniformNames = {
+        "time", "windStrength", "dimension", "lightDir", "lightColor", "sunDir", "ambientTop", "ambientBottom",
+        "skyZenith", "skyHorizon", "sunsetColor", "sunsetAmount", "nightFactor", "overcast",
+        "playerLightPos", "playerLightRadius", "creeperLightPos", "creeperLightRadius", "cameraPos",
+        "fogColor", "fogStart", "fogEnd", "fogMode", "shadowsOn", "shadowMap", "lightVP", "shadowTexel", "hdr",
+    };
+    private const int ShadowTextureSlot = 10;
+    private readonly ShadowMapper _shadows = new();
+    private bool _shadowBound;
+
+    // Запрос полной пересборки мешей (смена мягкого освещения и т.п.)
+    private static volatile bool _fullRemeshRequested;
+    public static void RequestFullRemesh() => _fullRemeshRequested = true;
+
+    // Шейдер неба (полноэкранный градиент по направлению взгляда)
+    private Shader _skyShader;
+    private bool _skyShaderReady;
+    private readonly Dictionary<string, int> _skyLocs = new();
     private static readonly Vector3[] StarPositions = GenerateStarField(160);
 
     public struct VoxelParticle {
@@ -187,19 +346,9 @@ public sealed class WorldRenderer : IDisposable {
         var shader = Raylib.LoadShaderFromMemory(VertexShaderSrc, FragmentShaderSrc);
         if (Raylib.IsShaderValid(shader)) {
             _material.Shader = shader;
-            _skyFactorLoc = Raylib.GetShaderLocation(shader, "skyFactor");
-            _sunAngleLoc = Raylib.GetShaderLocation(shader, "sunAngle");
-            _timeLoc = Raylib.GetShaderLocation(shader, "time");
-            _dimensionLoc = Raylib.GetShaderLocation(shader, "dimension");
-            _playerLightPosLoc = Raylib.GetShaderLocation(shader, "playerLightPos");
-            _playerLightRadiusLoc = Raylib.GetShaderLocation(shader, "playerLightRadius");
-            _creeperLightPosLoc = Raylib.GetShaderLocation(shader, "creeperLightPos");
-            _creeperLightRadiusLoc = Raylib.GetShaderLocation(shader, "creeperLightRadius");
-            _cameraPosLoc = Raylib.GetShaderLocation(shader, "cameraPos");
-            _fogColorLoc = Raylib.GetShaderLocation(shader, "fogColor");
-            _fogStartLoc = Raylib.GetShaderLocation(shader, "fogStart");
-            _fogEndLoc = Raylib.GetShaderLocation(shader, "fogEnd");
+            foreach (var name in UniformNames) _locs[name] = Raylib.GetShaderLocation(shader, name);
         }
+        LoadSkyShader();
         _materialReady = true;
 
         HookWorldEvents(_world);
@@ -232,7 +381,9 @@ public sealed class WorldRenderer : IDisposable {
     public int MeshQueueCount => _rebuildQueue.Count;
 
     public void ProcessMeshQueue() {
-        if (_lastDimension != _world.Dimension) {
+        bool fullRemesh = _fullRemeshRequested;
+        if (fullRemesh) _fullRemeshRequested = false;
+        if (_lastDimension != _world.Dimension || fullRemesh) {
             _lastDimension = _world.Dimension;
             _rebuildQueue.Clear();
             _rebuildSet.Clear();
@@ -279,36 +430,74 @@ public sealed class WorldRenderer : IDisposable {
         }
     }
 
+    private void SetF(string n, float v) { int l = Loc(n); if (l != -1) Raylib.SetShaderValue(_material.Shader, l, v, ShaderUniformDataType.Float); }
+    private void SetI(string n, int v) { int l = Loc(n); if (l != -1) Raylib.SetShaderValue(_material.Shader, l, v, ShaderUniformDataType.Int); }
+    private void SetV3(string n, Vector3 v) { int l = Loc(n); if (l != -1) Raylib.SetShaderValue(_material.Shader, l, v, ShaderUniformDataType.Vec3); }
+
+    /// <summary>Обновить модель атмосферы на кадр (вызывать до неба, теней и мира).</summary>
+    public void UpdateAtmosphere(float dt) {
+        Atmosphere.Update(_session.DayNight.TimeOfDay, _session.Weather, _world.Dimension, dt);
+    }
+
+    /// <summary>
+    /// Проход теней. Вызывается ДО начала кадра (BeginDrawing/BeginScene):
+    /// raylib не умеет вложенные render target-ы.
+    /// </summary>
+    public void RenderShadowPass() {
+        if (!_materialReady) return;
+        try {
+            _shadows.Render(_world, _session.Camera.Position);
+        } catch {
+            SaveSystem.ShadowQuality = 0; // не роняем игру из-за драйвера — просто без теней
+        }
+    }
+
+    private void BindShadowMap() {
+        _shadowBound = false;
+        int loc = Loc("shadowMap");
+        bool on = _shadows.Active && loc != -1;
+        SetI("shadowsOn", on ? 1 : 0);
+        if (!on) return;
+        Raylib.SetShaderValue(_material.Shader, loc, ShadowTextureSlot, ShaderUniformDataType.Int);
+        int vp = Loc("lightVP");
+        if (vp != -1) Raylib.SetShaderValueMatrix(_material.Shader, vp, _shadows.LightViewProj);
+        SetF("shadowTexel", _shadows.TexelWorld);
+        Rlgl.ActiveTextureSlot(ShadowTextureSlot);
+        Rlgl.EnableTexture(_shadows.DepthTextureId);
+        Rlgl.ActiveTextureSlot(0);
+        _shadowBound = true;
+    }
+
+    private void UnbindShadowMap() {
+        if (!_shadowBound) return;
+        Rlgl.ActiveTextureSlot(ShadowTextureSlot);
+        Rlgl.DisableTexture();
+        Rlgl.ActiveTextureSlot(0);
+        _shadowBound = false;
+    }
+
     public void DrawWorld() {
         if (!_materialReady) return;
 
-        // Фактор неба — uniform шейдера
-        if (_skyFactorLoc != -1) {
-            float sky = _session.DayNight.SkyFactor;
-            unsafe { Raylib.SetShaderValue(_material.Shader, _skyFactorLoc, &sky, ShaderUniformDataType.Float); }
-        }
-        if (_sunAngleLoc != -1) {
-            float angle = _session.DayNight.TimeOfDay * MathF.PI * 2f;
-            unsafe { Raylib.SetShaderValue(_material.Shader, _sunAngleLoc, &angle, ShaderUniformDataType.Float); }
-        }
-        if (_timeLoc != -1) {
-            float time = (float)_session.TotalPlaySeconds;
-            unsafe { Raylib.SetShaderValue(_material.Shader, _timeLoc, &time, ShaderUniformDataType.Float); }
-        }
-        if (_dimensionLoc != -1) {
-            int dim = (int)_world.Dimension;
-            unsafe { Raylib.SetShaderValue(_material.Shader, _dimensionLoc, &dim, ShaderUniformDataType.Int); }
-        }
+        SetF("time", (float)_session.TotalPlaySeconds);
+        SetF("windStrength", SaveSystem.GraphicsQuality == SaveSystem.GraphicsPreset.Fast ? 0f : 1f + Atmosphere.Overcast * 1.6f);
+        SetI("dimension", (int)_world.Dimension);
+        SetV3("lightDir", Atmosphere.LightDir);
+        SetV3("lightColor", Atmosphere.LightColor);
+        SetV3("sunDir", Atmosphere.SunDir);
+        SetV3("ambientTop", Atmosphere.AmbientTop);
+        SetV3("ambientBottom", Atmosphere.AmbientBottom);
+        SetV3("skyZenith", Atmosphere.Zenith);
+        SetV3("skyHorizon", Atmosphere.Horizon);
+        SetV3("sunsetColor", Atmosphere.SunsetColor);
+        SetF("sunsetAmount", Atmosphere.SunsetAmount);
+        SetF("nightFactor", Atmosphere.Night);
+        SetF("overcast", Atmosphere.Overcast);
+        SetF("hdr", PostProcessing.SceneIsHdr ? 1f : 0f);
 
         bool holdingTorch = _session.Player.SelectedEntry?.Item.Definition.Id == GameData.TorchItem.Id || _session.Player.OffhandItem?.Id == GameData.TorchItem.Id;
-        Vector3 lightPos = _session.Player.Eye;
-        float lightRadius = (SaveSystem.DynamicLighting && holdingTorch) ? 14.0f : 0f;
-        if (_playerLightPosLoc != -1) {
-            unsafe { Raylib.SetShaderValue(_material.Shader, _playerLightPosLoc, &lightPos, ShaderUniformDataType.Vec3); }
-        }
-        if (_playerLightRadiusLoc != -1) {
-            unsafe { Raylib.SetShaderValue(_material.Shader, _playerLightRadiusLoc, &lightRadius, ShaderUniformDataType.Float); }
-        }
+        SetV3("playerLightPos", _session.Player.Eye);
+        SetF("playerLightRadius", (SaveSystem.DynamicLighting && holdingTorch) ? 14.0f : 0f);
 
         // Динамический свет раздувающегося белого бабахера перед взрывом
         Vector3 creeperLightPos = Vector3.Zero;
@@ -324,18 +513,11 @@ public sealed class WorldRenderer : IDisposable {
                 }
             }
         }
-
-        if (_creeperLightPosLoc != -1) {
-            unsafe { Raylib.SetShaderValue(_material.Shader, _creeperLightPosLoc, &creeperLightPos, ShaderUniformDataType.Vec3); }
-        }
-        if (_creeperLightRadiusLoc != -1) {
-            unsafe { Raylib.SetShaderValue(_material.Shader, _creeperLightRadiusLoc, &creeperLightRadius, ShaderUniformDataType.Float); }
-        }
+        SetV3("creeperLightPos", creeperLightPos);
+        SetF("creeperLightRadius", creeperLightRadius);
 
         var camPos = _session.Camera.Position;
-        if (_cameraPosLoc != -1) {
-            unsafe { Raylib.SetShaderValue(_material.Shader, _cameraPosLoc, &camPos, ShaderUniformDataType.Vec3); }
-        }
+        SetV3("cameraPos", camPos);
 
         // Подводный / лавовый / атмосферный туман
         var camCell = new Vec3i((int)MathF.Floor(camPos.X), (int)MathF.Floor(camPos.Y), (int)MathF.Floor(camPos.Z));
@@ -345,9 +527,9 @@ public sealed class WorldRenderer : IDisposable {
 
         Vector3 fogVec;
         float fogStart, fogEnd;
-
+        int fogMode = 1;
         if (isWater) {
-            fogVec = new Vector3(0.04f, 0.16f, 0.36f); // Глубокий лазурно-синий подводный туман
+            fogVec = new Vector3(0.04f, 0.16f, 0.36f) * MathF.Max(0.25f, 1f - Atmosphere.Night * 0.75f); // Глубокий лазурно-синий подводный туман
             fogStart = 1.0f;
             fogEnd = (SaveSystem.GraphicsQuality == SaveSystem.GraphicsPreset.Fast) ? 12.0f : 20.0f;
         } else if (isLava) {
@@ -362,17 +544,14 @@ public sealed class WorldRenderer : IDisposable {
             bool end = _world.Dimension == Dimension.End;
             fogStart = nether ? 20.0f : end ? 40.0f : MathF.Max(15.0f, maxRenderDist * 0.55f);
             fogEnd = nether ? 68.0f : end ? 140.0f : MathF.Max(28.0f, maxRenderDist * 0.96f);
+            if (_world.Dimension == Dimension.Overworld) fogMode = 0;
         }
+        SetV3("fogColor", fogVec);
+        SetF("fogStart", fogStart);
+        SetF("fogEnd", fogEnd);
+        SetI("fogMode", fogMode);
 
-        if (_fogColorLoc != -1) {
-            unsafe { Raylib.SetShaderValue(_material.Shader, _fogColorLoc, &fogVec, ShaderUniformDataType.Vec3); }
-        }
-        if (_fogStartLoc != -1) {
-            unsafe { Raylib.SetShaderValue(_material.Shader, _fogStartLoc, &fogStart, ShaderUniformDataType.Float); }
-        }
-        if (_fogEndLoc != -1) {
-            unsafe { Raylib.SetShaderValue(_material.Shader, _fogEndLoc, &fogEnd, ShaderUniformDataType.Float); }
-        }
+        BindShadowMap();
 
         unsafe {
             Rlgl.EnableBackfaceCulling();
@@ -434,7 +613,9 @@ public sealed class WorldRenderer : IDisposable {
     /// накладывались поверх них прозрачным слоем с корректным Z-тестом (без просвета сквозь воду).
     /// </summary>
     public void DrawWorldTranslucent() {
-        if (!_materialReady || _translucentChunks.Count == 0) return;
+        // Карта теней остаётся привязанной к слоту после непрозрачного прохода
+        // (её читает и вода); отвязываем в конце в любом случае.
+        if (!_materialReady || _translucentChunks.Count == 0) { UnbindShadowMap(); return; }
         unsafe {
             // Сортировка полупрозрачных мешей (вода, лёд, стекло, порталы) от дальних к ближним
             if (_translucentChunks.Count > 1) {
@@ -449,44 +630,169 @@ public sealed class WorldRenderer : IDisposable {
             }
             Rlgl.EnableDepthMask();
         }
+        UnbindShadowMap();
     }
 
     // ── Небо и Погода ────────────────────────────────────────────────────────
 
-    /// <summary>Фоновый градиент неба (2D купол с горизонтом и рассветными оттенками).</summary>
+    private const string SkyFragmentSrc = """
+        #version 330
+        in vec2 fragTexCoord;
+        uniform vec3 camFwd;
+        uniform vec3 camRight;
+        uniform vec3 camUp;
+        uniform float tanHalfFov;
+        uniform float aspect;
+        uniform vec3 skyZenith;
+        uniform vec3 skyHorizon;
+        uniform vec3 sunsetColor;
+        uniform float sunsetAmount;
+        uniform vec3 sunDir;
+        uniform float nightFactor;
+        uniform float overcast;
+        uniform int dimension;
+        uniform float time;
+        out vec4 finalColor;
+
+        float hash13(vec3 p) {
+            p = fract(p * 0.1031);
+            p += dot(p, p.zyx + 31.32);
+            return fract((p.x + p.y) * p.z);
+        }
+        float noise3(vec3 p) {
+            vec3 i = floor(p), f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+            float n000 = hash13(i), n100 = hash13(i + vec3(1,0,0)), n010 = hash13(i + vec3(0,1,0)), n110 = hash13(i + vec3(1,1,0));
+            float n001 = hash13(i + vec3(0,0,1)), n101 = hash13(i + vec3(1,0,1)), n011 = hash13(i + vec3(0,1,1)), n111 = hash13(i + vec3(1,1,1));
+            return mix(mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+                       mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y), f.z);
+        }
+        float fbm(vec3 p) {
+            float s = 0.0, a = 0.5;
+            for (int i = 0; i < 5; i++) { s += noise3(p) * a; p = p * 2.03 + vec3(1.7, 9.2, 3.1); a *= 0.5; }
+            return s;
+        }
+
+        vec3 skyColor(vec3 d) {
+            float h = clamp(d.y, -1.0, 1.0);
+            vec3 c = mix(skyHorizon, skyZenith, (1.0 - exp(-max(h, 0.0) * 2.6)) / 0.9257);
+            if (sunsetAmount > 0.0) {
+                vec2 fd = normalize(d.xz + vec2(1e-4, 0.0));
+                vec2 fs = normalize(sunDir.xz + vec2(1e-4, 0.0));
+                float toward = dot(fd, fs) * 0.5 + 0.5;
+                float band = pow(1.0 - abs(h), 6.0);
+                c = mix(c, sunsetColor, sunsetAmount * band * (0.25 + 0.75 * toward * toward));
+            }
+            float mu = max(dot(d, sunDir), 0.0);
+            vec3 glowCol = mix(vec3(1.0, 0.92, 0.75), sunsetColor, sunsetAmount);
+            c += glowCol * (pow(mu, 8.0) * 0.22 + pow(mu, 64.0) * 0.35) * (1.0 - nightFactor) * (1.0 - overcast * 0.8);
+            return c;
+        }
+
+        void main() {
+            vec2 ndc = fragTexCoord * 2.0 - 1.0;
+            vec3 d = normalize(camFwd + camRight * ndc.x * tanHalfFov * aspect + camUp * ndc.y * tanHalfFov);
+            vec3 c;
+            if (dimension == 0) {
+                c = skyColor(d);
+                // Ниже горизонта — мягкая дымка (начинается ниже, чем кончается туман мира)
+                c = mix(c, skyHorizon * 0.55, smoothstep(-0.15, -0.6, d.y));
+                // Едва заметный Млечный путь ночью
+                if (nightFactor > 0.01) {
+                    float band = exp(-pow(dot(d, normalize(vec3(0.3, 0.2, 1.0))) * 3.2, 2.0));
+                    float neb = fbm(d * 4.0) * band;
+                    c += vec3(0.10, 0.11, 0.17) * neb * nightFactor * (1.0 - overcast) * smoothstep(-0.05, 0.25, d.y);
+                }
+            } else if (dimension == 1) {
+                // Нижний мир: раскалённая дымка, клубящаяся у «пола»
+                float n = fbm(d * 2.5 + vec3(0.0, time * 0.03, 0.0));
+                c = mix(vec3(0.16, 0.035, 0.025), vec3(0.34, 0.09, 0.04), n);
+                c = mix(c, vec3(0.45, 0.14, 0.05), smoothstep(0.1, -0.6, d.y) * 0.5);
+            } else if (dimension == 2) {
+                // Энд: тёмная пустота с пурпурной туманностью и холодными звёздами
+                float n = fbm(d * 3.0 + vec3(time * 0.01));
+                c = mix(vec3(0.02, 0.012, 0.04), vec3(0.16, 0.08, 0.26), pow(n, 2.2) * 1.6);
+                vec3 sp = floor(d * 220.0);
+                float st = step(0.9975, hash13(sp));
+                c += vec3(0.75, 0.70, 0.95) * st * (0.6 + 0.4 * sin(time * 2.0 + hash13(sp + 7.0) * 30.0));
+            } else {
+                // Бездна: почти чёрное фиолетовое ничто с медленными всполохами
+                float n = fbm(d * 2.0 + vec3(0.0, -time * 0.02, 0.0));
+                c = mix(vec3(0.015, 0.006, 0.03), vec3(0.09, 0.03, 0.15), n * n);
+            }
+            // Дизеринг против полос на плавных градиентах
+            c += (hash13(vec3(gl_FragCoord.xy, time)) - 0.5) / 255.0;
+            finalColor = vec4(c, 1.0);
+        }
+        """;
+
+    private static readonly string[] SkyUniformNames = {
+        "camFwd", "camRight", "camUp", "tanHalfFov", "aspect", "skyZenith", "skyHorizon",
+        "sunsetColor", "sunsetAmount", "sunDir", "nightFactor", "overcast", "dimension", "time",
+    };
+
+    private void LoadSkyShader() {
+        try {
+            var sh = Raylib.LoadShaderFromMemory(null, SkyFragmentSrc);
+            if (!Raylib.IsShaderValid(sh)) return;
+            _skyShader = sh;
+            foreach (var n in SkyUniformNames) _skyLocs[n] = Raylib.GetShaderLocation(sh, n);
+            _skyShaderReady = true;
+        } catch { _skyShaderReady = false; }
+    }
+
+    private void SkyF(string n, float v) { if (_skyLocs.TryGetValue(n, out int l) && l != -1) Raylib.SetShaderValue(_skyShader, l, v, ShaderUniformDataType.Float); }
+    private void SkyI(string n, int v) { if (_skyLocs.TryGetValue(n, out int l) && l != -1) Raylib.SetShaderValue(_skyShader, l, v, ShaderUniformDataType.Int); }
+    private void SkyV3(string n, Vector3 v) { if (_skyLocs.TryGetValue(n, out int l) && l != -1) Raylib.SetShaderValue(_skyShader, l, v, ShaderUniformDataType.Vec3); }
+
+    /// <summary>
+    /// Небо: полноэкранный шейдер считает цвет по НАПРАВЛЕНИЮ взгляда (раньше был
+    /// плоский 2D-градиент, не реагировавший на наклон камеры). Горизонт совпадает с туманом.
+    /// </summary>
     public void DrawSky() {
-        if (_world.Dimension == Dimension.Nether) {
-            Raylib.ClearBackground(new Color(45, 10, 10, 255));
-            return;
-        }
-        if (_world.Dimension == Dimension.End) {
-            Raylib.ClearBackground(new Color(10, 6, 20, 255)); // Пурпурно-чёрная пустота Энда
-            return;
-        }
-        if (_world.Dimension == Dimension.Void) {
-            Raylib.ClearBackground(new Color(6, 2, 14, 255)); // Глубокая тьма Бездны
-            return;
-        }
-        float f = _session.DayNight.SkyFactor;
-        if (_session.Weather != WeatherType.Clear) {
-            f *= 0.45f; // Пасмурное грозовое небо
-        }
         int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
-
-        // Базовые цвета неба (день/ночь)
-        var top = LerpColor(C(6, 8, 22, 255), C(85, 145, 235, 255), f);
-        var bottom = LerpColor(C(14, 16, 36, 255), C(175, 205, 245, 255), f);
-
-        // Рассветный / закатный золотистый оттенок у горизонта
-        float u = _session.DayNight.TimeOfDay;
-        float sunAngle = 2f * MathF.PI * (u - 0.25f);
-        float horizonGlow = Math.Clamp(1.0f - MathF.Abs(MathF.Sin(sunAngle)) * 2.8f, 0f, 1f);
-        if (horizonGlow > 0f && _session.Weather == WeatherType.Clear) {
-            var sunsetCol = C(245, 130, 65, 255);
-            bottom = LerpColor(bottom, sunsetCol, horizonGlow * 0.75f);
+        if (!_skyShaderReady) {
+            var hz = Atmosphere.Horizon; var zn = Atmosphere.Zenith;
+            Raylib.DrawRectangleGradientV(0, 0, w, h,
+                new Color((byte)(zn.X * 255), (byte)(zn.Y * 255), (byte)(zn.Z * 255), (byte)255),
+                new Color((byte)(hz.X * 255), (byte)(hz.Y * 255), (byte)(hz.Z * 255), (byte)255));
+            return;
         }
+        var cam = _session.Camera;
+        var fwd = cam.Target - cam.Position;
+        fwd = fwd.LengthSquared() > 1e-6f ? Vector3.Normalize(fwd) : _session.Player.Forward;
+        var right = Vector3.Cross(fwd, cam.Up);
+        right = right.LengthSquared() > 1e-6f ? Vector3.Normalize(right) : Vector3.UnitX;
+        var upv = Vector3.Cross(right, fwd);
 
-        Raylib.DrawRectangleGradientV(0, 0, w, h, top, bottom);
+        SkyV3("camFwd", fwd);
+        SkyV3("camRight", right);
+        SkyV3("camUp", upv);
+        SkyF("tanHalfFov", MathF.Tan(cam.FovY * 0.5f * MathF.PI / 180f));
+        SkyF("aspect", (float)w / Math.Max(1, h));
+        SkyV3("skyZenith", Atmosphere.Zenith);
+        SkyV3("skyHorizon", Atmosphere.Horizon);
+        SkyV3("sunsetColor", Atmosphere.SunsetColor);
+        SkyF("sunsetAmount", Atmosphere.SunsetAmount);
+        SkyV3("sunDir", Atmosphere.SunDir);
+        SkyF("nightFactor", Atmosphere.Night);
+        SkyF("overcast", Atmosphere.Overcast);
+        SkyI("dimension", (int)_world.Dimension);
+        SkyF("time", (float)(Raylib.GetTime() % 10000.0));
+
+        // Полноэкранный квад с UV (v вверх), чтобы шейдер знал направление каждого пикселя
+        Raylib.BeginShaderMode(_skyShader);
+        var tex = Raylib.GetShapesTexture();
+        Rlgl.SetTexture(tex.Id);
+        Rlgl.Begin((int)DrawMode.Quads);
+        Rlgl.Color4ub(255, 255, 255, 255);
+        Rlgl.TexCoord2f(0f, 1f); Rlgl.Vertex2f(0f, 0f);
+        Rlgl.TexCoord2f(0f, 0f); Rlgl.Vertex2f(0f, h);
+        Rlgl.TexCoord2f(1f, 0f); Rlgl.Vertex2f(w, h);
+        Rlgl.TexCoord2f(1f, 1f); Rlgl.Vertex2f(w, 0f);
+        Rlgl.End();
+        Rlgl.SetTexture(0);
+        Raylib.EndShaderMode();
     }
 
     /// <summary>3D Небесные светила (Солнце, Луна, звёзды — билборды без записи в Z-буфер, не режущие облака).</summary>
@@ -584,163 +890,118 @@ public sealed class WorldRenderer : IDisposable {
         Rlgl.SetTexture(0);
     }
 
-    /// <summary>Воксельные объемные облака (Minecraft Alpha/Modern style без внутренних стенок и z-fighting). Только в Обычном мире.</summary>
+    /// <summary>
+    /// Воксельные объёмные облака (без внутренних стенок). Только в Обычном мире.
+    /// Сетка ячеек привязана к ветру: облака плавно дрейфуют, а не «перещёлкиваются»
+    /// по 16 блоков; освещение берётся из модели атмосферы (закатный подсвет, ночь),
+    /// по краю радиуса облака растворяются в цвете неба вместо резкого обрыва.
+    /// </summary>
     public void DrawClouds(Camera3D camera) {
         if (SaveSystem.CloudsMode == 0) return;
         if (_world.Dimension != Dimension.Overworld) return; // в Энде и Незере облаков нет
 
         float time = (float)Raylib.GetTime();
-        float cloudY = 112f;
+        const float cloudY = 112f;
         var pPos = _session.Player.Position;
 
         const int step = 16;
         bool fancy = SaveSystem.CloudsMode == 2;
         int gridR = fancy ? (SaveSystem.GraphicsQuality == SaveSystem.GraphicsPreset.Fabulous ? 16 : 12) : 8;
         int size = gridR * 2 + 1;
-        int baseX = (int)MathF.Floor(pPos.X / step) * step;
-        int baseZ = (int)MathF.Floor(pPos.Z / step) * step;
 
         float wind = time * 2.2f;
+        int windCells = (int)MathF.Floor(wind / step);
+        float windFrac = wind - windCells * step;
+        int baseCellX = (int)MathF.Floor((pPos.X + windFrac) / step);
+        int baseCellZ = (int)MathF.Floor(pPos.Z / step);
+
         float height = fancy ? 4.0f : 0.8f;
         float y0 = cloudY;
         float y1 = cloudY + height;
 
-        // Расчет суточного освещения облаков
-        float sky = _session.DayNight?.SkyFactor ?? 1f;
-        byte cR = (byte)Math.Clamp((int)(245 * (0.25f + 0.75f * sky)), 45, 255);
-        byte cG = (byte)Math.Clamp((int)(248 * (0.28f + 0.72f * sky)), 50, 255);
-        byte cB = (byte)Math.Clamp((int)(255 * (0.35f + 0.65f * sky)), 65, 255);
-        byte alpha = (byte)(fancy ? 215 : 185);
+        // Освещение облаков из модели атмосферы: рассеянный свет неба + прямой свет + закат
+        var lit = Atmosphere.AmbientTop * 1.05f + Atmosphere.LightColor * 0.95f + new Vector3(0.05f);
+        lit = Vector3.Lerp(lit, lit * 0.6f + Atmosphere.SunsetColor * 0.75f, Atmosphere.SunsetAmount * 0.6f);
+        lit = Vector3.Min(lit, Vector3.One);
+        var shade = lit * new Vector3(0.80f, 0.82f, 0.88f);
+        byte alpha = (byte)(fancy ? 220 : 185);
+        float rWorld = gridR * step;
+        var horizon = Atmosphere.Horizon;
 
-        Color colTop = new(cR, cG, cB, alpha);
-        Color colBottom = new((byte)(cR * 0.78f), (byte)(cG * 0.78f), (byte)(cB * 0.80f), alpha);
-        Color colSideZ = new((byte)(cR * 0.85f), (byte)(cG * 0.85f), (byte)(cB * 0.88f), alpha);
-        Color colSideX = new((byte)(cR * 0.90f), (byte)(cG * 0.90f), (byte)(cB * 0.92f), alpha);
-
-        // 1. Построение маски плотности облаков
+        // 1. Маска плотности облаков (в координатах «сетки ветра»)
         Span<bool> grid = stackalloc bool[size * size];
         for (int gx = 0; gx < size; gx++) {
             int x = gx - gridR;
-            float wx = baseX + x * step;
             for (int gz = 0; gz < size; gz++) {
                 int z = gz - gridR;
-                if (x * x + z * z > gridR * gridR) {
-                    grid[gx * size + gz] = false;
-                    continue;
-                }
-                float wz = baseZ + z * step;
-                float nx = (wx + wind) * 0.0035f;
-                float nz = wz * 0.0035f;
+                if (x * x + z * z > gridR * gridR) { grid[gx * size + gz] = false; continue; }
+                float sx = (baseCellX + x + windCells) * (float)step;
+                float sz = (baseCellZ + z) * (float)step;
+                float nx = sx * 0.0035f;
+                float nz = sz * 0.0035f;
                 float n = MathF.Sin(nx * 3.14159f) * MathF.Cos(nz * 3.14159f)
                         + MathF.Sin((nx + nz) * 2.1f) * 0.42f;
-                grid[gx * size + gz] = n > 0.16f;
+                grid[gx * size + gz] = n > 0.16f - Atmosphere.Overcast * 0.35f; // в непогоду облаков больше
             }
         }
 
-        // 2. Отрисовка внешней оболочки облаков (только внешние видимые грани)
         var shapesTex = Raylib.GetShapesTexture();
         var shapesRect = Raylib.GetShapesTextureRectangle();
         float u = (shapesRect.X + shapesRect.Width * 0.5f) / Math.Max(1, shapesTex.Width);
         float v = (shapesRect.Y + shapesRect.Height * 0.5f) / Math.Max(1, shapesTex.Height);
 
+        void Quad(Color c, Vector3 a, Vector3 b, Vector3 d, Vector3 e) {
+            Rlgl.Color4ub(c.R, c.G, c.B, c.A);
+            Rlgl.TexCoord2f(u, v); Rlgl.Vertex3f(a.X, a.Y, a.Z);
+            Rlgl.TexCoord2f(u, v); Rlgl.Vertex3f(b.X, b.Y, b.Z);
+            Rlgl.TexCoord2f(u, v); Rlgl.Vertex3f(d.X, d.Y, d.Z);
+            Rlgl.TexCoord2f(u, v); Rlgl.Vertex3f(e.X, e.Y, e.Z);
+        }
+        static Color ToColor(Vector3 c, float a) => new(
+            (byte)Math.Clamp((int)(c.X * 255f), 0, 255), (byte)Math.Clamp((int)(c.Y * 255f), 0, 255),
+            (byte)Math.Clamp((int)(c.Z * 255f), 0, 255), (byte)Math.Clamp((int)a, 0, 255));
+
         Rlgl.SetTexture(shapesTex.Id);
         Rlgl.Begin((int)DrawMode.Quads);
-        Rlgl.TexCoord2f(u, v);
 
         for (int gx = 0; gx < size; gx++) {
             int x = gx - gridR;
-            float wx = baseX + x * step;
-            float x0 = wx;
-            float x1 = wx + step;
-
+            float x0 = (baseCellX + x) * (float)step - windFrac;
+            float x1 = x0 + step;
             for (int gz = 0; gz < size; gz++) {
                 if (!grid[gx * size + gz]) continue;
-
                 int z = gz - gridR;
-                float wz = baseZ + z * step;
-                float z0 = wz;
-                float z1 = wz + step;
+                float z0 = (baseCellZ + z) * (float)step;
+                float z1 = z0 + step;
+
+                // Растворение к краю радиуса: и прозрачность, и цвет уходят в горизонт
+                float cdx = (x0 + x1) * 0.5f - pPos.X, cdz = (z0 + z1) * 0.5f - pPos.Z;
+                float d = MathF.Sqrt(cdx * cdx + cdz * cdz) / rWorld;
+                float fade = Math.Clamp((d - 0.55f) / 0.45f, 0f, 1f);
+                fade = fade * fade * (3f - 2f * fade);
+                float a = alpha * (1f - fade);
+                if (a < 2f) continue;
+                var top = Vector3.Lerp(lit, horizon, fade * 0.7f);
+                var bottom = Vector3.Lerp(shade * 0.82f, horizon, fade * 0.7f);
+                var sideZ = Vector3.Lerp(shade * 0.92f, horizon, fade * 0.7f);
+                var sideX = Vector3.Lerp(shade, horizon, fade * 0.7f);
 
                 bool hasN = gz > 0 && grid[gx * size + (gz - 1)];
                 bool hasS = gz < size - 1 && grid[gx * size + (gz + 1)];
                 bool hasW = gx > 0 && grid[(gx - 1) * size + gz];
                 bool hasE = gx < size - 1 && grid[(gx + 1) * size + gz];
 
-                // Нижняя грань (-Y) — смотрит на землю
-                Rlgl.Color4ub(colBottom.R, colBottom.G, colBottom.B, colBottom.A);
-                Rlgl.TexCoord2f(u, v);
-                Rlgl.Vertex3f(x0, y0, z0);
-                Rlgl.TexCoord2f(u, v);
-                Rlgl.Vertex3f(x1, y0, z0);
-                Rlgl.TexCoord2f(u, v);
-                Rlgl.Vertex3f(x1, y0, z1);
-                Rlgl.TexCoord2f(u, v);
-                Rlgl.Vertex3f(x0, y0, z1);
+                // Низ (-Y) и верх (+Y)
+                Quad(ToColor(bottom, a), new(x0, y0, z0), new(x1, y0, z0), new(x1, y0, z1), new(x0, y0, z1));
+                if (fancy || camera.Position.Y > y0)
+                    Quad(ToColor(top, a), new(x0, y1, z1), new(x1, y1, z1), new(x1, y1, z0), new(x0, y1, z0));
 
-                // Верхняя грань (+Y) — смотрит в космос
-                if (fancy || camera.Position.Y > y0) {
-                    Rlgl.Color4ub(colTop.R, colTop.G, colTop.B, colTop.A);
-                    Rlgl.TexCoord2f(u, v);
-                    Rlgl.Vertex3f(x0, y1, z1);
-                    Rlgl.TexCoord2f(u, v);
-                    Rlgl.Vertex3f(x1, y1, z1);
-                    Rlgl.TexCoord2f(u, v);
-                    Rlgl.Vertex3f(x1, y1, z0);
-                    Rlgl.TexCoord2f(u, v);
-                    Rlgl.Vertex3f(x0, y1, z0);
-                }
-
-                // Боковые грани (только если соседний блок — воздух!)
-                if (fancy) {
-                    // Север (-Z)
-                    if (!hasN) {
-                        Rlgl.Color4ub(colSideZ.R, colSideZ.G, colSideZ.B, colSideZ.A);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x0, y1, z0);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x1, y1, z0);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x1, y0, z0);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x0, y0, z0);
-                    }
-                    // Юг (+Z)
-                    if (!hasS) {
-                        Rlgl.Color4ub(colSideZ.R, colSideZ.G, colSideZ.B, colSideZ.A);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x1, y1, z1);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x0, y1, z1);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x0, y0, z1);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x1, y0, z1);
-                    }
-                    // Запад (-X)
-                    if (!hasW) {
-                        Rlgl.Color4ub(colSideX.R, colSideX.G, colSideX.B, colSideX.A);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x0, y1, z1);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x0, y1, z0);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x0, y0, z0);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x0, y0, z1);
-                    }
-                    // Восток (+X)
-                    if (!hasE) {
-                        Rlgl.Color4ub(colSideX.R, colSideX.G, colSideX.B, colSideX.A);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x1, y1, z0);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x1, y1, z1);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x1, y0, z1);
-                        Rlgl.TexCoord2f(u, v);
-                        Rlgl.Vertex3f(x1, y0, z0);
-                    }
-                }
+                if (!fancy) continue;
+                // Боковые грани — только на границе облака
+                if (!hasN) Quad(ToColor(sideZ, a), new(x0, y1, z0), new(x1, y1, z0), new(x1, y0, z0), new(x0, y0, z0));
+                if (!hasS) Quad(ToColor(sideZ, a), new(x1, y1, z1), new(x0, y1, z1), new(x0, y0, z1), new(x1, y0, z1));
+                if (!hasW) Quad(ToColor(sideX, a), new(x0, y1, z1), new(x0, y1, z0), new(x0, y0, z0), new(x0, y0, z1));
+                if (!hasE) Quad(ToColor(sideX, a), new(x1, y1, z0), new(x1, y1, z1), new(x1, y0, z1), new(x1, y0, z0));
             }
         }
 
@@ -999,15 +1260,10 @@ public sealed class WorldRenderer : IDisposable {
     }
 
     public Color GetFogColor() {
-        float f = _session.DayNight.SkyFactor;
-        if (_session.Weather != WeatherType.Clear) f *= 0.45f;
-        return (_world.Dimension == Dimension.Nether)
-            ? new Color(45, 10, 10, 255)
-            : _world.Dimension == Dimension.End
-                ? new Color(24, 12, 44, 255)
-                : _world.Dimension == Dimension.Void
-                    ? new Color(14, 6, 26, 255)
-                    : LerpColor(C(16, 18, 40, 255), C(178, 208, 244, 255), f);
+        // Цвет тумана = цвет горизонта из модели атмосферы (как у неба и шейдера мира).
+        var c = Atmosphere.Horizon;
+        return new Color((byte)Math.Clamp((int)(c.X * 255f), 0, 255), (byte)Math.Clamp((int)(c.Y * 255f), 0, 255),
+            (byte)Math.Clamp((int)(c.Z * 255f), 0, 255), (byte)255);
     }
 
     public float GetFogFactor(Vector3 pos) {
@@ -2502,6 +2758,8 @@ public sealed class WorldRenderer : IDisposable {
 
     public void Dispose() {
         UnhookWorldEvents();
+        _shadows.Dispose();
+        if (_skyShaderReady) { Raylib.UnloadShader(_skyShader); _skyShaderReady = false; }
         if (_materialReady) {
             unsafe {
                 _material.Maps[(int)MaterialMapIndex.Albedo].Texture = default;
