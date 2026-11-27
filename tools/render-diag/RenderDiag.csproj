@@ -7,6 +7,6 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\VoxelFrame.Game\VoxelFrame.Game.csproj" />
+    <ProjectReference Include="..\..\src\Voxalith.Game\Voxalith.Game.csproj" />
   </ItemGroup>
 </Project>

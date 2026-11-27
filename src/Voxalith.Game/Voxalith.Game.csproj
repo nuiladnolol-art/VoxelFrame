@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Voxalith.Game</RootNamespace>
+    <AssemblyName>Voxalith</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <CodePage>65001</CodePage>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <Version>1.1.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Voxalith.Core\Voxalith.Core.csproj" />
+    <PackageReference Include="Raylib-cs" Version="7.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\assets\**\*">
+      <Link>assets\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <Target Name="CopyNativeRaylib" AfterTargets="Build">
+    <Copy SourceFiles="$(UserProfile)\.nuget\packages\raylib-cs\7.0.0\runtimes\win-x64\native\raylib.dll"
+          DestinationFolder="$(TargetDir)"
+          Condition="Exists('$(UserProfile)\.nuget\packages\raylib-cs\7.0.0\runtimes\win-x64\native\raylib.dll') and !Exists('$(TargetDir)raylib.dll')"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>Shot</AssemblyName>
+    <RootNamespace>Shot</RootNamespace>
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- SkipGetTargetFrameworkProperties обходит MSB4276 (сломанный workload-resolver в SDK),
+         который валит кросс-проектную ссылку на WinExe-проект игры. -->
+    <ProjectReference Include="..\..\src\Voxalith.Game\Voxalith.Game.csproj"
+                      SkipGetTargetFrameworkProperties="true"
+                      ReferenceOutputAssembly="true" />
+  </ItemGroup>
+</Project>

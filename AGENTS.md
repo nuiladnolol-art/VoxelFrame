@@ -44,14 +44,14 @@
 
 ## Правило: деплой бета-версии в локальный лаунчер
 
-После каждой значимой правки (изменение механики игры, фиксы в нескольких файлах, правки сети/физики) модель обязана опубликовать бета-сборку в локальный лаунчер. Лаунчер при старте сканирует папку `versions/` в корне репозитория (каждая подпапка с `VoxelFrame.Game.exe` показывается как установленная версия).
+После каждой значимой правки (изменение механики игры, фиксы в нескольких файлах, правки сети/физики) модель обязана опубликовать бета-сборку в локальный лаунчер. Лаунчер при старте сканирует папку `versions/` в корне репозитория (каждая подпапка с `Voxalith.exe` или `VoxelFrame.Game.exe` показывается как установленная версия).
 
 Команда (из корня репозитория, например `C:\Users\arsis\OneDrive\Desktop\VoxelFrame-main`):
 
 ```bash
 # Оболочка сессии — bash. Запускать через powershell.exe: из bash аргументы /p:... ломаются (MSYS-пути).
-# Номер беты — следующий после текущего релиза (например, текущий v1.0.4 → v1.0.5-beta)
-powershell.exe -NoProfile -Command '$beta="v1.0.5-beta"; $out="versions/$beta"; if (Test-Path $out) { Remove-Item -Recurse -Force $out }; dotnet publish "src/VoxelFrame.Game/VoxelFrame.Game.csproj" -c Release -r win-x64 --self-contained true /p:PublishSingleFile=false /p:PublishTrimmed=false -o $out | Select-Object -Last 4; if (Test-Path "assets") { Copy-Item -Recurse -Force assets "$out/assets" }'
+# Номер беты — следующий после текущего релиза (например, текущий v1.1.0-alpha)
+powershell.exe -NoProfile -Command '$beta="v1.1.0-alpha"; $out="versions/$beta"; if (Test-Path $out) { Remove-Item -Recurse -Force $out }; dotnet publish "src/Voxalith.Game/Voxalith.Game.csproj" -c Release -r win-x64 --self-contained true /p:PublishSingleFile=false /p:PublishTrimmed=false -o $out | Select-Object -Last 4; if (Test-Path "assets") { Copy-Item -Recurse -Force assets "$out/assets" }'
 ```
 
 После публикации сообщить пользователю, что в лаунчере нужно перезапустить/обновить список версий (при старте лаунчер подхватит бета-сборку автоматически). Не делать деплой без явного запроса, если правка тривиальная (типографика, комментарии и т.п.).

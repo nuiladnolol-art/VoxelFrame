@@ -1,12 +1,12 @@
-using System;
-using VoxelFrame.Core;
-using VoxelFrame.Core.Inventory;
-using VoxelFrame.Core.World;
+﻿using System;
+using Voxalith.Core;
+using Voxalith.Core.Inventory;
+using Voxalith.Core.World;
 
-namespace VoxelFrame.Tools.SelfCheck;
+namespace Voxalith.Tools.SelfCheck;
 
 /// <summary>
-/// Zero-dependency verification of VoxelFrame.Core components:
+/// Zero-dependency verification of Voxalith.Core components:
 ///   1. Container inventory slots, capacity, insertion & removal
 ///   2. VoxelData representation and subgrid layer masks
 ///   3. Chunk voxel indexing and storage
@@ -16,7 +16,7 @@ internal static class Program {
     private static int _passed, _failed;
 
     private static void Main() {
-        Console.WriteLine("== VoxelFrame.Core self-check ==");
+        Console.WriteLine("== Voxalith.Core self-check ==");
         Console.WriteLine("Verifying: inventory containers · voxel data · chunks · world grid\n");
 
         Test_Container_BasicOperations();
@@ -36,7 +36,7 @@ internal static class Program {
     private static void Test_Container_BasicOperations() {
         Console.WriteLine("[1] Container: slot insertion and capacity limits");
         var container = new Container();
-        var mat = new VoxelFrame.Core.Materials.Material { Id = 1, Name = "Dirt" };
+        var mat = new Voxalith.Core.Materials.Material { Id = 1, Name = "Dirt" };
         var def = new ItemDefinition { Id = 1, Name = "Dirt", MaxStack = 64, Material = mat };
         var item = new ItemInstance(def, 1);
 

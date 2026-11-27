@@ -1,6 +1,6 @@
-using VoxelFrame.Core;
-using VoxelFrame.Core.World;
-using VoxelFrame.Game;
+﻿using Voxalith.Core;
+using Voxalith.Core.World;
+using Voxalith.Game;
 
 var Faces = new[] {
     (X: 1, Y: 0, Z: 0, Nx: 1f, Ny: 0f, Nz: 0f), (X: -1, Y: 0, Z: 0, Nx: -1f, Ny: 0f, Nz: 0f),

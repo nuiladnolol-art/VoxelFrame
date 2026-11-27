@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Voxalith.Game\Voxalith.Game.csproj" />
+    <ProjectReference Include="..\Voxalith.Core\Voxalith.Core.csproj" />
+  </ItemGroup>
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Voxalith.Launcher</RootNamespace>
+    <AssemblyName>Voxalith.Launcher</AssemblyName>
+    <UseWindowsForms>true</UseWindowsForms>
+    <CodePage>65001</CodePage>
+    <ApplicationIcon>launcher.ico</ApplicationIcon>
+    <Version>1.1.0</Version>
+  </PropertyGroup>
+</Project>

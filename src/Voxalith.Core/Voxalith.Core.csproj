@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Voxalith.Core</AssemblyName>
+    <RootNamespace>Voxalith.Core</RootNamespace>
+    <CodePage>65001</CodePage>
+    <Version>1.1.0</Version>
+  </PropertyGroup>
+
+</Project>

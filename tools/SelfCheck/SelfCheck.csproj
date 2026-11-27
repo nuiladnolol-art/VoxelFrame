@@ -5,11 +5,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>VoxelFrame.Tools.SelfCheck</RootNamespace>
+    <RootNamespace>Voxalith.Tools.SelfCheck</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\VoxelFrame.Core\VoxelFrame.Core.csproj" />
+    <ProjectReference Include="..\..\src\Voxalith.Core\Voxalith.Core.csproj" />
   </ItemGroup>
 
 </Project>

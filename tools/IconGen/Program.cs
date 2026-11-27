@@ -23,9 +23,9 @@ class Program {
         // Save multi-resolution .ico files
         string[] targetIcos = new[] {
             Path.Combine(assetsDir, "icon.ico"),
-            Path.Combine(root, "src", "VoxelFrame.Game", "app.ico"),
-            Path.Combine(root, "src", "VoxelFrame.Launcher", "launcher.ico"),
-            Path.Combine(root, "src", "VoxelFrame.Installer", "app.ico"),
+            Path.Combine(root, "src", "Voxalith.Game", "app.ico"),
+            Path.Combine(root, "src", "Voxalith.Launcher", "launcher.ico"),
+            Path.Combine(root, "src", "Voxalith.Installer", "app.ico"),
         };
 
         foreach (var path in targetIcos) {

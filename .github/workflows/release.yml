@@ -32,7 +32,7 @@ jobs:
         shell: powershell
         run: |
           dotnet run --project tools/SelfCheck/SelfCheck.csproj
-          dotnet run --project src/VoxelFrame.Game/VoxelFrame.Game.csproj -- --smoke
+          dotnet run --project src/Voxalith.Game/Voxalith.Game.csproj -- --smoke
 
       - name: Determine Version Tag
         id: vars
@@ -56,7 +56,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
-          name: VoxelFrame ${{ steps.vars.outputs.tag }}
+          name: Voxalith ${{ steps.vars.outputs.tag }}
           draft: false
           prerelease: false
           generate_release_notes: true

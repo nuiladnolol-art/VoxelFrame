@@ -1,0 +1,27 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Voxalith.Core/Voxalith.Core.csproj" />
+    <Project Path="src/Voxalith.Game/Voxalith.Game.csproj" />
+    <Project Path="src/Voxalith.Installer/Voxalith.Installer.csproj" />
+    <Project Path="src/Voxalith.Launcher/Voxalith.Launcher.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/IconGen/IconGen.csproj" />
+    <Project Path="tools/SelfCheck/SelfCheck.csproj" />
+  </Folder>
+  <Folder Name="/tools/api-check/">
+    <Project Path="tools/api-check/ApiCheck.csproj" />
+  </Folder>
+  <Folder Name="/tools/mesh-diag/">
+    <Project Path="tools/mesh-diag/MeshDiag.csproj" />
+  </Folder>
+  <Folder Name="/tools/render-diag/">
+    <Project Path="tools/render-diag/RenderDiag.csproj" />
+  </Folder>
+  <Folder Name="/tools/shot/">
+    <Project Path="tools/shot/Shot.csproj" />
+  </Folder>
+  <Folder Name="/tools/test-sig/">
+    <Project Path="tools/test-sig/TestSig.csproj" />
+  </Folder>
+</Solution>

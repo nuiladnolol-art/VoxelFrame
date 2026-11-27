@@ -1,9 +1,9 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Numerics;
 using Raylib_cs;
-using VoxelFrame.Core;
-using VoxelFrame.Core.World;
-using VoxelFrame.Game;
+using Voxalith.Core;
+using Voxalith.Core.World;
+using Voxalith.Game;
 
 // Рендер-диагностика: реальный кадр мира + замер FPS без пересборок мешей.
 // Снимает скриншот для анализа (верхние грани должны быть зелёными — трава).
@@ -12,7 +12,7 @@ Raylib.SetConfigFlags(ConfigFlags.VSyncHint);
 Raylib.InitWindow(640, 360, "RenderDiag");
 Raylib.SetTargetFPS(60);
 TextureAtlas.Load();
-VoxelFrame.Game.Program.RegisterTiles();
+Voxalith.Game.Program.RegisterTiles();
 
 var session = GameSession.NewGame(12345, headless: true);
 var world = session.World;
