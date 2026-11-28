@@ -34,3 +34,4 @@ dotnet run --project src/Voxalith.Game/Voxalith.Game.csproj -c Release -- --smok
 ./build-release.ps1 -Version v1.1.0-alpha
 ./build-installer.ps1 -Version v1.1.0-alpha
 ```
+https://github.com/nuiladnolol-art/Voxalith/releases
