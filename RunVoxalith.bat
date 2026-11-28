@@ -2,9 +2,14 @@
 rem ── Запуск Voxalith (игра напрямую) ──────────────────────────────────────
 cd /d "%~dp0"
 
-if exist "versions\v1.1.0-alpha\Voxalith.exe" (
-    echo Запуск установленной версии Voxalith v1.1.0-alpha...
-    start "" /d "%~dp0versions\v1.1.0-alpha" "%~dp0versions\v1.1.0-alpha\Voxalith.exe"
+set "INSTALLED_EXE="
+for /d %%D in ("versions\*") do (
+    if exist "%%~fD\Voxalith.exe" set "INSTALLED_EXE=%%~fD\Voxalith.exe"
+)
+if defined INSTALLED_EXE (
+    echo Запуск установленной версии: "%INSTALLED_EXE%"...
+    for %%I in ("%INSTALLED_EXE%") do set "INSTALLED_DIR=%%~dpI"
+    start "" /d "%INSTALLED_DIR%" "%INSTALLED_EXE%"
     exit /b 0
 )
 

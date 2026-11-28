@@ -98,6 +98,7 @@ public class LauncherForm : Form {
     private string _latestName = "";
     private string _latestSetupUrl = "";
     private string _latestZipUrl = "";
+    private string _latestChecksumsUrl = "";
 
     private readonly List<GameReleaseItem> _versions = new();
     private static readonly HttpClient _http = new();
@@ -614,7 +615,15 @@ public class LauncherForm : Form {
                 psi.EnvironmentVariables["DOTNET_GCHeapHardLimit"] = $"0x{bytes:X}";
             }
 
-            string gameArgs = $"--username \"{nickname}\" --width {w} --height {h}{(fullscreen ? " --fullscreen" : "")}";
+            void AddGameArgs(ProcessStartInfo targetPsi) {
+                targetPsi.ArgumentList.Add("--username");
+                targetPsi.ArgumentList.Add(nickname);
+                targetPsi.ArgumentList.Add("--width");
+                targetPsi.ArgumentList.Add(w.ToString());
+                targetPsi.ArgumentList.Add("--height");
+                targetPsi.ArgumentList.Add(h.ToString());
+                if (fullscreen) targetPsi.ArgumentList.Add("--fullscreen");
+            }
 
             if (item.IsLocalDev) {
                 string? gameDir = FindGameDir();
@@ -639,7 +648,7 @@ public class LauncherForm : Form {
                     if (builtExe != null && File.Exists(builtExe)) {
                         psi.FileName = builtExe;
                         psi.WorkingDirectory = Path.GetDirectoryName(builtExe) ?? gameDir;
-                        psi.Arguments = gameArgs;
+                        AddGameArgs(psi);
                     }
                 }
             } else {
@@ -653,9 +662,8 @@ public class LauncherForm : Form {
                     if (!string.IsNullOrEmpty(exeDir)) {
                         string raylibTarget = Path.Combine(exeDir, "raylib.dll");
                         if (!File.Exists(raylibTarget)) {
-                            string? repoRoot = FindRepoRoot();
-                            string fallbackRaylib = repoRoot != null ? Path.Combine(repoRoot, "versions", "v1.1.0-alpha", "raylib.dll") : "";
-                            if (File.Exists(fallbackRaylib)) {
+                            string? fallbackRaylib = FindAnyFallbackRaylib(exeDir);
+                            if (fallbackRaylib != null && File.Exists(fallbackRaylib)) {
                                 try { File.Copy(fallbackRaylib, raylibTarget, true); } catch { }
                             }
                         }
@@ -663,7 +671,7 @@ public class LauncherForm : Form {
 
                     psi.FileName = exePath;
                     psi.WorkingDirectory = Path.GetDirectoryName(exePath) ?? AppDomain.CurrentDomain.BaseDirectory;
-                    psi.Arguments = gameArgs;
+                    AddGameArgs(psi);
                 } else {
                     MessageBox.Show("Исполняемый файл игры не найден:\n" + exePath, "Ошибка запуска", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
@@ -687,40 +695,103 @@ public class LauncherForm : Form {
         }
     }
 
+    private static string? FindAnyFallbackRaylib(string excludeDir) {
+        string? repoRoot = FindRepoRoot();
+        if (repoRoot == null) return null;
+        string versionsDir = Path.Combine(repoRoot, "versions");
+        if (Directory.Exists(versionsDir)) {
+            foreach (var dir in Directory.GetDirectories(versionsDir)) {
+                if (string.Equals(dir.TrimEnd('\\', '/'), excludeDir.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)) continue;
+                string candidate = Path.Combine(dir, "raylib.dll");
+                if (File.Exists(candidate)) return candidate;
+            }
+        }
+        string? gameDir = FindGameDir();
+        if (gameDir != null) {
+            string rel = Path.Combine(gameDir, "bin", "Release", "net10.0", "raylib.dll");
+            if (File.Exists(rel)) return rel;
+            string dbg = Path.Combine(gameDir, "bin", "Debug", "net10.0", "raylib.dll");
+            if (File.Exists(dbg)) return dbg;
+        }
+        return null;
+    }
+
+    private static string SanitizeTagComponent(string? tag) =>
+        Voxalith.Shared.PackageSecurity.SanitizeTagComponent(tag);
+
+    private static string SanitizeGitHubRepo(string? repo) =>
+        Voxalith.Shared.PackageSecurity.SanitizeGitHubRepo(repo);
+
+    private static void ExtractZipSafe(string zipPath, string destDir) =>
+        Voxalith.Shared.PackageSecurity.ExtractZipSafe(zipPath, destDir);
+
+    private static async Task VerifyFileSha256Async(string filePath, string checksumsUrl, string expectedFileName, CancellationToken ct) {
+        if (string.IsNullOrWhiteSpace(checksumsUrl)) {
+            throw new InvalidDataException("Релиз не содержит файл SHA256SUMS.txt — установка без проверки целостности запрещена.");
+        }
+        using var req = new HttpRequestMessage(HttpMethod.Get, checksumsUrl);
+        req.Headers.UserAgent.Add(new ProductInfoHeaderValue("VoxalithLauncher", "1.1"));
+        using var resp = await _http.SendAsync(req, ct);
+        resp.EnsureSuccessStatusCode();
+        string text = await resp.Content.ReadAsStringAsync(ct);
+
+        string? expectedHash = Voxalith.Shared.PackageSecurity.ParseExpectedSha256(text, expectedFileName);
+        if (string.IsNullOrEmpty(expectedHash)) {
+            throw new InvalidDataException($"В SHA256SUMS.txt не найдена контрольная сумма для «{expectedFileName}».");
+        }
+        using var fs = File.OpenRead(filePath);
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        string actualHash = Convert.ToHexString(await sha.ComputeHashAsync(fs, ct)).ToLowerInvariant();
+        if (!actualHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase)) {
+            throw new InvalidDataException("Контрольная сумма SHA256 не совпала — файл повреждён или подменён.");
+        }
+    }
+
     private async Task<bool> DownloadAndInstallVersionAsync(GameReleaseItem item) {
-        string tempZip = Path.Combine(Path.GetTempPath(), $"Voxalith_{item.Tag}_{Guid.NewGuid():N}.zip");
+        string safeTag = SanitizeTagComponent(item.Tag);
+        if (string.IsNullOrEmpty(safeTag)) {
+            MessageBox.Show("Небезопасный тег версии.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return false;
+        }
+        string tempZip = Path.Combine(Path.GetTempPath(), $"Voxalith_{safeTag}_{Guid.NewGuid():N}.zip");
+        _downloadCts?.Cancel();
+        _downloadCts?.Dispose();
+        _downloadCts = new CancellationTokenSource();
+        var ct = _downloadCts.Token;
         try {
-            lblStatus.Text = $"Загрузка {item.Tag}...";
+            lblStatus.Text = $"Загрузка {safeTag}...";
             lblStatus.ForeColor = Color.FromArgb(255, 215, 80);
             pbDownload.Visible = true;
             pbDownload.Value = 0;
             btnPlay.Enabled = false;
 
-            _downloadCts = new CancellationTokenSource();
-            using (var resp = await _http.GetAsync(item.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, _downloadCts.Token)) {
+            using (var resp = await _http.GetAsync(item.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, ct)) {
                 resp.EnsureSuccessStatusCode();
                 long total = resp.Content.Headers.ContentLength ?? -1L;
-                using var stream = await resp.Content.ReadAsStreamAsync();
+                using var stream = await resp.Content.ReadAsStreamAsync(ct);
                 using var fs = new FileStream(tempZip, FileMode.Create, FileAccess.Write, FileShare.None);
 
                 byte[] buf = new byte[81920];
                 long readSoFar = 0;
                 int bytesRead;
-                while ((bytesRead = await stream.ReadAsync(buf, 0, buf.Length, _downloadCts.Token)) > 0) {
-                    await fs.WriteAsync(buf, 0, bytesRead);
+                while ((bytesRead = await stream.ReadAsync(buf, 0, buf.Length, ct)) > 0) {
+                    await fs.WriteAsync(buf, 0, bytesRead, ct);
                     readSoFar += bytesRead;
                     if (total > 0) {
                         int pct = (int)(readSoFar * 100 / total);
                         pbDownload.Value = Math.Clamp(pct, 0, 100);
-                        lblStatus.Text = $"Загрузка {item.Tag}: {readSoFar / (1024 * 1024)} MB из {total / (1024 * 1024)} MB ({pct}%)";
+                        lblStatus.Text = $"Загрузка {safeTag}: {readSoFar / (1024 * 1024)} MB из {total / (1024 * 1024)} MB ({pct}%)";
                     }
                 }
             }
 
+            lblStatus.Text = "Проверка контрольной суммы SHA256...";
+            string assetFileName = Path.GetFileName(new Uri(item.DownloadUrl).LocalPath);
+            await VerifyFileSha256Async(tempZip, item.ChecksumsUrl, assetFileName, ct);
+
             lblStatus.Text = "Распаковка релиза...";
-            string destDir = Path.Combine(GetVersionsDirectory(), item.Tag);
-            Directory.CreateDirectory(destDir);
-            ZipFile.ExtractToDirectory(tempZip, destDir, true);
+            string destDir = Path.Combine(GetVersionsDirectory(), safeTag);
+            ExtractZipSafe(tempZip, destDir);
 
             string? exe = ResolveGameExe(destDir);
             if (exe == null) throw new InvalidDataException("В архиве релиза не найден исполняемый файл игры.");
@@ -728,13 +799,13 @@ public class LauncherForm : Form {
             item.IsInstalled = true;
             item.InstallPath = destDir;
             item.ExePath = exe;
-            item.DisplayName = $"💾 {item.Tag} (Установлена)";
+            item.DisplayName = $"💾 {safeTag} (Установлена)";
 
             int idx = cbVersion.SelectedIndex;
-            cbVersion.Items[idx] = item;
+            if (idx >= 0 && idx < cbVersion.Items.Count) cbVersion.Items[idx] = item;
             UpdatePlayButtonState();
 
-            lblStatus.Text = $"Версия {item.Tag} успешно установлена!";
+            lblStatus.Text = $"Версия {safeTag} успешно установлена!";
             lblStatus.ForeColor = Color.FromArgb(100, 220, 120);
             return true;
         } catch (Exception ex) {
@@ -744,6 +815,8 @@ public class LauncherForm : Form {
             return false;
         } finally {
             try { if (File.Exists(tempZip)) File.Delete(tempZip); } catch { }
+            _downloadCts?.Dispose();
+            _downloadCts = null;
             pbDownload.Visible = false;
             btnPlay.Enabled = true;
         }
@@ -753,7 +826,7 @@ public class LauncherForm : Form {
         btnRefresh.Enabled = false;
         lblStatus.Text = "Проверка обновлений на GitHub...";
         try {
-            string repo = _config.GitHubRepo;
+            string repo = SanitizeGitHubRepo(_config.GitHubRepo);
             string url = $"https://api.github.com/repos/{repo}/releases";
 
             var req = new HttpRequestMessage(HttpMethod.Get, url);
@@ -780,7 +853,8 @@ public class LauncherForm : Form {
                 if (root.ValueKind == JsonValueKind.Array) {
                     string versionsDir = GetVersionsDirectory();
                     foreach (var rel in root.EnumerateArray()) {
-                        string tag = rel.GetProperty("tag_name").GetString() ?? "";
+                        string rawTag = rel.GetProperty("tag_name").GetString() ?? "";
+                        string tag = SanitizeTagComponent(rawTag);
                         if (string.IsNullOrEmpty(tag)) continue;
 
                         string downloadUrl = "";
@@ -840,11 +914,18 @@ public class LauncherForm : Form {
 
     private async Task CheckForLauncherUpdatesAsync() {
         try {
-            string repo = _config.GitHubRepo;
+            string repo = SanitizeGitHubRepo(_config.GitHubRepo);
             string url = $"https://api.github.com/repos/{repo}/releases/latest";
             var req = new HttpRequestMessage(HttpMethod.Get, url);
             req.Headers.UserAgent.Add(new ProductInfoHeaderValue("VoxalithLauncher", "1.1"));
             var resp = await _http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode && repo.Contains("Voxalith", StringComparison.OrdinalIgnoreCase)) {
+                repo = "nuiladnolol-art/VoxelFrame";
+                url = $"https://api.github.com/repos/{repo}/releases/latest";
+                req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.UserAgent.Add(new ProductInfoHeaderValue("VoxalithLauncher", "1.1"));
+                resp = await _http.SendAsync(req);
+            }
             if (!resp.IsSuccessStatusCode) return;
 
             string json = await resp.Content.ReadAsStringAsync();
@@ -852,6 +933,9 @@ public class LauncherForm : Form {
             var root = doc.RootElement;
             _latestTag = root.GetProperty("tag_name").GetString() ?? "";
             _latestName = root.TryGetProperty("name", out var n) ? (n.GetString() ?? _latestTag) : _latestTag;
+            _latestSetupUrl = "";
+            _latestZipUrl = "";
+            _latestChecksumsUrl = "";
 
             if (root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array) {
                 foreach (var a in assets.EnumerateArray()) {
@@ -859,8 +943,10 @@ public class LauncherForm : Form {
                     string dl = a.GetProperty("browser_download_url").GetString() ?? "";
                     if (name.Contains("Setup", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                         _latestSetupUrl = dl;
-                    if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                    else if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                         _latestZipUrl = dl;
+                    else if (name.Equals("SHA256SUMS.txt", StringComparison.OrdinalIgnoreCase))
+                        _latestChecksumsUrl = dl;
                 }
             }
 
@@ -870,29 +956,28 @@ public class LauncherForm : Form {
         } catch { }
     }
 
-    private static bool IsNewerVersion(string latestTag, string currentVer) {
-        try {
-            string l = latestTag.TrimStart('v', 'V');
-            string c = currentVer.TrimStart('v', 'V');
-            if (Version.TryParse(l.Split('-')[0], out var vLatest) && Version.TryParse(c.Split('-')[0], out var vCur)) {
-                return vLatest > vCur;
-            }
-        } catch { }
-        return false;
-    }
+    private static bool IsNewerVersion(string latestTag, string currentVer) =>
+        Voxalith.Shared.PackageSecurity.IsNewerVersion(latestTag, currentVer);
 
     private async Task AutoUpdateLauncherAsync(string tag, string setupUrl, string zipUrl) {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"Voxalith_Update_{Guid.NewGuid():N}");
         try {
-            string url = !string.IsNullOrEmpty(setupUrl) ? setupUrl : zipUrl;
-            if (string.IsNullOrEmpty(url)) return;
-            string tempFile = Path.Combine(Path.GetTempPath(), Path.GetFileName(new Uri(url).LocalPath));
-            using (var s = await _http.GetStreamAsync(url))
+            if (string.IsNullOrEmpty(setupUrl)) {
+                MessageBox.Show("В этом релизе отсутствует установщик (.exe) для автообновления.", "Обновление", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            Directory.CreateDirectory(tempDir);
+            string fileName = Path.GetFileName(new Uri(setupUrl).LocalPath);
+            string tempFile = Path.Combine(tempDir, fileName);
+            using (var s = await _http.GetStreamAsync(setupUrl))
             using (var fs = new FileStream(tempFile, FileMode.Create)) {
                 await s.CopyToAsync(fs);
             }
+            await VerifyFileSha256Async(tempFile, _latestChecksumsUrl, fileName, CancellationToken.None);
             Process.Start(new ProcessStartInfo(tempFile) { UseShellExecute = true });
             Application.Exit();
         } catch (Exception ex) {
+            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch { }
             MessageBox.Show("Ошибка обновления: " + ex.Message, "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
@@ -910,7 +995,10 @@ public class LauncherForm : Form {
             if (File.Exists(path)) {
                 string json = File.ReadAllText(path);
                 var loaded = JsonSerializer.Deserialize<LauncherConfig>(json);
-                if (loaded != null) _config = loaded;
+                if (loaded != null) {
+                    loaded.GitHubRepo = SanitizeGitHubRepo(loaded.GitHubRepo);
+                    _config = loaded;
+                }
             }
         } catch { }
     }

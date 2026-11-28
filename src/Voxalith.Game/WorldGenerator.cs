@@ -290,12 +290,10 @@ public sealed class WorldGenerator {
         // Диапазон 0..maxSurfaceChunkY охватывает и низины (Y=0), и высокие горы.
         int maxSurfaceChunkY = (BaseHeight + HeightAmplitude + 20) / Chunk.SizeY + 1;
         if (chunk.Origin.Y >= 0 && chunk.Origin.Y <= maxSurfaceChunkY) {
-            // Деревья на поверхности
-            PlaceTrees(chunk, ox, oz);
-
-            // Растительность (2D трава)
-            PlaceFoliage(chunk, ox, oz);
-
+            if (chunk.Origin.Y >= 1) {
+                PlaceTrees(chunk, ox, oz);
+                PlaceFoliage(chunk, ox, oz);
+            }
             PlaceVillages(chunk, ox, oz);
             PlaceRuinedPortals(chunk, ox, oy, oz);
             PlaceEndStrongholds(chunk, ox, oy, oz);
@@ -924,30 +922,40 @@ public sealed class WorldGenerator {
         const int villageSectorBlocks = 704;
         int sectorX = (int)MathF.Floor((float)wx / villageSectorBlocks);
         int sectorZ = (int)MathF.Floor((float)wz / villageSectorBlocks);
-        float villageSeed = _mineshaftNoise.Get(sectorX * 31.73f + 123.456f, sectorZ * 31.73f + 654.321f);
-        if (villageSeed < 0.60f) return false;
+        for (int sx = sectorX - 1; sx <= sectorX + 1; sx++) {
+            for (int sz = sectorZ - 1; sz <= sectorZ + 1; sz++) {
+                float villageSeed = _mineshaftNoise.Get(sx * 31.73f + 123.456f, sz * 31.73f + 654.321f);
+                if (villageSeed < 0.60f) continue;
 
-        var rng = new Random(_seed ^ (sectorX * 73856093) ^ (sectorZ * 19349663));
-        int villageWX = sectorX * villageSectorBlocks + rng.Next(24, villageSectorBlocks - 24);
-        int villageWZ = sectorZ * villageSectorBlocks + rng.Next(24, villageSectorBlocks - 24);
+                var rng = new Random(_seed ^ (sx * 73856093) ^ (sz * 19349663));
+                int villageWX = sx * villageSectorBlocks + rng.Next(24, villageSectorBlocks - 24);
+                int villageWZ = sz * villageSectorBlocks + rng.Next(24, villageSectorBlocks - 24);
 
-        int dx = wx - villageWX, dz = wz - villageWZ;
-        return (dx * dx + dz * dz) <= (48 * 48);
+                int dx = wx - villageWX, dz = wz - villageWZ;
+                if ((dx * dx + dz * dz) <= (48 * 48)) return true;
+            }
+        }
+        return false;
     }
 
     public bool IsInRuinedPortal(int wx, int wz) {
         const int portalSectorSize = 320;
         int sectorX = (int)MathF.Floor((float)wx / portalSectorSize);
         int sectorZ = (int)MathF.Floor((float)wz / portalSectorSize);
-        float pSeed = _mineshaftNoise.Get(sectorX * 43.19f + 555.55f, sectorZ * 43.19f + 777.77f);
-        if (pSeed < 0.70f) return false;
+        for (int sx = sectorX - 1; sx <= sectorX + 1; sx++) {
+            for (int sz = sectorZ - 1; sz <= sectorZ + 1; sz++) {
+                float pSeed = _mineshaftNoise.Get(sx * 43.19f + 555.55f, sz * 43.19f + 777.77f);
+                if (pSeed < 0.70f) continue;
 
-        var rng = new Random(_seed ^ (sectorX * 458921) ^ (sectorZ * 912837));
-        int portalWX = sectorX * portalSectorSize + rng.Next(24, portalSectorSize - 24);
-        int portalWZ = sectorZ * portalSectorSize + rng.Next(24, portalSectorSize - 24);
+                var rng = new Random(_seed ^ (sx * 458921) ^ (sz * 912837));
+                int portalWX = sx * portalSectorSize + rng.Next(24, portalSectorSize - 24);
+                int portalWZ = sz * portalSectorSize + rng.Next(24, portalSectorSize - 24);
 
-        int dx = wx - portalWX, dz = wz - portalWZ;
-        return (dx * dx + dz * dz) <= (8 * 8);
+                int dx = wx - portalWX, dz = wz - portalWZ;
+                if ((dx * dx + dz * dz) <= (8 * 8)) return true;
+            }
+        }
+        return false;
     }
 
     public bool TryGetDesertPyramidPos(int sectorX, int sectorZ, out int cx, out int cz) {
@@ -1039,53 +1047,54 @@ public sealed class WorldGenerator {
     private void PlaceVillages(Chunk chunk, int ox, int oz) {
         // Размер сектора деревни: 704 блока (совпадает с FindNearestVillage, сбалансированная плотность)
         const int villageSectorBlocks = 704;
+        const int villageRadius = 60;
 
         int sectorX = (int)MathF.Floor((float)ox / villageSectorBlocks);
         int sectorZ = (int)MathF.Floor((float)oz / villageSectorBlocks);
-
-        // Генерируем позицию деревни в секторе через шум
-        var rng = new Random(_seed ^ (sectorX * 73856093) ^ (sectorZ * 19349663));
-        float villageSeed = _mineshaftNoise.Get(sectorX * 31.73f + 123.456f, sectorZ * 31.73f + 654.321f);
-        if (villageSeed < 0.60f) return; // ~20% секторов получают деревни в подходящих биомах
-
-        // Центр деревни в мировых координатах
-        int villageWX = sectorX * villageSectorBlocks + rng.Next(24, villageSectorBlocks - 24);
-        int villageWZ = sectorZ * villageSectorBlocks + rng.Next(24, villageSectorBlocks - 24);
-
-        // Проверяем, задевает ли этот чанк зону деревни (60 блоков радиус)
-        const int villageRadius = 60;
         int chunkMinX = ox, chunkMaxX = ox + Chunk.SizeX - 1;
         int chunkMinZ = oz, chunkMaxZ = oz + Chunk.SizeZ - 1;
-        if (villageWX + villageRadius < chunkMinX || villageWX - villageRadius > chunkMaxX) return;
-        if (villageWZ + villageRadius < chunkMinZ || villageWZ - villageRadius > chunkMaxZ) return;
 
-        // Биом центра деревни должен быть равнина или лес
-        int centerSurface = SurfaceHeight(villageWX, villageWZ);
-        if (centerSurface < SeaLevel + 3) return; // не в воде/пляже
-        var centerBiome = GetBiome(villageWX, BaseHeight, villageWZ);
-        if (centerBiome == BiomeType.Desert || centerBiome == BiomeType.Ocean ||
-            centerBiome == BiomeType.Beach || centerBiome == BiomeType.River ||
-            centerBiome == BiomeType.Swamp) return;
+        for (int sx = sectorX - 1; sx <= sectorX + 1; sx++) {
+            for (int sz = sectorZ - 1; sz <= sectorZ + 1; sz++) {
+                float villageSeed = _mineshaftNoise.Get(sx * 31.73f + 123.456f, sz * 31.73f + 654.321f);
+                if (villageSeed < 0.60f) continue;
 
-        // 1. Центральный колодец деревни (Village Town Well)
-        PlaceVillageWell(chunk, ox, oz, villageWX, villageWZ);
+                var rng = new Random(_seed ^ (sx * 73856093) ^ (sz * 19349663));
+                int villageWX = sx * villageSectorBlocks + rng.Next(24, villageSectorBlocks - 24);
+                int villageWZ = sz * villageSectorBlocks + rng.Next(24, villageSectorBlocks - 24);
 
-        // 2. Генерируем 4-7 разнообразных зданий вокруг центра
-        int houseCount = rng.Next(4, 8);
-        for (int h = 0; h < houseCount; h++) {
-            float angle = (float)h / houseCount * MathF.Tau + (float)rng.NextDouble() * 0.35f;
-            float dist = rng.Next(12, 34);
-            int houseX = villageWX + (int)(MathF.Cos(angle) * dist);
-            int houseZ = villageWZ + (int)(MathF.Sin(angle) * dist);
-            var (doorX, doorZ) = PlaceVillageHouse(chunk, ox, oz, houseX, houseZ, h, rng);
+                if (villageWX + villageRadius < chunkMinX || villageWX - villageRadius > chunkMaxX) continue;
+                if (villageWZ + villageRadius < chunkMinZ || villageWZ - villageRadius > chunkMaxZ) continue;
 
-            // Фонарный столб возле дома
-            int lampX = villageWX + (int)(MathF.Cos(angle) * (dist * 0.65f));
-            int lampZ = villageWZ + (int)(MathF.Sin(angle) * (dist * 0.65f));
-            PlaceVillageLampPost(chunk, ox, oz, lampX, lampZ);
+                // Биом центра деревни должен быть равнина или лес
+                int centerSurface = SurfaceHeight(villageWX, villageWZ);
+                if (centerSurface < SeaLevel + 3) continue; // не в воде/пляже
+                var centerBiome = GetBiome(villageWX, BaseHeight, villageWZ);
+                if (centerBiome == BiomeType.Desert || centerBiome == BiomeType.Ocean ||
+                    centerBiome == BiomeType.Beach || centerBiome == BiomeType.River ||
+                    centerBiome == BiomeType.Swamp) continue;
 
-            // Дорога напрямую к двери каждого дома
-            PlaceVillageRoadPath(chunk, ox, oz, doorX, doorZ, villageWX, villageWZ);
+                // 1. Центральный колодец деревни (Village Town Well)
+                PlaceVillageWell(chunk, ox, oz, villageWX, villageWZ);
+
+                // 2. Генерируем 4-7 разнообразных зданий вокруг центра
+                int houseCount = rng.Next(4, 8);
+                for (int h = 0; h < houseCount; h++) {
+                    float angle = (float)h / houseCount * MathF.Tau + (float)rng.NextDouble() * 0.35f;
+                    float dist = rng.Next(12, 34);
+                    int houseX = villageWX + (int)(MathF.Cos(angle) * dist);
+                    int houseZ = villageWZ + (int)(MathF.Sin(angle) * dist);
+                    var (doorX, doorZ) = PlaceVillageHouse(chunk, ox, oz, houseX, houseZ, h, rng);
+
+                    // Фонарный столб возле дома
+                    int lampX = villageWX + (int)(MathF.Cos(angle) * (dist * 0.65f));
+                    int lampZ = villageWZ + (int)(MathF.Sin(angle) * (dist * 0.65f));
+                    PlaceVillageLampPost(chunk, ox, oz, lampX, lampZ);
+
+                    // Дорога напрямую к двери каждого дома
+                    PlaceVillageRoadPath(chunk, ox, oz, doorX, doorZ, villageWX, villageWZ);
+                }
+            }
         }
     }
 
@@ -1441,58 +1450,62 @@ public sealed class WorldGenerator {
         const int portalSectorSize = 320; // Разрушенный портал (раньше 512)
         int sectorX = (int)MathF.Floor((float)ox / portalSectorSize);
         int sectorZ = (int)MathF.Floor((float)oz / portalSectorSize);
-
-        var rng = new Random(_seed ^ (sectorX * 458921) ^ (sectorZ * 912837));
-        float pSeed = _mineshaftNoise.Get(sectorX * 43.19f + 555.55f, sectorZ * 43.19f + 777.77f);
-        if (pSeed < 0.70f) return; // ~30% секторов получают разрушенный портал
-
-        int portalWX = sectorX * portalSectorSize + rng.Next(24, portalSectorSize - 24);
-        int portalWZ = sectorZ * portalSectorSize + rng.Next(24, portalSectorSize - 24);
-
         int chunkMinX = ox, chunkMaxX = ox + Chunk.SizeX - 1;
         int chunkMinZ = oz, chunkMaxZ = oz + Chunk.SizeZ - 1;
-        if (portalWX + 15 < chunkMinX || portalWX - 15 > chunkMaxX) return;
-        if (portalWZ + 15 < chunkMinZ || portalWZ - 15 > chunkMaxZ) return;
 
-        int surface = SurfaceHeight(portalWX, portalWZ);
-        if (surface <= SeaLevel + 2) return;
+        for (int sx = sectorX - 1; sx <= sectorX + 1; sx++) {
+            for (int sz = sectorZ - 1; sz <= sectorZ + 1; sz++) {
+                var rng = new Random(_seed ^ (sx * 458921) ^ (sz * 912837));
+                float pSeed = _mineshaftNoise.Get(sx * 43.19f + 555.55f, sz * 43.19f + 777.77f);
+                if (pSeed < 0.70f) continue;
 
-        // Платформа адского камня 7x7 с маленькой лавой
-        for (int dx = -3; dx <= 3; dx++) {
-            for (int dz = -3; dz <= 3; dz++) {
-                int r2 = dx * dx + dz * dz;
-                if (r2 > 10) continue;
-                int pwx = portalWX + dx, pwz = portalWZ + dz;
-                int pwy = SurfaceHeight(pwx, pwz);
-                if (pwy >= SeaLevel) {
-                    SetVillageBlock(chunk, ox, oz, pwx, pwy, pwz, GameData.BNetherrack.Id);
-                    if (r2 == 0) {
-                        SetVillageBlock(chunk, ox, oz, pwx, pwy, pwz, GameData.BLava.Id);
+                int portalWX = sx * portalSectorSize + rng.Next(24, portalSectorSize - 24);
+                int portalWZ = sz * portalSectorSize + rng.Next(24, portalSectorSize - 24);
+
+                if (portalWX + 15 < chunkMinX || portalWX - 15 > chunkMaxX) continue;
+                if (portalWZ + 15 < chunkMinZ || portalWZ - 15 > chunkMaxZ) continue;
+
+                int surface = SurfaceHeight(portalWX, portalWZ);
+                if (surface <= SeaLevel + 2) continue;
+
+                // Платформа адского камня 7x7 с маленькой лавой
+                for (int dx = -3; dx <= 3; dx++) {
+                    for (int dz = -3; dz <= 3; dz++) {
+                        int r2 = dx * dx + dz * dz;
+                        if (r2 > 10) continue;
+                        int pwx = portalWX + dx, pwz = portalWZ + dz;
+                        int pwy = SurfaceHeight(pwx, pwz);
+                        if (pwy >= SeaLevel) {
+                            SetVillageBlock(chunk, ox, oz, pwx, pwy, pwz, GameData.BNetherrack.Id);
+                            if (r2 == 0) {
+                                SetVillageBlock(chunk, ox, oz, pwx, pwy, pwz, GameData.BLava.Id);
+                            }
+                        }
                     }
                 }
-            }
-        }
 
-        // Рама разрушенного портала 4x5
-        for (int px = -1; px <= 2; px++) {
-            for (int py = 1; py <= 5; py++) {
-                bool isFrame = px == -1 || px == 2 || py == 1 || py == 5;
-                if (isFrame) {
-                    int bwx = portalWX + px, bwz = portalWZ;
-                    int bwy = surface + py;
+                // Рама разрушенного портала 4x5
+                for (int px = -1; px <= 2; px++) {
+                    for (int py = 1; py <= 5; py++) {
+                        bool isFrame = px == -1 || px == 2 || py == 1 || py == 5;
+                        if (isFrame) {
+                            int bwx = portalWX + px, bwz = portalWZ;
+                            int bwy = surface + py;
 
-                    bool broken = (px == 2 && py == 4) || (px == -1 && py == 5 && rng.NextDouble() < 0.5);
-                    ushort b = broken ? (ushort)0 : (rng.NextDouble() < 0.25 ? GameData.BNetherrack.Id : GameData.BObsidian.Id);
-                    if (b != 0) {
-                        SetWorldBlock(chunk, ox, oy, oz, bwx, bwy, bwz, b);
+                            bool broken = (px == 2 && py == 4) || (px == -1 && py == 5 && rng.NextDouble() < 0.5);
+                            ushort b = broken ? (ushort)0 : (rng.NextDouble() < 0.25 ? GameData.BNetherrack.Id : GameData.BObsidian.Id);
+                            if (b != 0) {
+                                SetWorldBlock(chunk, ox, oy, oz, bwx, bwy, bwz, b);
+                            }
+                        }
                     }
                 }
+
+                // Сундук портала на адском камне
+                SetWorldBlock(chunk, ox, oy, oz, portalWX + 2, surface + 1, portalWZ + 1, GameData.BChest.Id);
+                SetWorldBlock(chunk, ox, oy, oz, portalWX - 2, surface + 1, portalWZ - 1, GameData.BGoldOre.Id);
             }
         }
-
-        // Сундук портала на адском камне
-        SetWorldBlock(chunk, ox, oy, oz, portalWX + 2, surface + 1, portalWZ + 1, GameData.BChest.Id);
-        SetWorldBlock(chunk, ox, oy, oz, portalWX - 2, surface + 1, portalWZ - 1, GameData.BGoldOre.Id);
     }
 
     private void SetVillageRoadBlock(Chunk chunk, int ox, int oz, int wx, int wz) {
@@ -1544,39 +1557,43 @@ public sealed class WorldGenerator {
         int sectorX = (int)MathF.Floor((float)ox / dungeonSector);
         int sectorZ = (int)MathF.Floor((float)oz / dungeonSector);
 
-        // Вероятность данжа в секторе (~30%)
-        float dSeed = _mineshaftNoise.Get(sectorX * 23.45f + 111f, sectorZ * 23.45f + 222f);
-        if (dSeed < 0.70f) return;
+        for (int sx = sectorX - 1; sx <= sectorX + 1; sx++) {
+            for (int sz = sectorZ - 1; sz <= sectorZ + 1; sz++) {
+                // Вероятность данжа в секторе (~30%)
+                float dSeed = _mineshaftNoise.Get(sx * 23.45f + 111f, sz * 23.45f + 222f);
+                if (dSeed < 0.70f) continue;
 
-        var rng = new Random(_seed ^ (sectorX * 928374) ^ (sectorZ * 123891));
-        int cx = sectorX * dungeonSector + rng.Next(64, dungeonSector - 64);
-        int cz = sectorZ * dungeonSector + rng.Next(64, dungeonSector - 64);
-        int cy = 14 + Math.Abs((sectorX * 37 + sectorZ * 19) % 18);
+                var rng = new Random(_seed ^ (sx * 928374) ^ (sz * 123891));
+                int cx = sx * dungeonSector + rng.Next(64, dungeonSector - 64);
+                int cz = sz * dungeonSector + rng.Next(64, dungeonSector - 64);
+                int cy = 14 + Math.Abs((sx * 37 + sz * 19) % 18);
 
-        if (Math.Abs(ox + Chunk.SizeX / 2 - cx) > 28 || Math.Abs(oz + Chunk.SizeZ / 2 - cz) > 28) return;
+                if (Math.Abs(ox + Chunk.SizeX / 2 - cx) > 28 || Math.Abs(oz + Chunk.SizeZ / 2 - cz) > 28) continue;
 
-        // Комната 7x7x5 с мшистым булыжником и сквозными арками
-        for (int dx = -3; dx <= 3; dx++) {
-            for (int dz = -3; dz <= 3; dz++) {
-                for (int dy = 0; dy <= 4; dy++) {
-                    int wx = cx + dx, wy = cy + dy, wz = cz + dz;
-                    bool isWall = dx == -3 || dx == 3 || dz == -3 || dz == 3 || dy == 0 || dy == 4;
-                    if (isWall) {
-                        bool isDoorway = dy >= 1 && dy <= 2 && ((Math.Abs(dx) == 3 && Math.Abs(dz) <= 1) || (Math.Abs(dz) == 3 && Math.Abs(dx) <= 1));
-                        if (isDoorway) {
-                            SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, 0);
-                        } else {
-                            ushort wallBlock = ((wx * 7 + wz * 13 + wy * 3) % 3 == 0) ? GameData.BMossyCobblestone.Id : GameData.BCobblestone.Id;
-                            SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, wallBlock);
+                // Комната 7x7x5 с мшистым булыжником и сквозными арками
+                for (int dx = -3; dx <= 3; dx++) {
+                    for (int dz = -3; dz <= 3; dz++) {
+                        for (int dy = 0; dy <= 4; dy++) {
+                            int wx = cx + dx, wy = cy + dy, wz = cz + dz;
+                            bool isWall = dx == -3 || dx == 3 || dz == -3 || dz == 3 || dy == 0 || dy == 4;
+                            if (isWall) {
+                                bool isDoorway = dy >= 1 && dy <= 2 && ((Math.Abs(dx) == 3 && Math.Abs(dz) <= 1) || (Math.Abs(dz) == 3 && Math.Abs(dx) <= 1));
+                                if (isDoorway) {
+                                    SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, 0);
+                                } else {
+                                    ushort wallBlock = ((wx * 7 + wz * 13 + wy * 3) % 3 == 0) ? GameData.BMossyCobblestone.Id : GameData.BCobblestone.Id;
+                                    SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, wallBlock);
+                                }
+                            } else {
+                                ushort inside = 0;
+                                if (dx == 0 && dz == 0 && dy == 1) {
+                                    inside = GameData.BMobSpawner.Id;
+                                } else if ((dx == -2 && dz == 0 && dy == 1) || (dx == 2 && dz == 0 && dy == 1)) {
+                                    inside = GameData.BChest.Id;
+                                }
+                                SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, inside);
+                            }
                         }
-                    } else {
-                        ushort inside = 0;
-                        if (dx == 0 && dz == 0 && dy == 1) {
-                            inside = GameData.BMobSpawner.Id;
-                        } else if ((dx == -2 && dz == 0 && dy == 1) || (dx == 2 && dz == 0 && dy == 1)) {
-                            inside = GameData.BChest.Id;
-                        }
-                        SetWorldBlock(chunk, ox, oy, oz, wx, wy, wz, inside);
                     }
                 }
             }

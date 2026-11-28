@@ -117,9 +117,8 @@ public static class Program {
         Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint | ConfigFlags.VSyncHint | ConfigFlags.ResizableWindow);
         Raylib.InitWindow(launchWidth, launchHeight, "Voxalith — выживание");
         try {
-            string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "icon.png");
-            if (!File.Exists(iconPath)) iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "assets", "icon.png");
-            if (File.Exists(iconPath)) {
+            string? iconPath = AssetLocator.FindAssetFile("icon.png");
+            if (iconPath != null) {
                 var iconImg = Raylib.LoadImage(iconPath);
                 if (iconImg.Width > 0) {
                     Raylib.SetWindowIcon(iconImg);
@@ -499,6 +498,7 @@ public static class Program {
                             // Истинный финал: титры просмотрены — сохраняем и выходим в главное меню.
                             SoundSystem.StopTotem();
                             SoundSystem.StopDisc();
+                            Screens.ReturnHeld(session);
                             session.SaveTo(SaveSystem.SavePath);
                             session.Ui = UiState.Playing;
                             renderer?.Dispose();
@@ -666,6 +666,7 @@ public static class Program {
                     } else if (deathAction == Screens.DeathAction.MainMenu) {
                         SoundSystem.StopTotem();
                         SoundSystem.StopDisc();
+                        Screens.ReturnHeld(session);
                         session.SaveTo(SaveSystem.SavePath);
                         session.Ui = UiState.Playing;
                         renderer?.Dispose();
@@ -728,6 +729,7 @@ public static class Program {
         // Сохранение при закрытии окна/выходе: текущее измерение (в т.ч. Энд) и
         // позиция игрока не теряются, даже если закрыть окно крестиком без паузы.
         if (session != null && session.World != null) {
+            Screens.ReturnHeld(session);
             bool wasClient = GameClient.Active != null;
             if (wasClient) {
                 try { GameClient.Disconnect(session.Player); } catch { }

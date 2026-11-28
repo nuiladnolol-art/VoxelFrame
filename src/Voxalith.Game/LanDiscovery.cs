@@ -17,9 +17,16 @@ public sealed class LanDiscovery : IDisposable {
     private UdpClient? _listener;
     private CancellationTokenSource? _broadcasterCts;
     private CancellationTokenSource? _listenerCts;
+    private Task? _broadcasterTask;
+    private Task? _listenerTask;
     private readonly ConcurrentDictionary<string, DiscoveredServer> _servers = new();
 
-    public IReadOnlyCollection<DiscoveredServer> FoundServers => _servers.Values.ToArray();
+    public IReadOnlyCollection<DiscoveredServer> FoundServers {
+        get {
+            CleanupOldServers();
+            return _servers.Values.ToArray();
+        }
+    }
 
     private static List<IPAddress> GetBroadcastAddresses() {
         var list = new List<IPAddress> { IPAddress.Broadcast };
@@ -50,7 +57,7 @@ public sealed class LanDiscovery : IDisposable {
         _broadcasterCts = new CancellationTokenSource();
         var token = _broadcasterCts.Token;
 
-        Task.Run(async () => {
+        _broadcasterTask = Task.Run(async () => {
             while (!token.IsCancellationRequested && _broadcaster != null) {
                 try {
                     int count = getPlayerCount();
@@ -94,7 +101,7 @@ public sealed class LanDiscovery : IDisposable {
         _listenerCts = new CancellationTokenSource();
         var token = _listenerCts.Token;
 
-        Task.Run(async () => {
+        _listenerTask = Task.Run(async () => {
             while (!token.IsCancellationRequested && _listener != null) {
                 try {
                     var result = await _listener.ReceiveAsync(token);
@@ -130,8 +137,11 @@ public sealed class LanDiscovery : IDisposable {
         try {
             _broadcasterCts?.Cancel();
             _broadcaster?.Close();
+            _broadcasterTask?.Wait(100);
         } catch { }
+        _broadcaster?.Dispose();
         _broadcaster = null;
+        _broadcasterTask = null;
         _broadcasterCts?.Dispose();
         _broadcasterCts = null;
     }
@@ -140,8 +150,11 @@ public sealed class LanDiscovery : IDisposable {
         try {
             _listenerCts?.Cancel();
             _listener?.Close();
+            _listenerTask?.Wait(100);
         } catch { }
+        _listener?.Dispose();
         _listener = null;
+        _listenerTask = null;
         _listenerCts?.Dispose();
         _listenerCts = null;
     }

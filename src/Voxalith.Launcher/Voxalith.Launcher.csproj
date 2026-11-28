@@ -1,8 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <ItemGroup>
-    <ProjectReference Include="..\Voxalith.Game\Voxalith.Game.csproj" />
-    <ProjectReference Include="..\Voxalith.Core\Voxalith.Core.csproj" />
-  </ItemGroup>
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -15,4 +11,7 @@
     <ApplicationIcon>launcher.ico</ApplicationIcon>
     <Version>1.1.0</Version>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\src\Voxalith.Shared\PackageSecurity.cs" Link="PackageSecurity.cs" />
+  </ItemGroup>
 </Project>

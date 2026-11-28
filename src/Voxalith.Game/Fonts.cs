@@ -18,34 +18,8 @@ public static class Fonts {
         PixelFont.Load(); // Гарантированный fallback
 
         var codepoints = BuildCodepoints();
-        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-        string cwd = Directory.GetCurrentDirectory();
-
-        // 1. Собираем корни для поиска шрифта
-        var searchRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
-            baseDir,
-            cwd
-        };
-        try {
-            if (!string.IsNullOrEmpty(AppContext.BaseDirectory))
-                searchRoots.Add(AppContext.BaseDirectory);
-        } catch { }
-
-        // Поднимаемся вверх на 5 уровней для поиска в корне репозитория при отладке
-        var snapshot = searchRoots.ToList();
-        foreach (var root in snapshot) {
-            try {
-                var dir = new DirectoryInfo(root);
-                for (int i = 0; i < 5 && dir?.Parent != null; i++) {
-                    dir = dir.Parent;
-                    searchRoots.Add(dir.FullName);
-                }
-            } catch { }
-        }
-
-        // 2. Приоритетный поиск: только аутентичные пиксельные шрифты игры
         var candidatePaths = new List<string>();
-        foreach (var root in searchRoots) {
+        foreach (var root in AssetLocator.EnumerateSearchRoots(5)) {
             candidatePaths.Add(Path.Combine(root, "assets", "fonts", "main.ttf"));
             candidatePaths.Add(Path.Combine(root, "assets", "fonts", "pixel.ttf"));
             candidatePaths.Add(Path.Combine(root, "assets", "fonts", "minecraft.ttf"));
@@ -66,6 +40,8 @@ public static class Fonts {
                     try { Console.WriteLine($"[Fonts] Пиксельный шрифт успешно загружен: {path}"); } catch { }
                     break;
                 }
+                Raylib.UnloadFont(_font);
+                _font = default;
             } catch {
                 // Try next font
             }

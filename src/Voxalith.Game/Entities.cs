@@ -74,11 +74,7 @@ public static class Collision {
         float feetY = pos.Y - half.Y;
         var min = new Vector3(pos.X - half.X, feetY - 0.5f, pos.Z - half.Z);
         var max = new Vector3(pos.X + half.X, feetY + 0.05f, pos.Z + half.Z);
-        if (IntersectsSolid(world, min, max, ignoreDoors)) return true;
-        // Запасная проверка: если передан pos как стопы (pos.Y вместо центра)
-        var minAlt = new Vector3(pos.X - half.X, pos.Y - 0.5f, pos.Z - half.Z);
-        var maxAlt = new Vector3(pos.X + half.X, pos.Y + 0.05f, pos.Z + half.Z);
-        return IntersectsSolid(world, minAlt, maxAlt, ignoreDoors);
+        return IntersectsSolid(world, min, max, ignoreDoors);
     }
 
     /// <summary>Сдвигает тело с учётом коллизий; возвращает признак «стоит на земле».</summary>

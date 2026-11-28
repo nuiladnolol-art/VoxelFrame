@@ -140,28 +140,21 @@ public static class SoundSystem {
                 _audioReady = true;
             }
         } catch {
+            UnloadAllResources();
             _audioReady = false;
         }
     }
 
     private static void DiscoverMusicFiles() {
         _musicFiles.Clear();
-        string[] probeStarts = { Directory.GetCurrentDirectory(), AppDomain.CurrentDomain.BaseDirectory };
-        foreach (var start in probeStarts) {
-            var dir = new DirectoryInfo(start);
-            while (dir != null) {
-                string musicDir = Path.Combine(dir.FullName, "assets", "music");
-                if (Directory.Exists(musicDir)) {
-                    foreach (var f in Directory.GetFiles(musicDir)) {
-                        string name = Path.GetFileName(f).ToLowerInvariant();
-                        if (name.StartsWith("disc_") || name.StartsWith("record_")) continue; // Пластинки исключаем из обычной фоновой музыки
-                        string ext = Path.GetExtension(f).ToLowerInvariant();
-                        if (ext is ".mp3" or ".ogg" or ".wav" or ".flac") {
-                            if (!_musicFiles.Contains(f)) _musicFiles.Add(f);
-                        }
-                    }
+        foreach (var musicDir in AssetLocator.EnumerateAssetSubdirs("music")) {
+            foreach (var f in Directory.GetFiles(musicDir)) {
+                string name = Path.GetFileName(f).ToLowerInvariant();
+                if (name.StartsWith("disc_") || name.StartsWith("record_")) continue; // Пластинки исключаем из обычной фоновой музыки
+                string ext = Path.GetExtension(f).ToLowerInvariant();
+                if (ext is ".mp3" or ".ogg" or ".wav" or ".flac") {
+                    if (!_musicFiles.Contains(f)) _musicFiles.Add(f);
                 }
-                dir = dir.Parent;
             }
         }
     }
@@ -182,20 +175,8 @@ public static class SoundSystem {
         return Math.Clamp(master * catFactor, 0f, 1f);
     }
 
-    private static string? FindSoundFile(string fileName) {
-        string[] probeStarts = { Directory.GetCurrentDirectory(), AppDomain.CurrentDomain.BaseDirectory };
-        foreach (var start in probeStarts) {
-            var dir = new DirectoryInfo(start);
-            while (dir != null) {
-                string candidate = Path.Combine(dir.FullName, "assets", "sounds", fileName);
-                if (File.Exists(candidate)) return candidate;
-                candidate = Path.Combine(dir.FullName, "assets", "music", fileName);
-                if (File.Exists(candidate)) return candidate;
-                dir = dir.Parent;
-            }
-        }
-        return null;
-    }
+    private static string? FindSoundFile(string fileName) =>
+        AssetLocator.FindAssetFile(Path.Combine("sounds", fileName), Path.Combine("music", fileName));
 
     public static System.Numerics.Vector3 ListenerPosition;
     public static System.Numerics.Vector3 ListenerForward = new(0f, 0f, 1f);
@@ -372,6 +353,8 @@ public static class SoundSystem {
                     Raylib.PlayMusicStream(_discMusic);
                     return true;
                 }
+                if (Raylib.IsMusicValid(_discMusic)) Raylib.UnloadMusicStream(_discMusic);
+                _discMusic = default;
             }
         } catch {
             _discLoaded = false;
@@ -486,6 +469,9 @@ public static class SoundSystem {
                     Raylib.SetMusicVolume(_currentMusic, GetCategoryVolume(SoundCategory.Music));
                     Raylib.PlayMusicStream(_currentMusic);
                     _musicPlaying = true;
+                } else {
+                    if (Raylib.IsMusicValid(_currentMusic)) Raylib.UnloadMusicStream(_currentMusic);
+                    _currentMusic = default;
                 }
             }
         } catch {
@@ -643,110 +629,58 @@ public static class SoundSystem {
         bw.Write(subchunk2Size);
     }
 
-    /// <summary>
-    /// Конвертирует WAV в формате IEEE Float 32-bit в стандартный PCM 16-bit,
-    /// который корректно поддерживается Raylib.
-    /// </summary>
-    private static byte[]? ConvertFloat32ToPcm16Wav(byte[] input, ushort channels, uint sampleRate) {
-        try {
-            // Найти data chunk
-            int dataOffset = -1, dataSize = -1;
-            int pos = 12;
-            while (pos + 8 <= input.Length) {
-                string chunkId = System.Text.Encoding.ASCII.GetString(input, pos, 4);
-                int chunkSize = System.BitConverter.ToInt32(input, pos + 4);
-                if (chunkId == "data") {
-                    dataOffset = pos + 8;
-                    dataSize = chunkSize;
-                    break;
-                }
-                pos += 8 + chunkSize;
-            }
-            if (dataOffset < 0 || dataSize <= 0) return null;
+    private static void UnloadIfValid(ref Sound snd) {
+        if (Raylib.IsSoundValid(snd)) Raylib.UnloadSound(snd);
+        snd = default;
+    }
 
-            int numSamples = dataSize / (channels * 4); // Float32 = 4 bytes per sample per channel
-            // Downmix to mono если 2 канала, иначе оставляем как есть
-            int outChannels = 1;
-            int outSampleCount = numSamples;
+    private static void UnloadAllResources() {
+        UnloadIfValid(ref _stepGrass);
+        UnloadIfValid(ref _stepStone);
+        UnloadIfValid(ref _stepWood);
+        UnloadIfValid(ref _stepSand);
+        UnloadIfValid(ref _stepGravel);
+        UnloadIfValid(ref _stepWater);
 
-            using var ms = new MemoryStream();
-            using var bw = new BinaryWriter(ms);
-            short bitsOut = 16;
-            int byteRate = (int)(sampleRate * outChannels * bitsOut / 8);
-            int blockAlign = outChannels * bitsOut / 8;
-            int subchunk2Size = outSampleCount * blockAlign;
-            bw.Write("RIFF"u8);
-            bw.Write(36 + subchunk2Size);
-            bw.Write("WAVE"u8);
-            bw.Write("fmt "u8);
-            bw.Write(16);
-            bw.Write((short)1); // PCM
-            bw.Write((short)outChannels);
-            bw.Write((int)sampleRate);
-            bw.Write(byteRate);
-            bw.Write((short)blockAlign);
-            bw.Write(bitsOut);
-            bw.Write("data"u8);
-            bw.Write(subchunk2Size);
+        UnloadIfValid(ref _digGrass);
+        UnloadIfValid(ref _digStone);
+        UnloadIfValid(ref _digWood);
+        UnloadIfValid(ref _digSand);
+        UnloadIfValid(ref _placeSound);
+        UnloadIfValid(ref _breakToolSound);
 
-            for (int i = 0; i < numSamples; i++) {
-                float sample = 0f;
-                for (int c = 0; c < channels; c++) {
-                    float ch = System.BitConverter.ToSingle(input, dataOffset + (i * channels + c) * 4);
-                    sample += ch;
-                }
-                sample /= channels; // Смешиваем каналы в моно
-                short pcm = (short)Math.Clamp((int)(sample * 32767f), -32768, 32767);
-                bw.Write(pcm);
-            }
-            return ms.ToArray();
-        } catch {
-            return null;
+        UnloadIfValid(ref _hitSound);
+        UnloadIfValid(ref _critSound);
+        UnloadIfValid(ref _bowShootSound);
+        UnloadIfValid(ref _arrowHitSound);
+        UnloadIfValid(ref _explosionSound);
+        UnloadIfValid(ref _shieldBlockSound);
+        UnloadIfValid(ref _creeperHissSound);
+
+        UnloadIfValid(ref _eatSound);
+        UnloadIfValid(ref _splashSound);
+        UnloadIfValid(ref _popSound);
+        UnloadIfValid(ref _chestSound);
+        UnloadIfValid(ref _doorOpenSound);
+        UnloadIfValid(ref _doorCloseSound);
+        UnloadIfValid(ref _dupePoliceSound);
+        UnloadIfValid(ref _totemSound);
+        UnloadIfValid(ref _thunderSound);
+
+        if (_musicLoaded) {
+            Raylib.StopMusicStream(_currentMusic);
+            if (Raylib.IsMusicValid(_currentMusic)) Raylib.UnloadMusicStream(_currentMusic);
+            _currentMusic = default;
+            _musicLoaded = false;
+            _musicPlaying = false;
         }
+
+        StopDisc();
     }
 
     public static void Shutdown() {
         if (_audioReady) {
-            Raylib.UnloadSound(_stepGrass);
-            Raylib.UnloadSound(_stepStone);
-            Raylib.UnloadSound(_stepWood);
-            Raylib.UnloadSound(_stepSand);
-            Raylib.UnloadSound(_stepGravel);
-            Raylib.UnloadSound(_stepWater);
-
-            Raylib.UnloadSound(_digGrass);
-            Raylib.UnloadSound(_digStone);
-            Raylib.UnloadSound(_digWood);
-            Raylib.UnloadSound(_digSand);
-            Raylib.UnloadSound(_placeSound);
-            Raylib.UnloadSound(_breakToolSound);
-
-            Raylib.UnloadSound(_hitSound);
-            Raylib.UnloadSound(_critSound);
-            Raylib.UnloadSound(_bowShootSound);
-            Raylib.UnloadSound(_arrowHitSound);
-            Raylib.UnloadSound(_explosionSound);
-            Raylib.UnloadSound(_shieldBlockSound);
-            Raylib.UnloadSound(_creeperHissSound);
-
-            Raylib.UnloadSound(_eatSound);
-            Raylib.UnloadSound(_splashSound);
-            Raylib.UnloadSound(_popSound);
-            Raylib.UnloadSound(_chestSound);
-            Raylib.UnloadSound(_doorOpenSound);
-            Raylib.UnloadSound(_doorCloseSound);
-            Raylib.UnloadSound(_dupePoliceSound);
-            Raylib.UnloadSound(_totemSound);
-            Raylib.UnloadSound(_thunderSound);
-
-            if (_musicLoaded) {
-                Raylib.StopMusicStream(_currentMusic);
-                Raylib.UnloadMusicStream(_currentMusic);
-                _musicLoaded = false;
-            }
-
-            StopDisc();
-
+            UnloadAllResources();
             Raylib.CloseAudioDevice();
             _audioReady = false;
         }

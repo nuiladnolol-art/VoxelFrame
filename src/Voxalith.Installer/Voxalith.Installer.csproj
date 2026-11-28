@@ -13,5 +13,6 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="payload.zip" Condition="Exists('payload.zip')" />
+    <Compile Include="..\..\src\Voxalith.Shared\PackageSecurity.cs" Link="PackageSecurity.cs" />
   </ItemGroup>
 </Project>

@@ -150,7 +150,7 @@ public sealed class GameSession : IDisposable {
 
     public void RespawnPlayer() {
         if (World.Dimension != Dimension.Overworld) {
-            World = OverworldWorld ?? new GameWorld(MasterSeed) { Dimension = Dimension.Overworld };
+            World = OverworldWorld ?? CreateDimensionWorld(MasterSeed, Dimension.Overworld);
             Player.Dimension = Dimension.Overworld;
         }
         Player.Health = Player.MaxHealth;
@@ -169,6 +169,7 @@ public sealed class GameSession : IDisposable {
         World.EnsureLoadedAroundSync(new Vector3(spawnBlock.X, spawnBlock.Y, spawnBlock.Z), 2);
         Player.Position = World.GetSafeRespawnPosition(spawnBlock);
         Ui = UiState.Playing;
+        GameClient.Active?.SendAction(PlayerActionType.Respawn, 0);
         AddMessage("Вы возродились на точке спавна");
     }
 
@@ -257,6 +258,20 @@ public sealed class GameSession : IDisposable {
         return true;
     }
 
+    public IWorldNetworkSink? NetworkSink { get; private set; }
+
+    public void BindNetworkSink(IWorldNetworkSink? sink) {
+        NetworkSink = sink;
+        if (World != null) World.NetworkSink = sink;
+        if (OverworldWorld != null) OverworldWorld.NetworkSink = sink;
+        if (NetherWorld != null) NetherWorld.NetworkSink = sink;
+        if (EndWorld != null) EndWorld.NetworkSink = sink;
+        if (VoidWorld != null) VoidWorld.NetworkSink = sink;
+    }
+
+    private GameWorld CreateDimensionWorld(int seed, Dimension dim) =>
+        new GameWorld(seed) { Dimension = dim, NetworkSink = NetworkSink };
+
     // ── Тик ──────────────────────────────────────────────────────────────────
 
     public void SwitchDimension(Dimension targetDim) {
@@ -272,7 +287,7 @@ public sealed class GameSession : IDisposable {
 
         if (targetDim == Dimension.Nether) {
             if (NetherWorld == null) {
-                NetherWorld = new GameWorld(MasterSeed ^ 0x1337BEEF) { Dimension = Dimension.Nether };
+                NetherWorld = CreateDimensionWorld(MasterSeed ^ 0x1337BEEF, Dimension.Nether);
             }
             World = NetherWorld;
             int targetX = (int)MathF.Floor(Player.Position.X / 8f);
@@ -297,7 +312,7 @@ public sealed class GameSession : IDisposable {
             AddMessage("Вы вошли в Инфернум!");
         } else if (targetDim == Dimension.End) {
             if (EndWorld == null) {
-                EndWorld = new GameWorld(MasterSeed ^ 0x2E1D0FF) { Dimension = Dimension.End };
+                EndWorld = CreateDimensionWorld(MasterSeed ^ 0x2E1D0FF, Dimension.End);
             }
             World = EndWorld;
             // Парящая платформа у края главного острова (воздушная часть),
@@ -320,7 +335,7 @@ public sealed class GameSession : IDisposable {
             bool endBossDefeated = fromDim == Dimension.End && World.EndBossDefeated;
             // Истинный финал: выход из Бездны после победы над Истинным Слизнем — титры и главное меню.
             bool trueVictory = fromDim == Dimension.Void && World.TrueVoidBossDefeated;
-            World = OverworldWorld ?? new GameWorld(MasterSeed) { Dimension = Dimension.Overworld };
+            World = OverworldWorld ?? CreateDimensionWorld(MasterSeed, Dimension.Overworld);
 
             if (trueVictory) {
                 // Портал Триумфа уводит домой: финальные титры, затем главное меню.
@@ -380,15 +395,15 @@ public sealed class GameSession : IDisposable {
 
     public GameWorld GetWorld(Dimension dim) {
         if (dim == Dimension.Nether) {
-            if (NetherWorld == null) NetherWorld = new GameWorld(MasterSeed ^ 0x1337BEEF) { Dimension = Dimension.Nether };
+            if (NetherWorld == null) NetherWorld = CreateDimensionWorld(MasterSeed ^ 0x1337BEEF, Dimension.Nether);
             return NetherWorld;
         }
         if (dim == Dimension.End) {
-            if (EndWorld == null) EndWorld = new GameWorld(MasterSeed ^ 0x2E1D0FF) { Dimension = Dimension.End };
+            if (EndWorld == null) EndWorld = CreateDimensionWorld(MasterSeed ^ 0x2E1D0FF, Dimension.End);
             return EndWorld;
         }
         if (dim == Dimension.Void) {
-            if (VoidWorld == null) VoidWorld = new GameWorld(MasterSeed ^ 0x4E19D2B) { Dimension = Dimension.Void };
+            if (VoidWorld == null) VoidWorld = CreateDimensionWorld(MasterSeed ^ 0x4E19D2B, Dimension.Void);
             return VoidWorld;
         }
         if (OverworldWorld == null && World.Dimension == Dimension.Overworld) return World;
@@ -401,7 +416,7 @@ public sealed class GameSession : IDisposable {
     /// <summary>Переход в Бездну (тайное измерение под Эндом) при выживании в пустоте.</summary>
     public void EnterVoid() {
         if (VoidWorld == null) {
-            VoidWorld = new GameWorld(World.Seed ^ 0x4E19D2B) { Dimension = Dimension.Void };
+            VoidWorld = CreateDimensionWorld(World.Seed ^ 0x4E19D2B, Dimension.Void);
         }
         World = VoidWorld;
         Player.Dimension = Dimension.Void;
@@ -418,7 +433,7 @@ public sealed class GameSession : IDisposable {
 
     /// <summary>Возврат из Бездны в Энд.</summary>
     public void ReturnFromVoid() {
-        World = EndWorld ?? new GameWorld(World.Seed) { Dimension = Dimension.End };
+        World = EndWorld ?? CreateDimensionWorld(World.Seed, Dimension.End);
         var islandTop = World.Generator.EndSurfaceHeight(0, 0);
         if (islandTop <= 0) islandTop = 60;
         World.EnsureLoadedAroundSync(new Vector3(0.5f, islandTop + 2, 0.5f), 2);

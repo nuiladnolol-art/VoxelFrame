@@ -206,11 +206,14 @@ public sealed class EndSlime {
         SpitCooldown -= dt;
         if (phase >= 2 && SpitCooldown <= 0f && dist > 4f && dist < 34f) {
             SpitCooldown = phase == 3 ? 1.8f : 2.8f;
-            var aim = Vector3.Normalize(toPlayer + new Vector3(0f, 0.8f, 0f));
-            world.Arrows.Add(new ArrowProjectile(Position + new Vector3(0f, HalfSizeY, 0f), aim * 15f) {
-                IsSlimeSpit = true, Damage = 4.0f   // нерф: было 5.95
-            });
-            SoundSystem.PlayBowShoot();
+            var aimDiff = toPlayer + new Vector3(0f, 0.8f, 0f);
+            if (aimDiff.LengthSquared() > 1e-6f) {
+                var aim = Vector3.Normalize(aimDiff);
+                world.Arrows.Add(new ArrowProjectile(Position + new Vector3(0f, HalfSizeY, 0f), aim * 15f) {
+                    IsSlimeSpit = true, Damage = 4.0f   // нерф: было 5.95
+                });
+                SoundSystem.PlayBowShoot();
+            }
         }
 
         // Фаза 3: телеграф ударной волны — красное кольцо на земле за 0.6с до удара

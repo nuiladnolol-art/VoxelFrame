@@ -25,8 +25,17 @@ public static class Ui {
     private static float ResolveScale() {
         int screenH = Raylib.GetScreenHeight();
         if (screenH <= 0) return 1f;
-        if (SaveSystem.UiScaleMode == 0) return screenH / ReferenceHeight;
-        return Math.Max(0.5f, SaveSystem.UiScaleMode / 100f);
+        float scale = SaveSystem.UiScaleMode == 0
+            ? screenH / ReferenceHeight
+            : Math.Max(0.5f, SaveSystem.UiScaleMode / 100f);
+        // Не даём ручному масштабу сжимать виртуальный холст меньше 1060x580,
+        // иначе широкие панели (инвентарь 1020px, верстак 920x512) вылезут за экран.
+        int screenW = Raylib.GetScreenWidth();
+        if (screenW > 0) {
+            float maxFit = MathF.Min(screenW / 1060f, screenH / 580f);
+            if (maxFit > 0.1f) scale = MathF.Min(scale, maxFit);
+        }
+        return scale;
     }
 
     /// <summary>Начать виртуальный холст. Всё до End() рисуется в координатах UI.</summary>

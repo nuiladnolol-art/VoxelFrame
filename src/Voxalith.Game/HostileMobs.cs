@@ -341,10 +341,12 @@ public sealed class HostileMob {
                     AttackCooldown = 2.0f;
                     var toTarget = targetPos - eyePos;
                     float toDist = toTarget.Length();
-                    var arrowDir = Vector3.Normalize(toTarget);
-                    var arrowVel = arrowDir * 18f + new Vector3(0f, MathF.Min(2.5f, toDist * 0.12f), 0f);
-                    world.Arrows.Add(new ArrowProjectile(eyePos + arrowDir * 0.7f, arrowVel, this));
-                    SoundSystem.PlayBowShoot();
+                    if (toDist > 0.001f) {
+                        var arrowDir = toTarget / toDist;
+                        var arrowVel = arrowDir * 18f + new Vector3(0f, MathF.Min(2.5f, toDist * 0.12f), 0f);
+                        world.Arrows.Add(new ArrowProjectile(eyePos + arrowDir * 0.7f, arrowVel, this));
+                        SoundSystem.PlayBowShoot();
+                    }
                 }
             }
 
@@ -355,10 +357,12 @@ public sealed class HostileMob {
                 if (HasLineOfSight(world, eyePos, targetPos)) {
                     AttackCooldown = 2.5f;
                     var toTarget = targetPos - eyePos;
-                    var shotDir = Vector3.Normalize(toTarget);
-                    var shotVel = shotDir * 20f;
-                    world.Arrows.Add(new ArrowProjectile(eyePos + shotDir * 0.6f, shotVel, this) { Damage = 5f, IsFire = true });
-                    SoundSystem.PlayBowShoot();
+                    if (toTarget.LengthSquared() > 1e-6f) {
+                        var shotDir = Vector3.Normalize(toTarget);
+                        var shotVel = shotDir * 20f;
+                        world.Arrows.Add(new ArrowProjectile(eyePos + shotDir * 0.6f, shotVel, this) { Damage = 5f, IsFire = true });
+                        SoundSystem.PlayBowShoot();
+                    }
                 }
             }
 
@@ -375,9 +379,12 @@ public sealed class HostileMob {
                     var targetPos = player.Position + new Vector3(0f, Player.EyeHeight * 0.5f, 0f);
                     if (HasLineOfSight(world, eyePos, targetPos)) {
                         AttackCooldown = 1.8f;
-                        var shotDir = Vector3.Normalize(targetPos - eyePos);
-                        world.Arrows.Add(new ArrowProjectile(eyePos + shotDir * 0.6f, shotDir * 22f, this) { Damage = 7f, IsFire = true });
-                        SoundSystem.PlayBowShoot();
+                        var toTarget = targetPos - eyePos;
+                        if (toTarget.LengthSquared() > 1e-6f) {
+                            var shotDir = Vector3.Normalize(toTarget);
+                            world.Arrows.Add(new ArrowProjectile(eyePos + shotDir * 0.6f, shotDir * 22f, this) { Damage = 7f, IsFire = true });
+                            SoundSystem.PlayBowShoot();
+                        }
                     }
                 }
             }
@@ -410,9 +417,12 @@ public sealed class HostileMob {
                     var targetPos = player.Position + new Vector3(0f, Player.EyeHeight * 0.5f, 0f);
                     if (HasLineOfSight(world, eyePos, targetPos)) {
                         AttackCooldown = 1.6f;
-                        var shotDir = Vector3.Normalize(targetPos - eyePos);
-                        world.Arrows.Add(new ArrowProjectile(eyePos + shotDir * 0.6f, shotDir * 19f, this) { Damage = 6f });
-                        SoundSystem.PlayBowShoot();
+                        var toTarget = targetPos - eyePos;
+                        if (toTarget.LengthSquared() > 1e-6f) {
+                            var shotDir = Vector3.Normalize(toTarget);
+                            world.Arrows.Add(new ArrowProjectile(eyePos + shotDir * 0.6f, shotDir * 19f, this) { Damage = 6f });
+                            SoundSystem.PlayBowShoot();
+                        }
                     }
                 }
             }
@@ -454,7 +464,7 @@ public sealed class HostileMob {
         Velocity.Z = moveDir.Z * speed;
 
         // В какой жидкости находится моб (ноги)
-        var mobFeetCell = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y), (int)MathF.Floor(Position.Z));
+        var mobFeetCell = new Vec3i((int)MathF.Floor(Position.X), (int)MathF.Floor(Position.Y - HalfSizeY + 0.05f), (int)MathF.Floor(Position.Z));
         var mobFeetVox = world.GetVoxel(mobFeetCell);
         bool mobInWater = mobFeetVox.TypeId == GameData.BWater.Id;
         bool mobInLava = mobFeetVox.TypeId == GameData.BLava.Id;
@@ -674,22 +684,27 @@ public sealed class HostileMob {
         }
 
         // Уничтожение блоков в радиусе 3 с дропом ~30%
-        for (int dx = -3; dx <= 3; dx++) {
-            for (int dy = -3; dy <= 3; dy++) {
-                for (int dz = -3; dz <= 3; dz++) {
-                    if (dx * dx + dy * dy + dz * dz <= 9) {
-                        var target = center + new Vec3i(dx, dy, dz);
-                        var vox = world.GetVoxel(target);
-                        if (vox.TypeId != 0 && vox.TypeId != GameData.BBedrock.Id && vox.TypeId != GameData.BObsidian.Id) {
-                            var b = GameData.GetBlock(vox.TypeId);
-                            world.RemoveBlock(target);
-                            if (b.DropItemId != 0 && _random.NextDouble() < 0.30) {
-                                world.SpawnPickup(b.DropItemId, 1, target);
+        world.BeginBulkEdit();
+        try {
+            for (int dx = -3; dx <= 3; dx++) {
+                for (int dy = -3; dy <= 3; dy++) {
+                    for (int dz = -3; dz <= 3; dz++) {
+                        if (dx * dx + dy * dy + dz * dz <= 9) {
+                            var target = center + new Vec3i(dx, dy, dz);
+                            var vox = world.GetVoxel(target);
+                            if (vox.TypeId != 0 && vox.TypeId != GameData.BBedrock.Id && vox.TypeId != GameData.BObsidian.Id) {
+                                var b = GameData.GetBlock(vox.TypeId);
+                                world.RemoveBlock(target);
+                                if (b.DropItemId != 0 && _random.NextDouble() < 0.30) {
+                                    world.SpawnPickup(b.DropItemId, 1, target);
+                                }
                             }
                         }
                     }
                 }
             }
+        } finally {
+            world.EndBulkEdit();
         }
     }
 

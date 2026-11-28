@@ -23,7 +23,14 @@ public static partial class Screens {
         "Инвентарь"
     };
 
+    private static int _cachedCreativeTab = -1;
+    private static string _cachedCreativeFilter = "";
+    private static List<ItemDefinition> _cachedCreativeItems = new();
+
     private static List<ItemDefinition> GetCreativeItems(int tab, string filter) {
+        if (_cachedCreativeTab == tab && string.Equals(_cachedCreativeFilter, filter, StringComparison.Ordinal)) {
+            return _cachedCreativeItems;
+        }
         IEnumerable<ItemDefinition> items = tab switch {
             0 => GameData.Items.Values.Where(item => GameData.TryGetBlockByItem(item.Id, out var b) && b != null &&
                                                     b.Id != GameData.BTorch.Id && b.Id != GameData.BWorkbench.Id &&
@@ -57,7 +64,10 @@ public static partial class Screens {
             items = items.Where(i => i.Name.Contains(filter, StringComparison.OrdinalIgnoreCase));
         }
 
-        return items.OrderBy(i => i.Id).ToList();
+        _cachedCreativeItems = items.OrderBy(i => i.Id).ToList();
+        _cachedCreativeTab = tab;
+        _cachedCreativeFilter = filter;
+        return _cachedCreativeItems;
     }
 
     /// <summary>
@@ -123,11 +133,18 @@ public static partial class Screens {
             if (CreativeSearchActive) {
                 int key = Raylib.GetCharPressed();
                 while (key > 0) {
-                    if (key >= 32) CreativeSearch += (char)key;
+                    if (key >= 32) {
+                        CreativeSearch += (char)key;
+                        CreativeScrollRow = 0;
+                    }
                     key = Raylib.GetCharPressed();
                 }
                 if (Raylib.IsKeyPressed(KeyboardKey.Backspace) && CreativeSearch.Length > 0) {
                     CreativeSearch = CreativeSearch[..^1];
+                    CreativeScrollRow = 0;
+                }
+                if (Raylib.IsKeyPressed(KeyboardKey.Escape) || Raylib.IsKeyPressed(KeyboardKey.Enter)) {
+                    CreativeSearchActive = false;
                 }
             }
 
@@ -138,9 +155,10 @@ public static partial class Screens {
             var items = GetCreativeItems(CreativeTab, CreativeSearch);
             int totalRows = Math.Max(visibleRows, (items.Count + cols - 1) / cols);
 
-            // Скролл колесиком
+            // Скролл колесиком (только когда курсор над сеткой предметов)
+            var gridAreaRec = new Rectangle(gridX, gridY, gridW, visibleRows * (slot + gap));
             float wheel = Raylib.GetMouseWheelMove();
-            if (wheel != 0) {
+            if (wheel != 0 && Raylib.CheckCollisionPointRec(mouse, gridAreaRec)) {
                 CreativeScrollRow = Math.Clamp(CreativeScrollRow - (int)wheel, 0, Math.Max(0, totalRows - visibleRows));
             }
 

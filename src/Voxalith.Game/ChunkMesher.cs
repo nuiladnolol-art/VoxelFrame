@@ -60,6 +60,22 @@ namespace Voxalith.Game;
     [ThreadStatic] private static List<byte>? _tCols;
     [ThreadStatic] private static List<ushort>? _tIndices;
 
+    internal static BiomeType ResolveColumnBiome(byte[] biomeByColumn, int lx, int lz, Vec3i chunkCoord, GameWorld world) {
+        int ci = lx * Chunk.SizeZ + lz;
+        byte cached = biomeByColumn[ci];
+        if (cached != byte.MaxValue) return (BiomeType)cached;
+        var b = world.Generator.GetBiome(chunkCoord.X * Chunk.SizeX + lx, 40, chunkCoord.Z * Chunk.SizeZ + lz);
+        biomeByColumn[ci] = (byte)b;
+        return b;
+    }
+
+    internal static byte GetFoliageBiomeTile(BiomeType biome) => biome switch {
+        BiomeType.Plains => (byte)TextureAtlas.TTallGrassPlains,
+        BiomeType.Savanna => (byte)TextureAtlas.TTallGrassSavanna,
+        BiomeType.Swamp => (byte)TextureAtlas.TTallGrassSwamp,
+        _ => (byte)TextureAtlas.TTallGrass
+    };
+
     /// <summary>
     /// Строит GPU-меши чанка. Если вершин больше лимита ushort-индексов —
     /// возвращает НЕСКОЛЬКО мешей (большие постройки не обрезаются).
@@ -99,14 +115,8 @@ namespace Voxalith.Game;
         // Биом нужен для травы/листвы/жидкостей, но вызывался на каждую грань.
         // Внутри GetBiome — до десятка сэмплов шума, поэтому кэшируем по колонке.
         var biomeByColumn = new byte[Chunk.SizeX * Chunk.SizeZ]; // 255 = ещё не считали
-        BiomeType BiomeAt(int lx, int lz) {
-            int ci = lx * Chunk.SizeZ + lz;
-            byte cached = biomeByColumn[ci];
-            if (cached != byte.MaxValue) return (BiomeType)cached;
-            var b = world.Generator.GetBiome(gc.Coord.X * Chunk.SizeX + lx, 40, gc.Coord.Z * Chunk.SizeZ + lz);
-            biomeByColumn[ci] = (byte)b;
-            return b;
-        }
+        Array.Fill(biomeByColumn, byte.MaxValue);
+        BiomeType BiomeAt(int lx, int lz) => ResolveColumnBiome(biomeByColumn, lx, lz, gc.Coord, world);
 
         for (int pass = 0; pass < 2; pass++) {
             currentResult = pass == 0 ? resultOpaque : resultTranslucent;
@@ -131,13 +141,7 @@ namespace Voxalith.Game;
                     if (isFoliage) {
                         byte foliageTile;
                         if (v.TypeId == GameData.BTallGrass.Id) {
-                            var biome = BiomeAt(lx, lz);
-                            foliageTile = biome switch {
-                                BiomeType.Plains => (byte)TextureAtlas.TTallGrassPlains,
-                                BiomeType.Savanna => (byte)TextureAtlas.TTallGrassSavanna,
-                                BiomeType.Swamp => (byte)TextureAtlas.TTallGrassSwamp,
-                                _ => (byte)TextureAtlas.TTallGrass
-                            };
+                            foliageTile = GetFoliageBiomeTile(BiomeAt(lx, lz));
                         } else if (v.TypeId == GameData.BFire.Id) {
                             foliageTile = (byte)TextureAtlas.TFire;
                         } else if (v.TypeId == GameData.BSapling.Id) {
@@ -614,6 +618,17 @@ namespace Voxalith.Game;
         mesh.TexCoords = (float*)Raylib.MemAlloc((uint)(uvs.Count * 4));
         mesh.Colors = (byte*)Raylib.MemAlloc((uint)cols.Count);
         mesh.Indices = (ushort*)Raylib.MemAlloc((uint)(indices.Count * 2));
+
+        if (mesh.Vertices == null || mesh.Normals == null || mesh.TexCoords == null ||
+            mesh.Colors == null || mesh.Indices == null) {
+            if (mesh.Vertices != null) Raylib.MemFree(mesh.Vertices);
+            if (mesh.Normals != null) Raylib.MemFree(mesh.Normals);
+            if (mesh.TexCoords != null) Raylib.MemFree(mesh.TexCoords);
+            if (mesh.Colors != null) Raylib.MemFree(mesh.Colors);
+            if (mesh.Indices != null) Raylib.MemFree(mesh.Indices);
+            Console.WriteLine($"[ChunkMesher] Raylib.MemAlloc вернул null (vc={vc}, ic={indices.Count}).");
+            return new Mesh();
+        }
 
         CopyFrom(verts, mesh.Vertices);
         CopyFrom(norms, mesh.Normals);

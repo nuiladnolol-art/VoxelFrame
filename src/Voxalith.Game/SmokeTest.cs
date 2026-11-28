@@ -26,24 +26,25 @@ internal static class SmokeTest {
             Timed("movement", () => TestMovement(shared));
             Timed("break", () => TestBreakAndPlace(shared));
             Timed("mining", TestMining);
-            Timed("durability_fixes", () => TestDurabilityAndMiningFixes(shared));
+            Timed("durability_fixes", () => TestDurabilityAndMiningFixes(NewSession(12346)));
             Timed("crafting", TestCrafting);
-            Timed("fire", () => TestFire(shared));
-            Timed("food", () => TestFood(shared));
-            Timed("animals", () => TestAnimals(shared));
-            Timed("daynight", () => TestDayNight(shared));
+            Timed("fire", () => TestFire(NewSession(12347)));
+            Timed("food", () => TestFood(NewSession(12348)));
+            Timed("animals", () => TestAnimals(NewSession(12349)));
+            Timed("daynight", () => TestDayNight(NewSession(12350)));
             Timed("saveload", TestSaveLoad);
             Timed("sunprop", () => TestSunPropagation(shared));
             Timed("backup", TestSaveBackupRecovery);
-            Timed("collapse", () => TestCollapse(shared));
-            Timed("mobs", () => TestAlphaMobsAndFluids(shared));
-            Timed("biomes", () => TestBiomesAnimalsCharcoalTools(shared));
-            Timed("endslime", () => TestEndSlime(shared));
-            Timed("trueboss", () => TestTrueVoidBossAndLore(shared));
+            Timed("collapse", () => TestCollapse(NewSession(12351)));
+            Timed("mobs", () => TestAlphaMobsAndFluids(NewSession(12352)));
+            Timed("biomes", () => TestBiomesAnimalsCharcoalTools(NewSession(12353)));
+            Timed("endslime", () => TestEndSlime(NewSession(12354)));
+            Timed("trueboss", () => TestTrueVoidBossAndLore(NewSession(12355)));
             Timed("endsave", TestEndSaveLoad);
             Timed("multi", TestMultiWorldSaveLoad);
             Timed("network", TestMultiplayerConnectionAndSync);
             Timed("regressions", TestBugFixes);
+            Timed("regressions2", TestPhase1To4Regressions);
         } catch (Exception ex) {
             Fail($"необработанное исключение: {ex}");
         }
@@ -309,16 +310,46 @@ internal static class SmokeTest {
     private static void TestFire(GameSession s) {
         Console.WriteLine("[5] Огонь");
         var w = s.World;
-        var planksPos = new Vec3i((int)MathF.Floor(s.Player.Position.X) + 4, s.World.SpawnBlock.Y + 1, (int)MathF.Floor(s.Player.Position.Z));
+        int fx = (int)MathF.Floor(s.Player.Position.X) + 4;
+        int fy = s.World.SpawnBlock.Y + 2;
+        int fz = (int)MathF.Floor(s.Player.Position.Z);
+        var center = new Vec3i(fx, fy, fz);
 
-        // Детерминированное поджигание досок.
-        w.PlacePlacedBlock(planksPos, GameData.BPlanks);
-        w.Fire.Ignite(planksPos);
-        Check(w.Fire.Burning.ContainsKey(planksPos), "доски горят");
-        for (int i = 0; i < 30; i++) w.Fire.Tick(0.5f);
-        var after = w.GetBlockType(planksPos);
+        // Опора под огненным патчем (камень, чтобы огонь не проваливался) + 3×3 горючие доски
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                w.PlacePlacedBlock(new Vec3i(fx + dx, fy - 1, fz + dz), GameData.BStone);
+                w.PlacePlacedBlock(new Vec3i(fx + dx, fy, fz + dz), GameData.BPlanks);
+                w.RemoveBlock(new Vec3i(fx + dx, fy + 1, fz + dz));
+            }
+        }
+        w.Fire.Ignite(center);
+        Check(w.Fire.Burning.ContainsKey(center), "доски горят");
+
+        int maxBurningSeen = w.Fire.Burning.Count;
+        bool neighborTouched = false;
+        for (int i = 0; i < 80; i++) {
+            w.Fire.Tick(0.25f);
+            if (w.Fire.Burning.Count > maxBurningSeen) maxBurningSeen = w.Fire.Burning.Count;
+            if (w.Fire.Burning.ContainsKey(new Vec3i(fx + 1, fy, fz)) ||
+                w.Fire.Burning.ContainsKey(new Vec3i(fx - 1, fy, fz)) ||
+                w.Fire.Burning.ContainsKey(new Vec3i(fx, fy, fz + 1)) ||
+                w.Fire.Burning.ContainsKey(new Vec3i(fx, fy, fz - 1)) ||
+                w.Fire.Burning.ContainsKey(new Vec3i(fx, fy + 1, fz))) {
+                neighborTouched = true;
+            }
+        }
+        var after = w.GetBlockType(center);
         Check(after == null || after.Id == 0, "доски сгорели");
-        Check(true, "распространение огня стабильно");
+        Check(neighborTouched || maxBurningSeen > 1, $"огонь реально распространяется на соседние блоки/воздух (пик={maxBurningSeen})");
+
+        // Выгрузка чанка очищает активные очаги горения в этом чанке
+        var firePos = new Vec3i(fx, fy + 1, fz);
+        w.PlacePlacedBlock(firePos, GameData.BPlanks);
+        w.Fire.Ignite(firePos);
+        Check(w.Fire.Burning.ContainsKey(firePos), "новый очаг добавлен перед выгрузкой чанка");
+        w.Fire.OnChunkUnloaded(Chunk.CoordOf(firePos));
+        Check(!w.Fire.Burning.ContainsKey(firePos), "выгрузка чанка очищает очаги огня этого чанка");
     }
 
     // ── 6. Еда, сытость и спринт ────────────────────────────────────────────
@@ -1110,9 +1141,11 @@ internal static class SmokeTest {
             clientSession.Player.Position = playerPos;
             client.SendMovement(playerPos, 0f, 0f, false, false, false, false, 20f, 0);
 
-            // Добавляем клиенту грязь в инвентарь и шлем обновление на сервер
+            // Выдаём клиенту грязь на сервере (сервер-авторитетный инвентарь) и синхронизируем
+            var srvClient = server!.Clients.First();
+            srvClient.PlayerData.Inventory.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.DirtItem), 5));
+            srvClient.Send(NetworkProtocol.WritePlayerInventoryUpdate(srvClient.PlayerData, 0));
             clientSession.Player.Inventory.InsertAt(0, new ItemEntry(GameData.NewItem(GameData.DirtItem), 5));
-            client.SendInventoryUpdate(clientSession.Player);
 
             var testPos = new Vec3i(5, 60, 5);
             serverSession.World.SetBlock(new Vec3i(5, 59, 5), GameData.BStone.Id);
@@ -1149,6 +1182,81 @@ internal static class SmokeTest {
             Check(serverSession.World.GetVoxel(testPos).TypeId == 0, "сервер принял разрушение блока");
             Check(serverSession.World.Pickups.Count > 0, "дроп появился на сервере после разрушения блока");
 
+            // 15.1 Античит-проверки серверного авторитета
+            // 1) Клиентский взрыв игнорируется сервером
+            var shieldPos = new Vec3i(6, 59, 6);
+            serverSession.World.SetBlock(shieldPos, GameData.BStone.Id);
+            client.SendExplosion(new Vector3(6.5f, 59.5f, 6.5f), 5f, 50f, 0);
+            for (int i = 0; i < 10; i++) {
+                serverSession.Tick(Dt, PlayerInput.Idle);
+                GameServer.Active?.Update(Dt);
+                Thread.Sleep(10);
+            }
+            Check(serverSession.World.GetVoxel(shieldPos).TypeId == GameData.BStone.Id, "сервер отклонил клиентский пакет взрыва");
+
+            // 2) Клиент не может выдать себе предметы или завысить HP через PlayerInventoryUpdate
+            srvClient.Health = 10f;
+            srvClient.PlayerData.Health = 10f;
+            clientSession.Player.Health = 20f;
+            clientSession.Player.Inventory.InsertAt(2, new ItemEntry(GameData.NewItem(GameData.DiamondItem), 64));
+            client.SendInventoryUpdate(clientSession.Player, 0);
+            for (int i = 0; i < 10; i++) {
+                serverSession.Tick(Dt, PlayerInput.Idle);
+                GameServer.Active?.Update(Dt);
+                Thread.Sleep(10);
+            }
+            Check(srvClient.PlayerData.Inventory.CountOf(GameData.DiamondItem) == 0, "сервер заблокировал подделку предметов в PlayerInventoryUpdate");
+            Check(MathF.Abs(srvClient.PlayerData.Health - 10f) < 0.01f, "сервер не позволил клиенту перезаписать Health");
+
+            // 3) Сон днём/далеко от кровати отклоняется
+            serverSession.DayNight.TimeOfDay = 0.5f;
+            client.SendBedSleep(true, new Vec3i(99, 60, 99));
+            for (int i = 0; i < 10; i++) {
+                serverSession.Tick(Dt, PlayerInput.Idle);
+                GameServer.Active?.Update(Dt);
+                Thread.Sleep(10);
+            }
+            Check(MathF.Abs(serverSession.DayNight.TimeOfDay - 0.5f) < 0.05f, "сервер отклонил BedSleep без кровати/ночи");
+
+            // 4) Урон PlayerHit пересчитывается сервером (подмена damage=999f режется до безоружного удара)
+            serverSession.World.SetBlock(new Vec3i(5, 59, 4), GameData.BStone.Id);
+            serverSession.Player.Position = new Vector3(5.5f, 60f, 4.5f);
+            serverSession.Player.Velocity = Vector3.Zero;
+            serverSession.Player.Health = 20f;
+            serverSession.Player.HurtTimer = 0f;
+            client.SendMovement(new Vector3(5.5f, 60f, 4.2f), 0f, 0f, false, false, false, false, 20f, 0);
+            Thread.Sleep(250);
+            for (int i = 0; i < 6; i++) {
+                serverSession.Tick(Dt, PlayerInput.Idle);
+                GameServer.Active?.Update(Dt);
+                Thread.Sleep(10);
+            }
+            client.SendHit(1, 999f);
+            for (int i = 0; i < 10; i++) {
+                serverSession.Tick(Dt, PlayerInput.Idle);
+                GameServer.Active?.Update(Dt);
+                Thread.Sleep(10);
+            }
+            Check(serverSession.Player.Health > 14f && serverSession.Player.Health < 20f,
+                  $"сервер ограничил поддельный PlayerHit уроном оружия ({serverSession.Player.Health:F1} HP вместо 0)");
+
+            // 5) Дальний удар (> 6 блоков) игнорируется сервером
+            float hpBeforeFarHit = serverSession.Player.Health;
+            client.SendMovement(new Vector3(50f, 60f, 50f), 0f, 0f, false, false, false, false, 20f, 0);
+            Thread.Sleep(250);
+            for (int i = 0; i < 6; i++) {
+                serverSession.Tick(Dt, PlayerInput.Idle);
+                GameServer.Active?.Update(Dt);
+                Thread.Sleep(10);
+            }
+            client.SendHit(1, 5f);
+            for (int i = 0; i < 10; i++) {
+                serverSession.Tick(Dt, PlayerInput.Idle);
+                GameServer.Active?.Update(Dt);
+                Thread.Sleep(10);
+            }
+            Check(MathF.Abs(serverSession.Player.Health - hpBeforeFarHit) < 0.01f, "сервер отклонил PlayerHit с дистанции > 6 блоков");
+
             GameClient.Disconnect(clientSession.Player);
             GameServer.Stop();
             Check(GameClient.Active == null && GameServer.Active == null, "корректное отключение клиента и остановка сервера");
@@ -1159,6 +1267,122 @@ internal static class SmokeTest {
                 string pPath = SaveSystem.GetPlayerDataPath(testPlayerName);
                 if (File.Exists(pPath)) File.Delete(pPath);
             } catch { }
+        }
+    }
+
+    // ── 17. Дополнительные регрессии фаз 1–4 ────────────────────────────────
+
+    private static void TestPhase1To4Regressions() {
+        Console.WriteLine("[17] Регрессии: биомы мешера, приседание у стены, озёра, защита сейвов");
+        var s = NewSession(7711);
+        var w = s.World;
+
+        // 1. Кэш биомов в ChunkMesher: буфер с byte.MaxValue должен находить не-Plains биомы
+        Vec3i? foundNonPlainsCol = null;
+        BiomeType foundBiome = BiomeType.Plains;
+        for (int gx = -256; gx <= 256 && foundNonPlainsCol == null; gx += 16) {
+            for (int gz = -256; gz <= 256; gz += 16) {
+                var b = w.Generator.GetBiome(gx, 40, gz);
+                if (b == BiomeType.Savanna || b == BiomeType.Swamp) {
+                    foundNonPlainsCol = new Vec3i(gx, 40, gz);
+                    foundBiome = b;
+                    break;
+                }
+            }
+        }
+        Check(foundNonPlainsCol.HasValue, "в генераторе найдены биомы Savanna/Swamp для проверки кэша");
+        if (foundNonPlainsCol is { } col) {
+            var cc = Chunk.CoordOf(col);
+            int lx = col.X - cc.X * Chunk.SizeX;
+            int lz = col.Z - cc.Z * Chunk.SizeZ;
+            var cache = new byte[Chunk.SizeX * Chunk.SizeZ];
+            Array.Fill(cache, byte.MaxValue);
+            var resolved = ChunkMesher.ResolveColumnBiome(cache, lx, lz, cc, w);
+            Check(resolved == foundBiome && cache[lx * Chunk.SizeZ + lz] == (byte)foundBiome,
+                  $"кэш биомов ChunkMesher вернул реальный биом ({resolved}) вместо дефолтного Plains");
+        }
+        Check(ChunkMesher.GetFoliageBiomeTile(BiomeType.Plains) != ChunkMesher.GetFoliageBiomeTile(BiomeType.Savanna) &&
+              ChunkMesher.GetFoliageBiomeTile(BiomeType.Savanna) != ChunkMesher.GetFoliageBiomeTile(BiomeType.Swamp),
+              "разные биомы используют разные тайлы листвы/травы");
+
+        // 2. Collision.HasGroundBelow не должен засчитывать стену на уровне пояса над пустотой
+        int gx0 = 220, gy0 = 50, gz0 = 220;
+        w.PlacePlacedBlock(new Vec3i(gx0, gy0, gz0), GameData.BStone);
+        w.RemoveBlock(new Vec3i(gx0 + 1, gy0, gz0));
+        w.RemoveBlock(new Vec3i(gx0 + 1, gy0 + 1, gz0));
+        w.PlacePlacedBlock(new Vec3i(gx0 + 1, gy0 + 2, gz0), GameData.BStone); // стена у пояса игрока
+        bool onSolid = Collision.HasGroundBelow(w, new Vector3(gx0 + 0.5f, gy0 + 1.0f, gz0 + 0.5f), Player.HalfExtents);
+        bool overVoidByWall = Collision.HasGroundBelow(w, new Vector3(gx0 + 1.35f, gy0 + 1.0f, gz0 + 0.5f), Player.HalfExtents);
+        Check(onSolid && !overVoidByWall, "HasGroundBelow видит опору под ногами и не обманывается стеной над пустотой");
+
+        // 3. FluidEngine: стабильность озера + очистка при выгрузке чанка
+        int lx0 = 180, ly0 = 54, lz0 = 180;
+        for (int dx = 0; dx <= 3; dx++) {
+            for (int dz = 0; dz <= 3; dz++) {
+                w.PlacePlacedBlock(new Vec3i(lx0 + dx, ly0, lz0 + dz), GameData.BStone);
+                bool edge = dx == 0 || dx == 3 || dz == 0 || dz == 3;
+                w.PlacePlacedBlock(new Vec3i(lx0 + dx, ly0 + 1, lz0 + dz), edge ? GameData.BStone : GameData.BWater);
+                w.RemoveBlock(new Vec3i(lx0 + dx, ly0 + 2, lz0 + dz));
+            }
+        }
+        w.PlacePlacedBlock(new Vec3i(lx0 + 1, ly0 + 3, lz0 + 1), GameData.BWater); // поток сверху в источник
+        for (int i = 0; i < 25; i++) w.Fluids.Tick(0.2f);
+        bool lakeStable = true;
+        for (int dx = 1; dx <= 2; dx++) {
+            for (int dz = 1; dz <= 2; dz++) {
+                var lv = w.GetVoxel(new Vec3i(lx0 + dx, ly0 + 1, lz0 + dz));
+                if (lv.TypeId != GameData.BWater.Id || lv.SubGridLayerMask != 0) lakeStable = false;
+            }
+        }
+        Check(lakeStable, "источники воды в озере стабильны под падающей струёй (без осцилляций)");
+
+        var farFluid = new Vec3i(lx0 + 1, ly0 + 1, lz0 + 1);
+        w.Fluids.ScheduleUpdate(farFluid);
+        w.Fluids.OnChunkUnloaded(Chunk.CoordOf(farFluid));
+        Check(w.GetVoxel(farFluid).TypeId == GameData.BWater.Id, "выгрузка чанка жидкостей сохраняет валидность без исключений");
+
+        // 4. SaveSystem: обрезанный .dat, повреждённые NaN-поля .plr и path traversal
+        string truncPath = Path.Combine(Path.GetTempPath(), $"vox_trunc_{Guid.NewGuid():N}.dat");
+        string outsideDir = Path.Combine(Path.GetTempPath(), $"vox_outside_{Guid.NewGuid():N}");
+        string nanName = $"NanTest_{Guid.NewGuid():N}";
+        string nanPath = SaveSystem.GetPlayerDataPath(nanName);
+        try {
+            s.SaveTo(truncPath);
+            byte[] fullBytes = File.ReadAllBytes(truncPath);
+            File.WriteAllBytes(truncPath, fullBytes[..(fullBytes.Length / 2)]);
+            bool threwTruncated = false;
+            try {
+                _ = SaveSystem.Load(truncPath, headless: true);
+            } catch (Exception ex) when (ex is EndOfStreamException or InvalidDataException or IOException) {
+                threwTruncated = true;
+            }
+            Check(threwTruncated, "обрезанный файл сейва вызывает ошибку чтения вместо тихих пустых блоков");
+
+            var nanPlayer = new Player { Name = nanName, Yaw = float.NaN };
+            SaveSystem.SavePlayerData(nanName, nanPlayer);
+            if (File.Exists(nanPath + ".bak")) File.Delete(nanPath + ".bak");
+            var targetPlayer = new Player { Position = new Vector3(12f, 65f, -4f) };
+            bool loadedNan = SaveSystem.LoadPlayerData(nanName, targetPlayer);
+            Check(!loadedNan && MathF.Abs(targetPlayer.Position.X - 12f) < 0.01f,
+                  "повреждённые данные игрока с NaN полями отклонены при загрузке");
+
+            string evilWorld = SaveSystem.CreateWorldSavePath("..\\..\\evil_world");
+            string evilPlr = SaveSystem.GetPlayerDataPath("../hacker");
+            Check(SaveSystem.IsPathInsideDirectory(evilWorld, SaveSystem.SaveDirectory) &&
+                  SaveSystem.IsPathInsideDirectory(evilPlr, SaveSystem.SaveDirectory),
+                  "CreateWorldSavePath и GetPlayerDataPath не выходят за пределы SaveDirectory");
+
+            Directory.CreateDirectory(outsideDir);
+            File.WriteAllText(Path.Combine(outsideDir, "keep.txt"), "safe");
+            SaveSystem.DeleteSave(Path.Combine(outsideDir, "world.dat"));
+            Check(Directory.Exists(outsideDir) && File.Exists(Path.Combine(outsideDir, "keep.txt")),
+                  "DeleteSave отказывается удалять файлы за пределами SaveDirectory");
+        } finally {
+            try { if (File.Exists(truncPath)) File.Delete(truncPath); } catch { }
+            try { if (File.Exists(truncPath + ".bak")) File.Delete(truncPath + ".bak"); } catch { }
+            try { if (File.Exists(nanPath)) File.Delete(nanPath); } catch { }
+            try { if (File.Exists(nanPath + ".bak")) File.Delete(nanPath + ".bak"); } catch { }
+            try { if (Directory.Exists(outsideDir)) Directory.Delete(outsideDir, true); } catch { }
         }
     }
 }

@@ -392,11 +392,12 @@ public static class PostProcessing {
     private static Rectangle SrcRectFbo(in Target t) => new(0, 0, t.W, t.H);
     private static Rectangle SrcRectScreen(in Target t) => new(0, 0, t.W, -t.H);
 
-    /// <summary>Полноэкранный проход: шейдер читает src (texture0) и пишет в dst.</summary>
-    private static void Pass(Shader sh, in Target src, in Target dst, Action? setup = null) {
+    private static void BeginPass(Shader sh, in Target dst) {
         Raylib.BeginTextureMode(dst.Rt);
         Raylib.BeginShaderMode(sh);
-        setup?.Invoke();
+    }
+
+    private static void EndPass(in Target src, in Target dst) {
         Raylib.DrawTexturePro(src.Rt.Texture, SrcRectFbo(src), new Rectangle(0, 0, dst.W, dst.H), Vector2.Zero, 0f, Color.White);
         Raylib.EndShaderMode();
         Raylib.EndTextureMode();
@@ -413,21 +414,24 @@ public static class PostProcessing {
 
         // 1. Bloom
         if (bloomOn) {
-            Pass(_prefilter, _scene, _down[0], () => {
-                V2(_prefilter, "texel", new Vector2(1f / _scene.W, 1f / _scene.H));
-                F(_prefilter, "threshold", _hdr ? 1.05f : 0.85f);
-            });
+            BeginPass(_prefilter, _down[0]);
+            V2(_prefilter, "texel", new Vector2(1f / _scene.W, 1f / _scene.H));
+            F(_prefilter, "threshold", _hdr ? 1.05f : 0.85f);
+            EndPass(_scene, _down[0]);
+
             for (int i = 1; i < BloomLevels; i++) {
-                var src = _down[i - 1];
-                Pass(_downSh, src, _down[i], () => V2(_downSh, "texel", new Vector2(1f / src.W, 1f / src.H)));
+                ref readonly var src = ref _down[i - 1];
+                BeginPass(_downSh, _down[i]);
+                V2(_downSh, "texel", new Vector2(1f / src.W, 1f / src.H));
+                EndPass(src, _down[i]);
             }
             for (int i = BloomLevels - 2; i >= 0; i--) {
-                var lower = i == BloomLevels - 2 ? _down[BloomLevels - 1] : _up[i + 1];
-                var cur = _down[i];
-                Pass(_upSh, lower, _up[i], () => {
-                    V2(_upSh, "texel", new Vector2(1f / lower.W, 1f / lower.H));
-                    Tex(_upSh, "texture1", cur.Rt.Texture);
-                });
+                ref readonly var lower = ref (i == BloomLevels - 2 ? ref _down[BloomLevels - 1] : ref _up[i + 1]);
+                ref readonly var cur = ref _down[i];
+                BeginPass(_upSh, _up[i]);
+                V2(_upSh, "texel", new Vector2(1f / lower.W, 1f / lower.H));
+                Tex(_upSh, "texture1", cur.Rt.Texture);
+                EndPass(lower, _up[i]);
             }
         }
 
@@ -450,11 +454,11 @@ public static class PostProcessing {
                     if (raysStrength > 0.005f) {
                         raysColor = Vector3.Lerp(new Vector3(1.0f, 0.93f, 0.80f), new Vector3(1.0f, 0.62f, 0.32f), Atmosphere.SunsetAmount);
                         float aspect = (float)_w / Math.Max(1, _h);
-                        Pass(_raysSh, _scene, _rays, () => {
-                            Tex(_raysSh, "depthTex", _scene.Rt.Depth);
-                            V2(_raysSh, "sunUv", sunUv);
-                            F(_raysSh, "aspect", aspect);
-                        });
+                        BeginPass(_raysSh, _rays);
+                        Tex(_raysSh, "depthTex", _scene.Rt.Depth);
+                        V2(_raysSh, "sunUv", sunUv);
+                        F(_raysSh, "aspect", aspect);
+                        EndPass(_scene, _rays);
                     }
                 }
             }
@@ -470,22 +474,21 @@ public static class PostProcessing {
             else if (eyeVox.TypeId == GameData.BLava.Id) underlava = 1f;
         }
         float golden = SaveSystem.PostFxGoldenHour ? Atmosphere.SunsetAmount : 0f;
-        float rs = raysStrength;
-        Pass(_composite, _scene, _ldr, () => {
-            Tex(_composite, "bloomTex", bloomOn ? _up[0].Rt.Texture : _down[0].Rt.Texture);
-            Tex(_composite, "raysTex", _rays.Rt.Texture);
-            F(_composite, "bloomStrength", bloomOn ? 0.55f : 0f);
-            F(_composite, "raysStrength", rs);
-            V3(_composite, "raysColor", raysColor);
-            F(_composite, "exposure", 1.0f + Atmosphere.Night * 0.25f);
-            F(_composite, "golden", golden);
-            F(_composite, "night", Atmosphere.Night);
-            F(_composite, "vignette", SaveSystem.PostFxVignette ? 1f : 0f);
-            F(_composite, "vignetteStrength", SaveSystem.PostFxVignetteStrength / 100f);
-            F(_composite, "underwater", underwater);
-            F(_composite, "underlava", underlava);
-            F(_composite, "time", time);
-        });
+        BeginPass(_composite, _ldr);
+        Tex(_composite, "bloomTex", bloomOn ? _up[0].Rt.Texture : _down[0].Rt.Texture);
+        Tex(_composite, "raysTex", _rays.Rt.Texture);
+        F(_composite, "bloomStrength", bloomOn ? 0.55f : 0f);
+        F(_composite, "raysStrength", raysStrength);
+        V3(_composite, "raysColor", raysColor);
+        F(_composite, "exposure", 1.0f + Atmosphere.Night * 0.25f);
+        F(_composite, "golden", golden);
+        F(_composite, "night", Atmosphere.Night);
+        F(_composite, "vignette", SaveSystem.PostFxVignette ? 1f : 0f);
+        F(_composite, "vignetteStrength", SaveSystem.PostFxVignetteStrength / 100f);
+        F(_composite, "underwater", underwater);
+        F(_composite, "underlava", underlava);
+        F(_composite, "time", time);
+        EndPass(_scene, _ldr);
 
         // 4. FXAA на экран
         Raylib.BeginDrawing();

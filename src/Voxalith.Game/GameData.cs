@@ -501,7 +501,7 @@ public static class GameData {
     // ── Реестр предметов ───────────────────────────────────────────────────────
 
     public static readonly Dictionary<ushort, ItemDefinition> Items = new();
-    private static ulong _nextInstanceId;
+    private static long _nextInstanceId;
 
     // ── Категории и единый реестр рецептов ────────────────────────────────────
     public enum CraftCategory { All = 0, Tools, Weapons, Armor, Blocks, Food, Materials }
@@ -575,7 +575,8 @@ public static class GameData {
     }
 
     public static ItemInstance NewItem(ItemDefinition def) {
-        var inst = new ItemInstance(def, _nextInstanceId++);
+        ulong id = (ulong)Interlocked.Increment(ref _nextInstanceId) - 1;
+        var inst = new ItemInstance(def, id);
         int maxDur = GetMaxItemDurability(def.Id);
         if (maxDur > 0) inst.Durability = maxDur;
         else inst.Durability = 0;

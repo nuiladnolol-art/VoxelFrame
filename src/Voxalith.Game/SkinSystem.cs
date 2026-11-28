@@ -69,15 +69,7 @@ public static class SkinSystem {
     }
 
     private static void DiscoverCustomSkins() {
-        string[] probeDirs = {
-            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "skins"),
-            Path.Combine(Directory.GetCurrentDirectory(), "assets", "skins"),
-            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "skins"),
-            Path.Combine(Directory.GetCurrentDirectory(), "skins")
-        };
-
-        foreach (var dir in probeDirs) {
-            if (!Directory.Exists(dir)) continue;
+        foreach (var dir in AssetLocator.EnumerateAssetSubdirs("skins", includeDirectSubdir: true)) {
             foreach (var file in Directory.GetFiles(dir, "*.png")) {
                 string name = Path.GetFileNameWithoutExtension(file);
                 if (string.IsNullOrWhiteSpace(name)) continue;

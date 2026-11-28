@@ -46,10 +46,14 @@ public static partial class Screens {
         _lanDiscovery?.StopListener();
     }
 
+    private static readonly List<DiscoveredServer> _sortedServers = new();
+    private static string _directConnectError = "";
+
     public static void DrawMultiplayer(ref GameSession? session) {
-        if (_connectedSession != null) {
-            session = _connectedSession;
-            _connectedSession = null;
+        var readySession = Interlocked.Exchange(ref _connectedSession, null);
+        if (readySession != null) {
+            Reset();
+            session = readySession;
             CloseMultiplayerMenu();
             return;
         }
@@ -127,7 +131,12 @@ public static partial class Screens {
         Raylib.DrawRectangleRounded(listRect, 0.10f, 6, new Color(18, 22, 32, 235));
         Raylib.DrawRectangleRoundedLinesEx(listRect, 0.10f, 6, 1.5f, new Color(48, 58, 80, 240));
 
-        var servers = _lanDiscovery?.FoundServers.OrderByDescending(s => s.LastSeen).ToList() ?? [];
+        _sortedServers.Clear();
+        if (_lanDiscovery != null) {
+            foreach (var srv in _lanDiscovery.FoundServers) _sortedServers.Add(srv);
+            _sortedServers.Sort((a, b) => b.LastSeen.CompareTo(a.LastSeen));
+        }
+        var servers = _sortedServers;
 
         if (servers.Count == 0) {
             // Анимированный поиск серверов в сети
@@ -143,10 +152,10 @@ public static partial class Screens {
             Fonts.DrawCentered("Или подключитесь напрямую по IP-адресу кнопкой ниже", sw / 2f, listY + listH / 2f + 26f, 13f, new Color(140, 150, 170, 180));
         } else {
             // Ограничивающий Scissor для списка серверов с масштабированием в реальные экранные пиксели
-            int scissorX = (int)((panelX + 4) * Ui.CurrentScale);
-            int scissorY = (int)((listY + 4) * Ui.CurrentScale);
-            int scissorW = (int)((panelW - 8) * Ui.CurrentScale);
-            int scissorH = (int)((listH - 8) * Ui.CurrentScale);
+            int scissorX = Math.Max(0, (int)((panelX + 4) * Ui.CurrentScale));
+            int scissorY = Math.Max(0, (int)((listY + 4) * Ui.CurrentScale));
+            int scissorW = Math.Max(0, (int)((panelW - 8) * Ui.CurrentScale));
+            int scissorH = Math.Max(0, (int)((listH - 8) * Ui.CurrentScale));
 
             Raylib.BeginScissorMode(scissorX, scissorY, scissorW, scissorH);
 
@@ -231,6 +240,7 @@ public static partial class Screens {
 
         if (Button(panelX + btnW + 16, row1Y, btnW, btnH, "Прямое подключение", true)) {
             InDirectConnectModal = true;
+            _directConnectError = "";
             _activeInputField = 2; // Фокус на поле IP
         }
 
@@ -305,6 +315,11 @@ public static partial class Screens {
         HandleTextInput(ref DirectConnectIp, 2, maxLen: 64);
         HandleTextInput(ref DirectConnectPort, 3, maxLen: 6);
 
+        // Ошибка валидации прямо внутри модального окна
+        if (!string.IsNullOrEmpty(_directConnectError)) {
+            Fonts.DrawCentered(_directConnectError, sw / 2f, my + 224f, 14f, new Color(255, 110, 110, 255));
+        }
+
         // Кнопки действий
         int modalBtnW = (fieldW - 16) / 2;
         int modalBtnY = my + modalH - 56;
@@ -312,15 +327,17 @@ public static partial class Screens {
         bool doConnect = Button(fx, modalBtnY, modalBtnW, 38, "Подключиться", true) || Raylib.IsKeyPressed(KeyboardKey.Enter);
         if (doConnect) {
             if (int.TryParse(DirectConnectPort, out int port) && port > 0 && port <= 65535) {
+                _directConnectError = "";
                 SaveSystem.SaveSettings();
                 InDirectConnectModal = false;
                 ConnectToServer(DirectConnectIp.Trim(), port);
             } else {
-                ConnectingStatus = "Неверный номер порта (1..65535)";
+                _directConnectError = "Неверный номер порта (1..65535)";
             }
         }
 
         if (Button(fx + modalBtnW + 16, modalBtnY, modalBtnW, 38, "Отмена", true) || Raylib.IsKeyPressed(KeyboardKey.Escape)) {
+            _directConnectError = "";
             InDirectConnectModal = false;
         }
     }

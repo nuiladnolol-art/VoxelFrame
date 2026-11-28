@@ -16,13 +16,20 @@ public sealed partial class GameWorld {
             foreach (var kv in _chunks) {
                 var gc = kv.Value;
                 if (_lightDirty.Contains(gc) || _meshDirty.Contains(gc)) continue;
-                // Изменённый чанк нельзя просто выбросить: его содержимое не восстановить
-                // из генератора. Держим в памяти до сохранения.
-                if (_modifiedChunks.Contains(kv.Key)) continue;
                 var c = kv.Key;
                 int dx = Math.Abs(c.X - centerChunk.X);
                 int dz = Math.Abs(c.Z - centerChunk.Z);
-                if (dx > keep || dz > keep) toRemove.Add(c);
+                if (dx <= keep && dz <= keep) continue;
+
+                // Изменённый чанк остаётся в RAM для сохранения, но его GPU-меш выгружается при удалении от игрока.
+                if (_modifiedChunks.Contains(c)) {
+                    if (gc.MeshUploaded) {
+                        gc.UnloadMesh();
+                        gc.MeshDirty = true;
+                    }
+                    continue;
+                }
+                toRemove.Add(c);
             }
             foreach (var cc in toRemove) {
                 if (_chunks.TryGetValue(cc, out var gc)) {
@@ -32,6 +39,7 @@ public sealed partial class GameWorld {
                     _meshDirty.Remove(gc);
                     _decor.Remove(cc);
                     Fluids.OnChunkUnloaded(cc);
+                    Fire.OnChunkUnloaded(cc);
                     // Освобождаем и нижележащий слой: иначе 128 КиБ на чанк остаются в памяти навсегда.
                     _grid.RemoveChunk(cc);
                 }

@@ -31,9 +31,13 @@ public sealed class EndCrystalEntity {
     public void Tick(float dt, GameWorld world, Player player, GameSession session) {
         if (!Alive) return;
 
+        // Если чанк якоря выгружен по дистанции — ждём его возвращения, не уничтожая сущность.
+        if (world.TryGetChunk(Chunk.CoordOf(Anchor)) == null) return;
+
         // Якорный блок исчез (чужой взрыв, удаление) — сущность больше не существует.
         if (world.GetVoxel(Anchor).TypeId != GameData.BEnderCrystal.Id) {
             Alive = false;
+            world.MarkEndCrystalDestroyed(Anchor);
             return;
         }
 

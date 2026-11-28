@@ -1,4 +1,6 @@
-﻿namespace Voxalith.Game;
+using System;
+
+namespace Voxalith.Core.World;
 
 /// <summary>
 /// Детерминированный гладкий шум Перлина (2D и 3D) с фрактальным наложением октав.

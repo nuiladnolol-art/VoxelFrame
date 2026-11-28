@@ -99,104 +99,42 @@ public static class NetworkProtocol {
     public const int MaxStandardPacketSize = 128 * 1024; // 128 KB standard max
     public const int MaxPacketSize = 16 * 1024 * 1024;   // 16 MB max for world chunks
 
+    /// <summary>Очищает имя игрока/файла от символов пути, управляющих символов и зарезервированных имён ОС.</summary>
+    public static string SanitizePlayerName(string? rawName, string fallback = "Player", int maxLen = 24) =>
+        Voxalith.Core.Net.ProtocolFraming.SanitizePlayerName(rawName, fallback, maxLen);
+
+    public static bool IsReplaceableSnapshot(byte packetType) =>
+        packetType == (byte)PacketType.MobSync ||
+        packetType == (byte)PacketType.PickupSync ||
+        packetType == (byte)PacketType.ProjectileSync ||
+        packetType == (byte)PacketType.PlayerMovement ||
+        packetType == (byte)PacketType.TimeWeatherSync;
 
     /// <summary>
     /// Собирает пакет с 4-байтовым заголовком длины [int32 Length][byte PacketType][Payload...].
     /// </summary>
-    public static byte[] BuildPacket(PacketType type, Action<BinaryWriter> writeBody) {
-        using var ms = new MemoryStream();
-        using var w = new BinaryWriter(ms, Encoding.UTF8);
-        w.Write(0); // резервируем 4 байта под длину
-        w.Write((byte)type);
-        writeBody(w);
-        w.Flush();
-
-        int payloadLength = (int)ms.Length - 4;
-        ms.Position = 0;
-        w.Write(payloadLength);
-        w.Flush();
-        return ms.ToArray();
-    }
+    public static byte[] BuildPacket(PacketType type, Action<BinaryWriter> writeBody) =>
+        Voxalith.Core.Net.ProtocolFraming.BuildPacket((byte)type, writeBody);
 
     /// <summary>
     /// Синхронное чтение следующего фрейма из TCP-потока с защитой от фрагментации и DoS-аллокаций.
     /// Возвращает структуру PacketFrame, которую необходимо освободить через Dispose().
     /// </summary>
-    public static PacketFrame? ReadPacketFrame(Stream stream) {
-        Span<byte> lenBuf = stackalloc byte[4];
-        int read = 0;
-        while (read < 4) {
-            int r = stream.Read(lenBuf.Slice(read, 4 - read));
-            if (r <= 0) return null;
-            read += r;
-        }
-        int payloadLength = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(lenBuf);
-        if (payloadLength <= 0 || payloadLength > MaxPacketSize) return null;
-
-        int firstByte = stream.ReadByte();
-        if (firstByte < 0) return null;
-        var type = (PacketType)firstByte;
-
-        if (type != PacketType.WorldChunksSync && payloadLength > MaxStandardPacketSize) {
-            return null;
-        }
-
-        byte[] payload = ArrayPool<byte>.Shared.Rent(payloadLength);
-        payload[0] = (byte)firstByte;
-        read = 1;
-        while (read < payloadLength) {
-            int r = stream.Read(payload, read, payloadLength - read);
-            if (r <= 0) {
-                ArrayPool<byte>.Shared.Return(payload);
-                return null;
-            }
-            read += r;
-        }
-        return new PacketFrame(type, payload, payloadLength);
-    }
+    public static PacketFrame? ReadPacketFrame(Stream stream, bool allowLargeWorldSync = true) =>
+        Voxalith.Core.Net.ProtocolFraming.TryReadFrame(
+            stream, MaxStandardPacketSize, MaxPacketSize, (byte)PacketType.WorldChunksSync, allowLargeWorldSync,
+            out byte pt, out byte[] buf, out int len)
+            ? new PacketFrame((PacketType)pt, buf, len)
+            : null;
 
     /// <summary>
     /// Асинхронное чтение следующего фрейма из TCP-потока.
     /// Возвращает структуру PacketFrame, которую необходимо освободить через Dispose().
     /// </summary>
-    public static async Task<PacketFrame?> ReadPacketFrameAsync(Stream stream, CancellationToken token = default) {
-        byte[] lenBuf = ArrayPool<byte>.Shared.Rent(4);
-        try {
-            int read = 0;
-            while (read < 4) {
-                int r = await stream.ReadAsync(lenBuf.AsMemory(read, 4 - read), token);
-                if (r <= 0) return null;
-                read += r;
-            }
-            int payloadLength = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(lenBuf);
-            if (payloadLength <= 0 || payloadLength > MaxPacketSize) return null;
-
-            byte[] payload = ArrayPool<byte>.Shared.Rent(payloadLength);
-            int r1 = await stream.ReadAsync(payload.AsMemory(0, 1), token);
-            if (r1 <= 0) {
-                ArrayPool<byte>.Shared.Return(payload);
-                return null;
-            }
-            var type = (PacketType)payload[0];
-
-            if (type != PacketType.WorldChunksSync && payloadLength > MaxStandardPacketSize) {
-                ArrayPool<byte>.Shared.Return(payload);
-                return null;
-            }
-
-            read = 1;
-            while (read < payloadLength) {
-                int r = await stream.ReadAsync(payload.AsMemory(read, payloadLength - read), token);
-                if (r <= 0) {
-                    ArrayPool<byte>.Shared.Return(payload);
-                    return null;
-                }
-                read += r;
-            }
-            return new PacketFrame(type, payload, payloadLength);
-        } finally {
-            ArrayPool<byte>.Shared.Return(lenBuf);
-        }
+    public static async Task<PacketFrame?> ReadPacketFrameAsync(Stream stream, CancellationToken token = default, bool allowLargeWorldSync = true) {
+        var res = await Voxalith.Core.Net.ProtocolFraming.TryReadFrameAsync(
+            stream, MaxStandardPacketSize, MaxPacketSize, (byte)PacketType.WorldChunksSync, allowLargeWorldSync, token);
+        return res.Ok ? new PacketFrame((PacketType)res.PacketType, res.Buffer, res.Length) : null;
     }
 
     public static byte[] WriteHandshake(string playerName, string version, string skinName = "cyan") =>

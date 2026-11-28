@@ -166,11 +166,14 @@ public sealed class TrueEndSlime {
             // Фаза 2+: Залпы сферами Бездны (Void Orbs)
             if (phase >= 2 && SpitCooldown <= 0f && dist > 3f && dist < 45f) {
                 SpitCooldown = phase == 3 ? 1.3f : 2.0f;
-                var aim = Vector3.Normalize(toPlayer + new Vector3(0f, 0.6f, 0f));
-                world.Arrows.Add(new ArrowProjectile(Position + new Vector3(0f, HalfSizeY, 0f), aim * 18f) {
-                    IsSlimeSpit = true, Damage = 7.5f
-                });
-                SoundSystem.PlayBowShoot();
+                var aimDiff = toPlayer + new Vector3(0f, 0.6f, 0f);
+                if (aimDiff.LengthSquared() > 1e-6f) {
+                    var aim = Vector3.Normalize(aimDiff);
+                    world.Arrows.Add(new ArrowProjectile(Position + new Vector3(0f, HalfSizeY, 0f), aim * 18f) {
+                        IsSlimeSpit = true, Damage = 7.5f
+                    });
+                    SoundSystem.PlayBowShoot();
+                }
             }
 
             // Фаза 3: телеграф сингулярности — 0.6с кольцо-предупреждение, затем рывок-притяжение
@@ -185,16 +188,19 @@ public sealed class TrueEndSlime {
                 SingularityWarningTimer -= dt;
                 if (SingularityWarningTimer <= 0f) {
                     session.ShowTitle("СИНГУЛЯРНОСТЬ БЕЗДНЫ", "Искажение пространства притягивает вас!", 2.5f, new Color(220, 40, 255, 255));
-                    var pullDir = Vector3.Normalize(Position - player.Position);
-                    player.Velocity += pullDir * 12f + new Vector3(0f, 3f, 0f);
+                    var pullVec = Position - player.Position;
+                    if (pullVec.LengthSquared() > 1e-6f) {
+                        var pullDir = Vector3.Normalize(pullVec);
+                        player.Velocity += pullDir * 12f + new Vector3(0f, 3f, 0f);
+                    }
                     world.SpawnCrit(player.Position, 25);
                     SoundSystem.PlayThunder();
                 }
             }
         }
 
-        // Ударная волна при приземлении
-        if (SlamCooldown <= 0f && dist < 12f && IsGrounded) {
+        // Ударная волна при приземлении (не срабатывает во время фазы отдыха)
+        if (State != TrueBossState.Resting && SlamCooldown <= 0f && dist < 12f && IsGrounded) {
             SlamCooldown = phase == 3 ? 3.5f : 5.0f;
             float slamDmg = (phase == 3 ? 12f : 8f) * (1f - dist / 12f);
             player.ApplyDamage(slamDmg, session, Position);

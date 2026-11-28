@@ -37,12 +37,19 @@ if (Test-Path $setupExe) {
     Copy-Item -Force $setupExe "$distSetupExe"
     Write-Host "== Инсталлятор успешно собран: $distDir/Voxalith-Setup.exe и $distSetupExe ==" -ForegroundColor Green
 
-    # Дописываем хеши инсталлятора в общий файл контрольных сумм релиза.
+    # Обновляем хеши инсталлятора в общем файле контрольных сумм без дублей.
     $sumsFile = Join-Path $distDir "SHA256SUMS.txt"
+    $setupHash = (Get-FileHash -Algorithm SHA256 -Path "$distDir/Voxalith-Setup.exe").Hash.ToLowerInvariant()
+    $distSetupName = Split-Path -Leaf $distSetupExe
+    $distSetupHash = (Get-FileHash -Algorithm SHA256 -Path $distSetupExe).Hash.ToLowerInvariant()
     $lines = @()
-    if (Test-Path $sumsFile) { $lines = @(Get-Content -Path $sumsFile) }
-    $lines += "$((Get-FileHash -Algorithm SHA256 -Path "$distDir/Voxalith-Setup.exe").Hash.ToLowerInvariant())  Voxalith-Setup.exe"
-    $lines += "$((Get-FileHash -Algorithm SHA256 -Path $distSetupExe).Hash.ToLowerInvariant())  $(Split-Path -Leaf $distSetupExe)"
+    if (Test-Path $sumsFile) {
+        $lines = @(Get-Content -Path $sumsFile | Where-Object {
+            $_ -notmatch '\s+Voxalith-Setup\.exe$' -and $_ -notmatch ("\s+" + [regex]::Escape($distSetupName) + '$')
+        })
+    }
+    $lines += "$setupHash  Voxalith-Setup.exe"
+    $lines += "$distSetupHash  $distSetupName"
     $lines | Out-File -FilePath $sumsFile -Encoding ascii
     Write-Host "== Контрольные суммы обновлены: $sumsFile ==" -ForegroundColor Green
 } else {

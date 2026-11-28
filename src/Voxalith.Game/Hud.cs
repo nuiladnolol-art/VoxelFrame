@@ -1,4 +1,5 @@
-﻿using Raylib_cs;
+﻿using System.Runtime.InteropServices;
+using Raylib_cs;
 using Voxalith.Core;
 using Voxalith.Core.World;
 
@@ -8,6 +9,22 @@ namespace Voxalith.Game;
 public static class Hud {
     private const int SlotSize = 52;
     private const int SlotGap = 4;
+
+    private static readonly string[] SlotNumberStrings = { "1", "2", "3", "4", "5", "6", "7", "8", "9" };
+    private static readonly string[] StackQtyStrings = BuildStackQtyStrings();
+    private static readonly string RuntimePlatformLine = $"{RuntimeInformation.FrameworkDescription} ({RuntimeInformation.OSArchitecture})";
+    private static readonly List<(string name, float hp, bool isHost, Dimension dim)> _tabPlayers = new();
+
+    private static string[] BuildStackQtyStrings() {
+        var arr = new string[65];
+        arr[0] = "";
+        arr[1] = "";
+        for (int i = 2; i < arr.Length; i++) arr[i] = $"×{i}";
+        return arr;
+    }
+
+    internal static string FormatStackQty(int qty) =>
+        (uint)qty < (uint)StackQtyStrings.Length ? StackQtyStrings[qty] : $"×{qty}";
 
     public static bool ShowDebugInfo = false;
 
@@ -163,21 +180,17 @@ public static class Hud {
             Fonts.DrawShadowed($"Истинный Монолит Бездны  [{tb.Health:F0} / {TrueEndSlime.MaxHealth:F0}]", bx + 6, by - 26, 20f, new Color(255, 210, 255, 250));
         }
 
-        // Инфо-панель: Координаты, Направление взгляда, Биом, Время, FPS (F3)
-        int px = (int)MathF.Floor(player.Position.X);
-        int py = (int)MathF.Floor(player.Position.Y);
-        int pz = (int)MathF.Floor(player.Position.Z);
-        var curBiome = session.World.Generator.GetBiome(px, py, pz);
-        string biomeName = WorldGenerator.GetBiomeName(curBiome);
-
-        string facing;
-        if (MathF.Abs(player.Forward.X) > MathF.Abs(player.Forward.Z)) {
-            facing = player.Forward.X > 0 ? "Восток (+X)" : "Запад (-X)";
-        } else {
-            facing = player.Forward.Z > 0 ? "Юг (+Z)" : "Север (-Z)";
-        }
-
+        // Инфо-панель: Координаты, Направление взгляда, Биом, Время, FPS (F3) — считаем только при включённом F3.
         if (ShowDebugInfo) {
+            int px = (int)MathF.Floor(player.Position.X);
+            int py = (int)MathF.Floor(player.Position.Y);
+            int pz = (int)MathF.Floor(player.Position.Z);
+            var curBiome = session.World.Generator.GetBiome(px, py, pz);
+            string biomeName = WorldGenerator.GetBiomeName(curBiome);
+
+            string facing = MathF.Abs(player.Forward.X) > MathF.Abs(player.Forward.Z)
+                ? (player.Forward.X > 0 ? "Восток (+X)" : "Запад (-X)")
+                : (player.Forward.Z > 0 ? "Юг (+Z)" : "Север (-Z)");
             DrawF3DebugOverlay(session, player, px, py, pz, biomeName, facing, w, h);
         }
 
@@ -215,13 +228,14 @@ public static class Hud {
             Raylib.DrawRectangleRoundedLinesEx(rect, 0.15f, 6, selected ? 2.5f : 1.5f, borderColor);
             
             // Subtle slot number (1-9) in top-left corner
-            Fonts.Draw($"{i + 1}", rect.X + 4f, rect.Y + 3f, 11f, selected ? theme.AccentSecondary : theme.TextSecondary);
+            string slotLabel = (uint)i < (uint)SlotNumberStrings.Length ? SlotNumberStrings[i] : $"{i + 1}";
+            Fonts.Draw(slotLabel, rect.X + 4f, rect.Y + 3f, 11f, selected ? theme.AccentSecondary : theme.TextSecondary);
 
             var entry = inv.Slots[i];
             if (entry != null) {
                 DrawItemIcon(entry.Value.Item.Definition, rect, 0.7f);
                 if (entry.Value.Quantity > 1) {
-                    Fonts.DrawShadowed($"×{entry.Value.Quantity}", rect.X + 3f, rect.Y + rect.Height - 20f, 15f, Color.White);
+                    Fonts.DrawShadowed(FormatStackQty(entry.Value.Quantity), rect.X + 3f, rect.Y + rect.Height - 20f, 15f, Color.White);
                 }
                 // Полоска прочности инструмента/оружия/брони
                 DrawItemDurability(entry.Value.Item, rect);
@@ -426,7 +440,8 @@ public static class Hud {
 
         // ── СПИСОК ИГРОКОВ (TAB PLAYER LIST) В МУЛЬТИПЛЕЕРЕ ─────────────────
         if (Raylib.IsKeyDown(KeyBinds.PlayerList) && (GameClient.Active != null || GameServer.Active != null)) {
-            var playerList = new System.Collections.Generic.List<(string name, float hp, bool isHost, Dimension dim)>();
+            var playerList = _tabPlayers;
+            playerList.Clear();
             playerList.Add((session.Player.Name, session.Player.Health, GameServer.Active != null, session.World.Dimension));
 
             if (GameClient.Active != null) {
@@ -699,7 +714,7 @@ public static class Hud {
             ry += 20f;
         }
 
-        LineR($".NET 10.0 (Windows x64)");
+        LineR(RuntimePlatformLine);
         LineR($"Mem: {GC.GetTotalMemory(false) / (1024 * 1024)} MB");
         LineR($"Mobs: {session.World.HostileMobs.Count} hostile, {session.World.Animals.Count} passive");
         LineR($"Pickups: {session.World.Pickups.Count}");

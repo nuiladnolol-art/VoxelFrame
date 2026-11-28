@@ -20,7 +20,7 @@ public sealed partial class Player {
         }
         world.RemoveBlock(pos);
         SoundSystem.PlayDig(block.Id);
-        // Сеть уже уведомлена хуком OnNetworkBlockChangeBroadcast из SetVoxelInternal.
+        // Сеть уже уведомлена через NetworkSink.OnBlockChanged из SetVoxelInternal.
 
         // Проверка песка/гравия выше — каскадное падение от гравитации!
         var curAbove = pos + new Vec3i(0, 1, 0);

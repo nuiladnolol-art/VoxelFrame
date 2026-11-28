@@ -84,18 +84,24 @@ public sealed class FluidEngine {
         }
 
         _waterTimer += dt;
-        while (_waterTimer >= 0.25f) {
+        int waterSteps = 0;
+        while (_waterTimer >= 0.25f && waterSteps < 4) {
             _waterTimer -= 0.25f;
+            waterSteps++;
             TickFluidType(GameData.BWater.Id, _activeWater, MaxWaterDistance);
         }
+        if (waterSteps >= 4) _waterTimer = 0f;
 
         _lavaTimer += dt;
         float lavaInterval = _world.Dimension == Dimension.Nether ? 0.5f : 1.5f; // В Аду лава течет в 3 раза быстрее (10 тиков vs 30 тиков)
         int lavaMaxDist = _world.Dimension == Dimension.Nether ? 7 : MaxLavaDistance;
-        while (_lavaTimer >= lavaInterval) {
+        int lavaSteps = 0;
+        while (_lavaTimer >= lavaInterval && lavaSteps < 2) {
             _lavaTimer -= lavaInterval;
+            lavaSteps++;
             TickFluidType(GameData.BLava.Id, _activeLava, lavaMaxDist);
         }
+        if (lavaSteps >= 2) _lavaTimer = 0f;
     }
 
     private void TickFluidType(ushort fluidId, HashSet<Vec3i> activeSet, int maxDistance) {
@@ -317,8 +323,10 @@ public sealed class FluidEngine {
                     // Настоящий источник дает уровень 1
                     minParentLevel = Math.Min(minParentLevel, 0);
                 } else if (nLevel == FallingLevel) {
-                    // Падающий столб питает горизонтальные клетки ТОЛЬКО если он ударился о пол
-                    if (_world.IsSolidAt(nPos + new Vec3i(0, -1, 0))) {
+                    // Падающий столб питает горизонтальные клетки, если под ним твёрдый пол или источник той же жидкости
+                    var downN = nPos + new Vec3i(0, -1, 0);
+                    var downNVox = _world.GetVoxel(downN);
+                    if (_world.IsSolidAt(downN) || (downNVox.TypeId == fluidId && downNVox.SubGridLayerMask == 0)) {
                         minParentLevel = Math.Min(minParentLevel, 0);
                     }
                 } else if (nLevel < currentLevel || currentLevel == FallingLevel) {

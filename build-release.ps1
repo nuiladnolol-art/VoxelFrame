@@ -25,7 +25,8 @@ dotnet publish "$rootDir/src/Voxalith.Launcher/Voxalith.Launcher.csproj" -c Rele
 
 Write-Host "3. Копирование ассетов..." -ForegroundColor Yellow
 if (Test-Path "$rootDir/assets") {
-    Copy-Item -Recurse -Force "$rootDir/assets" "$buildDir/assets"
+    New-Item -ItemType Directory -Path "$buildDir/assets" -Force | Out-Null
+    Copy-Item -Recurse -Force "$rootDir/assets/*" "$buildDir/assets"
 }
 
 Write-Host "4. Упаковка в ZIP архив..." -ForegroundColor Yellow

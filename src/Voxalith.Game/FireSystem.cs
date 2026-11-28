@@ -28,6 +28,18 @@ public sealed class FireSystem {
     public void RegisterCampfire(Vec3i pos) => Campfires.Add(pos);
     public void UnregisterCampfire(Vec3i pos) => Campfires.Remove(pos);
 
+    public void OnChunkUnloaded(Vec3i chunkCoord) {
+        Burning.Remove(new Vec3i()); // noop safeguard
+        var toRemove = new List<Vec3i>();
+        foreach (var p in Burning.Keys) {
+            if ((p.X >> 5) == chunkCoord.X && (p.Y >> 5) == chunkCoord.Y && (p.Z >> 5) == chunkCoord.Z) {
+                toRemove.Add(p);
+            }
+        }
+        for (int i = 0; i < toRemove.Count; i++) Burning.Remove(toRemove[i]);
+        Campfires.RemoveWhere(p => (p.X >> 5) == chunkCoord.X && (p.Y >> 5) == chunkCoord.Y && (p.Z >> 5) == chunkCoord.Z);
+    }
+
     /// <summary>Поджечь блок, если он горючий или воздух над/рядом с горючим.</summary>
     public void Ignite(Vec3i pos) {
         if (Burning.ContainsKey(pos)) return;
@@ -80,6 +92,7 @@ public sealed class FireSystem {
         _campfireSnapshot.Clear();
         _campfireSnapshot.AddRange(Campfires);
         foreach (var camp in _campfireSnapshot) {
+            if (_world.TryGetChunk(Chunk.CoordOf(camp)) == null) continue;
             foreach (var d in WorldGridDirs) {
                 TryIgnite(camp + d);
             }
@@ -88,12 +101,14 @@ public sealed class FireSystem {
         _burningSnapshot.Clear();
         _burningSnapshot.AddRange(Burning.Keys);
         foreach (var pos in _burningSnapshot) {
+            if (_world.TryGetChunk(Chunk.CoordOf(pos)) == null) continue;
             // Проверяем соседей в радиусе 1 блока во все стороны
             foreach (var d in WorldGridDirs) {
                 var target = pos + d;
+                if (_world.TryGetChunk(Chunk.CoordOf(target)) == null) continue;
                 var vox = _world.GetVoxel(target);
                 if (vox.TypeId == 0) {
-                    // Если рядом воздух, проверяем, есть ли горючие блоки вокруг этого воздуха
+                    // Если рядом воздух, проверяем опору или соседние горючие блоки
                     bool hasFlammableNearby = false;
                     foreach (var nd in WorldGridDirs) {
                         var nb = _world.GetBlockType(target + nd);
@@ -102,7 +117,8 @@ public sealed class FireSystem {
                             break;
                         }
                     }
-                    if (hasFlammableNearby && _random.NextDouble() < 0.25) {
+                    bool hasSupport = _world.IsSolidAt(target + new Vec3i(0, -1, 0)) || hasFlammableNearby;
+                    if (hasFlammableNearby && hasSupport && _random.NextDouble() < 0.25) {
                         _world.PlacePlacedBlock(target, GameData.BFire);
                         Burning[target] = 8f;
                         _world.MarkLightDirty(target);

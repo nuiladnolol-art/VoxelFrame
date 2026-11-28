@@ -39,6 +39,7 @@ public sealed class ShadowMapper : IDisposable {
     private Material _material;
     private bool _materialReady;
     private bool _failed;
+    private readonly List<GameChunk> _chunksBuf = new();
 
     /// <summary>Матрица view*proj источника света (для шейдера мира).</summary>
     public Matrix4x4 LightViewProj { get; private set; }
@@ -141,7 +142,8 @@ public sealed class ShadowMapper : IDisposable {
 
         float reach = HalfExtent + 28f; // + радиус описанной сферы чанка
         Rlgl.EnableBackfaceCulling();
-        foreach (var gc in world.Chunks) {
+        world.CopyChunksTo(_chunksBuf);
+        foreach (var gc in _chunksBuf) {
             if (!gc.MeshUploaded) continue;
             var c = new Vector3((gc.Coord.X + 0.5f) * Chunk.SizeX, (gc.Coord.Y + 0.5f) * Chunk.SizeY, (gc.Coord.Z + 0.5f) * Chunk.SizeZ);
             var d = c - center;

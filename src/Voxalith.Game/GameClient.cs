@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Numerics;
 using System.Text;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Voxalith.Core;
 using Voxalith.Core.Inventory;
@@ -94,13 +95,16 @@ public sealed class GameClient : IDisposable {
     private readonly ConcurrentDictionary<int, RemotePlayer> _remotePlayers = new();
     public IReadOnlyCollection<RemotePlayer> RemotePlayers => _remotePlayers.Values.ToArray();
 
-    private readonly ConcurrentQueue<byte[]> _sendQueue = new();
+    private readonly Channel<byte[]> _sendChannel = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true });
     private long _queuedPackets;
-    private readonly SemaphoreSlim _sendSignal = new(0, int.MaxValue);
     private Task? _writerTask;
+    private volatile bool _intentionalDisconnect;
     private readonly ConcurrentQueue<Action> _mainThreadActions = new();
+    private const int MaxMainThreadActions = 4096;
+    private const int MaxQueuedPackets = 512;
 
     public void EnqueueMainThreadAction(Action action) {
+        if (_mainThreadActions.Count >= MaxMainThreadActions) return;
         _mainThreadActions.Enqueue(action);
     }
 
@@ -126,12 +130,15 @@ public sealed class GameClient : IDisposable {
         return client;
     }
 
+    private sealed class ClientWorldNetworkSink(GameClient client) : IWorldNetworkSink {
+        public bool IsRemoteClient => true;
+        public void OnBlockChanged(Vec3i pos, ushort typeId, byte mask, bool isBreak, Dimension dimension) =>
+            client.SendBlockChange(pos.X, pos.Y, pos.Z, typeId, mask, isBreak, (byte)dimension);
+    }
+
     public void BindSession(GameSession session) {
         _session = session;
-        GameWorld.OnNetworkBlockChangeBroadcast = (pos, typeId, mask, isBreak, dim) => {
-            SendBlockChange(pos.X, pos.Y, pos.Z, typeId, mask, isBreak, (byte)dim);
-        };
-        GameWorld.NetworkHookOwner = this;
+        session.BindNetworkSink(new ClientWorldNetworkSink(this));
         _ownsBlockHook = true;
         if (InitialPlayerData != null) {
             ApplyPlayerDataToSession(session, InitialPlayerData);
@@ -144,13 +151,15 @@ public sealed class GameClient : IDisposable {
     }
 
     public void DisconnectAndNotify(Player? player = null) {
+        _intentionalDisconnect = true;
         try {
             if (player != null) {
                 SendInventoryUpdate(player);
             }
             var disc = NetworkProtocol.WriteDisconnect("User disconnected");
             SendPacket(disc);
-            Thread.Sleep(100);
+            _sendChannel.Writer.TryComplete();
+            _writerTask?.Wait(200);
         } catch { }
         Dispose();
     }
@@ -168,32 +177,57 @@ public sealed class GameClient : IDisposable {
         await _stream.WriteAsync(handshake, token);
 
         _writerTask = Task.Run(SendWriterLoop);
-        _ = Task.Run(() => ReceiveLoop(token), token);
+        _ = Task.Run(() => ReceiveLoop(token), CancellationToken.None);
     }
 
     private async Task SendWriterLoop() {
         var token = _cts?.Token ?? CancellationToken.None;
-        while (!token.IsCancellationRequested && IsConnected) {
-            try {
-                await _sendSignal.WaitAsync(token);
-            } catch (OperationCanceledException) {
-                break;
-            }
-            while (_sendQueue.TryDequeue(out var data)) {
-                Interlocked.Decrement(ref _queuedPackets);
-                _sendSignal.Wait(0);
-                try {
+        try {
+            while (await _sendChannel.Reader.WaitToReadAsync(token)) {
+                while (_sendChannel.Reader.TryRead(out var data)) {
+                    Interlocked.Decrement(ref _queuedPackets);
                     if (!IsConnected || _stream == null) return;
                     await _stream.WriteAsync(data, token);
-                } catch {
-                    return;
                 }
             }
-            while (_sendSignal.Wait(0)) { }
+        } catch (OperationCanceledException) {
+        } catch {
+        }
+    }
+
+    private sealed class LimitedReadStream : Stream {
+        private readonly Stream _inner;
+        private readonly long _maxBytes;
+        private long _totalRead;
+
+        public LimitedReadStream(Stream inner, long maxBytes) {
+            _inner = inner;
+            _maxBytes = maxBytes;
+        }
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => _totalRead; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override int Read(byte[] buffer, int offset, int count) {
+            int n = _inner.Read(buffer, offset, count);
+            if (n > 0) {
+                _totalRead += n;
+                if (_totalRead > _maxBytes) throw new InvalidDataException("Превышен лимит распакованного размера пакета.");
+            }
+            return n;
         }
     }
 
     private void ReceiveLoop(CancellationToken token) {
+        const int MaxSyncEntities = 4096;
+        const int MaxDecompressedChunkBytes = 32 * 1024 * 1024;
         try {
             while (!token.IsCancellationRequested && _socket is { Connected: true }) {
                 var frameNullable = NetworkProtocol.ReadPacketFrame(_stream!);
@@ -210,10 +244,13 @@ public sealed class GameClient : IDisposable {
                         ReceivedTimeOfDay = reader.ReadSingle();
                         ReceivedCheats = reader.ReadBoolean();
                         ReceivedGamemode = reader.ReadInt32();
-                        ReceivedKeepInventory = reader.ReadBoolean();
-                        if (_session != null) {
-                            _session.KeepInventory = ReceivedKeepInventory;
-                        }
+                        bool keepInv = reader.ReadBoolean();
+                        ReceivedKeepInventory = keepInv;
+                        EnqueueMainThreadAction(() => {
+                            if (_session != null) {
+                                _session.KeepInventory = keepInv;
+                            }
+                        });
                         HasReceivedWelcome = true;
                         break;
                     }
@@ -228,12 +265,15 @@ public sealed class GameClient : IDisposable {
                         byte dim = reader.ReadByte();
                         string skin = "cyan";
                         try { skin = reader.ReadString(); } catch { }
+                        if (!float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z) ||
+                            !float.IsFinite(yaw) || !float.IsFinite(pitch) || dim > (byte)Dimension.Void) break;
 
                         if (id != LocalClientId) {
-                            var rp = new RemotePlayer(id, name, new Vector3(x, y, z), yaw, pitch, (Dimension)dim);
-                            rp.SkinName = skin;
-                            _remotePlayers[id] = rp;
                             EnqueueMainThreadAction(() => {
+                                var rp = new RemotePlayer(id, name, new Vector3(x, y, z), yaw, pitch, (Dimension)dim) {
+                                    SkinName = skin
+                                };
+                                _remotePlayers[id] = rp;
                                 _session?.AddChatMessage($"Игрок {name} вошёл в мир.", Raylib_cs.Color.Yellow);
                                 _session?.AddMessage($"Игрок {name} вошёл в мир");
                             });
@@ -242,12 +282,12 @@ public sealed class GameClient : IDisposable {
                     }
                     case PacketType.PlayerLeave: {
                         int id = reader.ReadInt32();
-                        if (_remotePlayers.TryRemove(id, out var rp)) {
-                            EnqueueMainThreadAction(() => {
+                        EnqueueMainThreadAction(() => {
+                            if (_remotePlayers.TryRemove(id, out var rp)) {
                                 _session?.AddChatMessage($"Игрок {rp.Name} вышел из игры.", Raylib_cs.Color.Yellow);
                                 _session?.AddMessage($"Игрок {rp.Name} вышел");
-                            });
-                        }
+                            }
+                        });
                         break;
                     }
                     case PacketType.PlayerMovement: {
@@ -260,21 +300,27 @@ public sealed class GameClient : IDisposable {
                         byte flags = reader.ReadByte();
                         float hp = reader.ReadSingle();
                         byte dim = reader.ReadByte();
+                        if (!float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z) ||
+                            !float.IsFinite(yaw) || !float.IsFinite(pitch) || dim > (byte)Dimension.Void) break;
 
-                        if (id != LocalClientId && _remotePlayers.TryGetValue(id, out var rp)) {
-                            var newPos = new Vector3(x, y, z);
-                            if (Vector3.DistanceSquared(rp.Position, newPos) > 400f || rp.Position == Vector3.Zero) {
-                                rp.Position = newPos;
-                            }
-                            rp.TargetPosition = newPos;
-                            rp.TargetYaw = yaw;
-                            rp.TargetPitch = pitch;
-                            rp.IsMoving = (flags & 1) != 0;
-                            rp.IsSneaking = (flags & 2) != 0;
-                            rp.IsFlying = (flags & 4) != 0;
-                            rp.IsBlocking = (flags & 8) != 0;
-                            rp.Health = hp;
-                            rp.Dimension = (Dimension)dim;
+                        if (id != LocalClientId) {
+                            EnqueueMainThreadAction(() => {
+                                if (_remotePlayers.TryGetValue(id, out var rp)) {
+                                    var newPos = new Vector3(x, y, z);
+                                    if (Vector3.DistanceSquared(rp.Position, newPos) > 400f || rp.Position == Vector3.Zero) {
+                                        rp.Position = newPos;
+                                    }
+                                    rp.TargetPosition = newPos;
+                                    rp.TargetYaw = yaw;
+                                    rp.TargetPitch = pitch;
+                                    rp.IsMoving = (flags & 1) != 0;
+                                    rp.IsSneaking = (flags & 2) != 0;
+                                    rp.IsFlying = (flags & 4) != 0;
+                                    rp.IsBlocking = (flags & 8) != 0;
+                                    if (float.IsFinite(hp)) rp.Health = Math.Clamp(hp, 0f, 20f);
+                                    rp.Dimension = (Dimension)dim;
+                                }
+                            });
                         }
                         break;
                     }
@@ -283,13 +329,17 @@ public sealed class GameClient : IDisposable {
                         var action = (PlayerActionType)reader.ReadByte();
                         int itemId = reader.ReadInt32();
 
-                        if (id != LocalClientId && _remotePlayers.TryGetValue(id, out var rp)) {
-                            rp.SelectedItemId = itemId;
-                            if (action == PlayerActionType.SwingArm) {
-                                rp.ArmSwingTimer = 1.0f;
-                            } else if (action == PlayerActionType.Hurt) {
-                                rp.HurtTimer = 1.0f;
-                            }
+                        if (id != LocalClientId) {
+                            EnqueueMainThreadAction(() => {
+                                if (_remotePlayers.TryGetValue(id, out var rp)) {
+                                    rp.SelectedItemId = itemId;
+                                    if (action == PlayerActionType.SwingArm) {
+                                        rp.ArmSwingTimer = 1.0f;
+                                    } else if (action == PlayerActionType.Hurt) {
+                                        rp.HurtTimer = 1.0f;
+                                    }
+                                }
+                            });
                         }
                         break;
                     }
@@ -297,6 +347,7 @@ public sealed class GameClient : IDisposable {
                         int attackerId = reader.ReadInt32();
                         int targetId = reader.ReadInt32();
                         float dmg = reader.ReadSingle();
+                        if (!float.IsFinite(dmg) || dmg < 0f) break;
 
                         if (targetId == LocalClientId) {
                             EnqueueMainThreadAction(() => {
@@ -308,8 +359,12 @@ public sealed class GameClient : IDisposable {
                                     SendAction(PlayerActionType.Hurt, 0);
                                 }
                             });
-                        } else if (_remotePlayers.TryGetValue(targetId, out var targetRp)) {
-                            targetRp.HurtTimer = 1.0f;
+                        } else {
+                            EnqueueMainThreadAction(() => {
+                                if (_remotePlayers.TryGetValue(targetId, out var targetRp)) {
+                                    targetRp.HurtTimer = 1.0f;
+                                }
+                            });
                         }
                         break;
                     }
@@ -366,27 +421,32 @@ public sealed class GameClient : IDisposable {
                         int slot = reader.ReadInt32();
                         byte pDim = reader.ReadByte();
 
+                        if (!float.IsFinite(px) || !float.IsFinite(py) || !float.IsFinite(pz) ||
+                            !float.IsFinite(yaw) || !float.IsFinite(pitch) || pDim > (byte)Dimension.Void) break;
+
                         var pData = new Player {
                             Position = new Vector3(px, py, pz),
                             Yaw = yaw,
                             Pitch = pitch,
-                            Health = hp,
-                            Hunger = hunger,
-                            Saturation = sat,
+                            Hunger = float.IsFinite(hunger) ? Math.Clamp(hunger, 0f, Player.MaxHunger) : Player.MaxHunger,
+                            Saturation = float.IsFinite(sat) ? Math.Clamp(sat, 0f, 20f) : 5f,
                             SelectedSlot = Math.Clamp(slot, 0, 8),
                             Dimension = (Dimension)pDim
                         };
+                        pData.Health = float.IsFinite(hp) ? Math.Clamp(hp, 0f, pData.MaxHealth) : pData.MaxHealth;
 
                         int invCount = reader.ReadInt32();
+                        if (invCount < 0 || invCount > pData.Inventory.Capacity) break;
                         for (int i = 0; i < invCount; i++) {
                             int idx = reader.ReadInt32();
                             ushort itId = reader.ReadUInt16();
                             int itQty = reader.ReadInt32();
                             int itDur = reader.ReadInt32();
-                            if (GameData.Items.TryGetValue(itId, out var itDef)) {
+                            if (idx >= 0 && idx < pData.Inventory.Capacity && GameData.Items.TryGetValue(itId, out var itDef)) {
                                 var itemInst = GameData.NewItem(itDef);
-                                itemInst.Durability = itDur;
-                                pData.Inventory.InsertAt(idx, new ItemEntry(itemInst, itQty));
+                                int maxDur = GameData.GetMaxItemDurability(itDef.Id);
+                                if (maxDur > 0) itemInst.Durability = Math.Clamp(itDur, 1, maxDur);
+                                pData.Inventory.InsertAt(idx, new ItemEntry(itemInst, Math.Clamp(itQty, 1, itDef.MaxStack)));
                             }
                         }
 
@@ -396,8 +456,9 @@ public sealed class GameClient : IDisposable {
                             int offDur = reader.ReadInt32();
                             if (GameData.Items.TryGetValue(offId, out var offDef)) {
                                 var offInst = GameData.NewItem(offDef);
-                                offInst.Durability = offDur;
-                                pData.OffhandEntry = new ItemEntry(offInst, offQty);
+                                int maxDur = GameData.GetMaxItemDurability(offDef.Id);
+                                if (maxDur > 0) offInst.Durability = Math.Clamp(offDur, 1, maxDur);
+                                pData.OffhandEntry = new ItemEntry(offInst, Math.Clamp(offQty, 1, offDef.MaxStack));
                             }
                         }
 
@@ -408,8 +469,9 @@ public sealed class GameClient : IDisposable {
                                 int armDur = reader.ReadInt32();
                                 if (GameData.Items.TryGetValue(armId, out var armDef)) {
                                     var armInst = GameData.NewItem(armDef);
-                                    armInst.Durability = armDur;
-                                    pData.Armor[a] = new ItemEntry(armInst, armQty);
+                                    int maxDur = GameData.GetMaxItemDurability(armDef.Id);
+                                    if (maxDur > 0) armInst.Durability = Math.Clamp(armDur, 1, maxDur);
+                                    pData.Armor[a] = new ItemEntry(armInst, Math.Clamp(armQty, 1, armDef.MaxStack));
                                 }
                             }
                         }
@@ -426,13 +488,15 @@ public sealed class GameClient : IDisposable {
                     }
                     case PacketType.WorldChunksSync: {
                         byte dim = reader.ReadByte();
+                        if (dim > (byte)Dimension.Void) break;
                         int compLen = reader.ReadInt32();
                         long remaining = reader.BaseStream.Length - reader.BaseStream.Position;
                         if (compLen <= 0 || compLen > remaining) break;
                         byte[] compBytes = reader.ReadBytes(compLen);
                         using var memGz = new MemoryStream(compBytes);
                         using var gz = new GZipStream(memGz, CompressionMode.Decompress);
-                        using var brGz = new BinaryReader(gz, Encoding.UTF8);
+                        using var limitedGz = new LimitedReadStream(gz, MaxDecompressedChunkBytes);
+                        using var brGz = new BinaryReader(limitedGz, Encoding.UTF8);
                         int chunkCount = brGz.ReadInt32();
                         if (chunkCount < 0 || chunkCount > 512) break;
 
@@ -459,7 +523,7 @@ public sealed class GameClient : IDisposable {
                                 for (int m = 0; m < maskCount; m++) {
                                     int idx = brGz.ReadInt32();
                                     byte mask = brGz.ReadByte();
-                                    masks[idx] = mask;
+                                    if (idx >= 0 && idx < Chunk.VoxelCount) masks[idx] = mask;
                                 }
                             }
                             loadedChunks.Add((cc, types, masks));
@@ -478,7 +542,8 @@ public sealed class GameClient : IDisposable {
                     case PacketType.MobSync: {
                         byte dim = reader.ReadByte();
                         int animCount = reader.ReadInt32();
-                        var syncdAnimals = new List<(uint id, AnimalType type, Vector3 pos, Vector3 vel, float hp, float hurt, bool baby, bool love)>();
+                        if (animCount < 0 || animCount > MaxSyncEntities) break;
+                        var syncdAnimals = new List<(uint id, AnimalType type, Vector3 pos, Vector3 vel, float hp, float hurt, bool baby, bool love)>(animCount);
                         for (int i = 0; i < animCount; i++) {
                             uint id = reader.ReadUInt32();
                             var aType = (AnimalType)reader.ReadByte();
@@ -488,11 +553,15 @@ public sealed class GameClient : IDisposable {
                             float hurt = reader.ReadSingle();
                             bool isBaby = reader.ReadBoolean();
                             bool inLove = reader.ReadBoolean();
-                            syncdAnimals.Add((id, aType, pos, vel, hp, hurt, isBaby, inLove));
+                            if (float.IsFinite(pos.X) && float.IsFinite(pos.Y) && float.IsFinite(pos.Z) &&
+                                float.IsFinite(vel.X) && float.IsFinite(vel.Y) && float.IsFinite(vel.Z)) {
+                                syncdAnimals.Add((id, aType, pos, vel, hp, hurt, isBaby, inLove));
+                            }
                         }
 
                         int hostCount = reader.ReadInt32();
-                        var syncdHostiles = new List<(uint id, HostileType type, Vector3 pos, Vector3 vel, float hp, float hurt, float fuse)>();
+                        if (hostCount < 0 || hostCount > MaxSyncEntities) break;
+                        var syncdHostiles = new List<(uint id, HostileType type, Vector3 pos, Vector3 vel, float hp, float hurt, float fuse)>(hostCount);
                         for (int i = 0; i < hostCount; i++) {
                             uint id = reader.ReadUInt32();
                             var hType = (HostileType)reader.ReadByte();
@@ -501,7 +570,10 @@ public sealed class GameClient : IDisposable {
                             float hp = reader.ReadSingle();
                             float hurt = reader.ReadSingle();
                             float fuse = reader.ReadSingle();
-                            syncdHostiles.Add((id, hType, pos, vel, hp, hurt, fuse));
+                            if (float.IsFinite(pos.X) && float.IsFinite(pos.Y) && float.IsFinite(pos.Z) &&
+                                float.IsFinite(vel.X) && float.IsFinite(vel.Y) && float.IsFinite(vel.Z)) {
+                                syncdHostiles.Add((id, hType, pos, vel, hp, hurt, fuse));
+                            }
                         }
 
                         EnqueueMainThreadAction(() => {
@@ -532,8 +604,6 @@ public sealed class GameClient : IDisposable {
                                         world.Animals.Add(newAnim);
                                     }
                                 }
-                                // Гистерезис: не удаляем мобов на границе радиуса синка (128 м),
-                                // иначе они мигают — появляются/исчезают при движении игрока.
                                 const float DespawnDistSq = 160f * 160f;
                                 var localPos = _session.Player.Position;
                                 world.Animals.RemoveAll(a => !aliveAnimIds.Contains(a.Id) &&
@@ -570,7 +640,8 @@ public sealed class GameClient : IDisposable {
                     case PacketType.PickupSync: {
                         byte dim = reader.ReadByte();
                         int pCount = reader.ReadInt32();
-                        var syncdPickups = new List<(uint id, ushort itId, int qty, int dur, Vector3 pos, Vector3 vel, float bob)>();
+                        if (pCount < 0 || pCount > MaxSyncEntities) break;
+                        var syncdPickups = new List<(uint id, ushort itId, int qty, int dur, Vector3 pos, Vector3 vel, float bob)>(pCount);
                         for (int i = 0; i < pCount; i++) {
                             uint id = reader.ReadUInt32();
                             ushort itId = reader.ReadUInt16();
@@ -579,7 +650,10 @@ public sealed class GameClient : IDisposable {
                             var pos = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
                             var vel = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
                             float bob = reader.ReadSingle();
-                            syncdPickups.Add((id, itId, qty, dur, pos, vel, bob));
+                            if (float.IsFinite(pos.X) && float.IsFinite(pos.Y) && float.IsFinite(pos.Z) &&
+                                float.IsFinite(vel.X) && float.IsFinite(vel.Y) && float.IsFinite(vel.Z)) {
+                                syncdPickups.Add((id, itId, qty, dur, pos, vel, bob));
+                            }
                         }
 
                         EnqueueMainThreadAction(() => {
@@ -596,7 +670,7 @@ public sealed class GameClient : IDisposable {
                                     } else if (GameData.Items.TryGetValue(pData.itId, out var def)) {
                                         var inst = GameData.NewItem(def);
                                         if (pData.dur > 0) inst.Durability = pData.dur;
-                                        var pk = new ItemPickup(inst, pData.qty, pData.pos) {
+                                        var pk = new ItemPickup(inst, Math.Clamp(pData.qty, 1, def.MaxStack), pData.pos) {
                                             Id = pData.id,
                                             Velocity = pData.vel,
                                             BobPhase = pData.bob
@@ -629,6 +703,8 @@ public sealed class GameClient : IDisposable {
                         float vx = reader.ReadSingle(), vy = reader.ReadSingle(), vz = reader.ReadSingle();
                         byte flags = reader.ReadByte();
                         byte dim = reader.ReadByte();
+                        if (!float.IsFinite(px) || !float.IsFinite(py) || !float.IsFinite(pz) ||
+                            !float.IsFinite(vx) || !float.IsFinite(vy) || !float.IsFinite(vz)) break;
                         EnqueueMainThreadAction(() => {
                             if (_session != null && _session.World.Dimension == (Dimension)dim) {
                                 var arr = new ArrowProjectile(new Vector3(px, py, pz), new Vector3(vx, vy, vz), null) {
@@ -648,6 +724,10 @@ public sealed class GameClient : IDisposable {
                         float radius = reader.ReadSingle();
                         float maxDmg = reader.ReadSingle();
                         byte dim = reader.ReadByte();
+                        if (!float.IsFinite(ex) || !float.IsFinite(ey) || !float.IsFinite(ez) ||
+                            !float.IsFinite(radius) || !float.IsFinite(maxDmg)) break;
+                        radius = Math.Clamp(radius, 0.5f, 8.0f);
+                        maxDmg = Math.Clamp(maxDmg, 0f, 50f);
                         EnqueueMainThreadAction(() => {
                             if (_session != null && _session.World.Dimension == (Dimension)dim) {
                                 GameWorld.CreateExplosion(_session.World, new Vector3(ex, ey, ez), radius, maxDmg, _session);
@@ -658,11 +738,14 @@ public sealed class GameClient : IDisposable {
                     case PacketType.ProjectileSync: {
                         byte dim = reader.ReadByte();
                         int arrCount = reader.ReadInt32();
-                        var syncdArrows = new List<ArrowProjectile>();
+                        if (arrCount < 0 || arrCount > MaxSyncEntities) break;
+                        var syncdArrows = new List<ArrowProjectile>(arrCount);
                         for (int i = 0; i < arrCount; i++) {
                             var pos = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
                             var vel = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
                             byte flags = reader.ReadByte();
+                            if (!float.IsFinite(pos.X) || !float.IsFinite(pos.Y) || !float.IsFinite(pos.Z) ||
+                                !float.IsFinite(vel.X) || !float.IsFinite(vel.Y) || !float.IsFinite(vel.Z)) continue;
                             var arr = new ArrowProjectile(pos, vel) {
                                 IsSlimeSpit = (flags & 1) != 0,
                                 IsEnderPearl = (flags & 2) != 0,
@@ -683,6 +766,7 @@ public sealed class GameClient : IDisposable {
                         float tpx = reader.ReadSingle();
                         float tpy = reader.ReadSingle();
                         float tpz = reader.ReadSingle();
+                        if (!float.IsFinite(tpx) || !float.IsFinite(tpy) || !float.IsFinite(tpz)) break;
                         EnqueueMainThreadAction(() => {
                             if (_session != null) {
                                 _session.Player.Position = new Vector3(tpx, tpy, tpz);
@@ -704,17 +788,20 @@ public sealed class GameClient : IDisposable {
                         int slot = reader.ReadInt32();
                         byte invDim = reader.ReadByte();
                         int invCount = reader.ReadInt32();
-                        
+                        const int MaxPlayerInvCapacity = 36;
+                        if (invCount < 0 || invCount > MaxPlayerInvCapacity) break;
+
                         var newInvSlots = new Dictionary<int, ItemEntry>();
                         for (int i = 0; i < invCount; i++) {
                             int idx = reader.ReadInt32();
                             ushort itId = reader.ReadUInt16();
                             int itQty = reader.ReadInt32();
                             int itDur = reader.ReadInt32();
-                            if (GameData.Items.TryGetValue(itId, out var itDef)) {
+                            if (idx >= 0 && idx < MaxPlayerInvCapacity && GameData.Items.TryGetValue(itId, out var itDef)) {
                                 var itemInst = GameData.NewItem(itDef);
-                                itemInst.Durability = itDur;
-                                newInvSlots[idx] = new ItemEntry(itemInst, itQty);
+                                int maxDur = GameData.GetMaxItemDurability(itDef.Id);
+                                if (maxDur > 0) itemInst.Durability = Math.Clamp(itDur, 1, maxDur);
+                                newInvSlots[idx] = new ItemEntry(itemInst, Math.Clamp(itQty, 1, itDef.MaxStack));
                             }
                         }
 
@@ -726,8 +813,9 @@ public sealed class GameClient : IDisposable {
                             int offDur = reader.ReadInt32();
                             if (GameData.Items.TryGetValue(offId, out var offDef)) {
                                 var offInst = GameData.NewItem(offDef);
-                                offInst.Durability = offDur;
-                                newOffhand = new ItemEntry(offInst, offQty);
+                                int maxDur = GameData.GetMaxItemDurability(offDef.Id);
+                                if (maxDur > 0) offInst.Durability = Math.Clamp(offDur, 1, maxDur);
+                                newOffhand = new ItemEntry(offInst, Math.Clamp(offQty, 1, offDef.MaxStack));
                             }
                         }
 
@@ -739,28 +827,29 @@ public sealed class GameClient : IDisposable {
                                 int armDur = reader.ReadInt32();
                                 if (GameData.Items.TryGetValue(armId, out var armDef)) {
                                     var armInst = GameData.NewItem(armDef);
-                                    armInst.Durability = armDur;
-                                    newArmor[a] = new ItemEntry(armInst, armQty);
+                                    int maxDur = GameData.GetMaxItemDurability(armDef.Id);
+                                    if (maxDur > 0) armInst.Durability = Math.Clamp(armDur, 1, maxDur);
+                                    newArmor[a] = new ItemEntry(armInst, Math.Clamp(armQty, 1, armDef.MaxStack));
                                 }
                             }
                         }
 
                         EnqueueMainThreadAction(() => {
                             if (_session != null) {
-                                // Sync basic stats
-                                _session.Player.Health = hp;
-                                _session.Player.Hunger = hunger;
-                                _session.Player.Saturation = sat;
+                                if (float.IsFinite(hp)) _session.Player.Health = Math.Clamp(hp, 0f, _session.Player.MaxHealth);
+                                if (float.IsFinite(hunger)) _session.Player.Hunger = Math.Clamp(hunger, 0f, Player.MaxHunger);
+                                if (float.IsFinite(sat)) _session.Player.Saturation = Math.Clamp(sat, 0f, 20f);
                                 _session.Player.SelectedSlot = Math.Clamp(slot, 0, 8);
-                                
-                                // Sync inventory
+
                                 for (int i = 0; i < _session.Player.Inventory.Capacity; i++) {
                                     _session.Player.Inventory.RemoveAt(i);
                                 }
                                 foreach (var kvp in newInvSlots) {
-                                    _session.Player.Inventory.InsertAt(kvp.Key, kvp.Value);
+                                    if (kvp.Key >= 0 && kvp.Key < _session.Player.Inventory.Capacity) {
+                                        _session.Player.Inventory.InsertAt(kvp.Key, kvp.Value);
+                                    }
                                 }
-                                
+
                                 _session.Player.OffhandEntry = newOffhand;
                                 for (int a = 0; a < 4; a++) {
                                     _session.Player.Armor[a] = newArmor[a];
@@ -775,7 +864,8 @@ public sealed class GameClient : IDisposable {
                         int cz = reader.ReadInt32();
                         byte dim = reader.ReadByte();
                         int cCount = reader.ReadInt32();
-                        var items = new List<(int idx, ushort id, int qty, int dur)>();
+                        if (dim > (byte)Dimension.Void || cCount < 0 || cCount > GameWorld.ChestCapacity) break;
+                        var items = new List<(int idx, ushort id, int qty, int dur)>(cCount);
                         for (int i = 0; i < cCount; i++) {
                             items.Add((reader.ReadInt32(), reader.ReadUInt16(), reader.ReadInt32(), reader.ReadInt32()));
                         }
@@ -787,10 +877,11 @@ public sealed class GameClient : IDisposable {
                                 var chest = targetWorld.GetOrCreateChest(cPos);
                                 for (int i = 0; i < chest.Capacity; i++) chest.RemoveAt(i);
                                 foreach (var item in items) {
-                                    if (GameData.Items.TryGetValue(item.id, out var def)) {
+                                    if (item.idx >= 0 && item.idx < chest.Capacity && GameData.Items.TryGetValue(item.id, out var def)) {
                                         var inst = GameData.NewItem(def);
-                                        inst.Durability = item.dur;
-                                        chest.InsertAt(item.idx, new ItemEntry(inst, item.qty));
+                                        int maxDur = GameData.GetMaxItemDurability(def.Id);
+                                        if (maxDur > 0) inst.Durability = Math.Clamp(item.dur, 1, maxDur);
+                                        chest.InsertAt(item.idx, new ItemEntry(inst, Math.Clamp(item.qty, 1, def.MaxStack)));
                                     }
                                 }
                             }
@@ -946,11 +1037,13 @@ public sealed class GameClient : IDisposable {
         } catch (Exception ex) {
             Console.WriteLine($"[GameClient] Ошибка в цикле сокета: {ex.Message}");
         } finally {
-            WasDisconnected = true;
-            EnqueueMainThreadAction(() => {
-                _session?.AddChatMessage("Соединение с сервером разорвано.", Raylib_cs.Color.Red);
-                _session?.AddMessage("Соединение с сервером разорвано");
-            });
+            if (!_intentionalDisconnect) {
+                WasDisconnected = true;
+                EnqueueMainThreadAction(() => {
+                    _session?.AddChatMessage("Соединение с сервером разорвано.", Raylib_cs.Color.Red);
+                    _session?.AddMessage("Соединение с сервером разорвано");
+                });
+            }
         }
     }
 
@@ -962,11 +1055,14 @@ public sealed class GameClient : IDisposable {
     }
 
     public void SendPacket(byte[] data) {
-        if (!IsConnected || _stream == null) return;
-        if (Interlocked.Read(ref _queuedPackets) >= 512) return;
-        _sendQueue.Enqueue(data);
-        Interlocked.Increment(ref _queuedPackets);
-        try { _sendSignal.Release(); } catch { }
+        if (!IsConnected || _stream == null || data == null || data.Length < 5) return;
+        if (Interlocked.Read(ref _queuedPackets) >= MaxQueuedPackets) {
+            if (NetworkProtocol.IsReplaceableSnapshot(data[4])) return;
+            return;
+        }
+        if (_sendChannel.Writer.TryWrite(data)) {
+            Interlocked.Increment(ref _queuedPackets);
+        }
     }
 
     public void SendMovement(Vector3 pos, float yaw, float pitch, bool isMoving, bool isSneaking, bool isFlying, bool isBlocking, float health, byte dimension = 0) {
@@ -1086,25 +1182,19 @@ public sealed class GameClient : IDisposable {
     }
 
     public void Dispose() {
-        // Снимаем только СВОЙ хук: безусловное обнуление отключало широковещание
-        // сервера, если клиент и хост живут в одном процессе (например, в тестах).
+        _intentionalDisconnect = true;
+        // Снимаем только СВОЙ sink: другой клиент или хост в том же процессе имеют собственные сессии.
         if (_ownsBlockHook) {
-            if (ReferenceEquals(GameWorld.NetworkHookOwner, this)) {
-                GameWorld.OnNetworkBlockChangeBroadcast = null;
-                GameWorld.NetworkHookOwner = null;
-            }
+            _session?.BindNetworkSink(null);
             _ownsBlockHook = false;
         }
-        if (_session != null) {
-            SendInventoryUpdate(_session.Player);
-        }
+        _sendChannel.Writer.TryComplete();
         _cts?.Cancel();
         try { _writerTask?.Wait(50); } catch { }
         try { _stream?.Dispose(); } catch { }
         try { _socket?.Close(); } catch { }
         _socket = null;
         _remotePlayers.Clear();
-        _sendSignal.Dispose();
         _cts?.Dispose();
         _cts = null;
     }

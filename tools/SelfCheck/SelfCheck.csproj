@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Voxalith.Core\Voxalith.Core.csproj" />
+    <Compile Include="..\..\src\Voxalith.Shared\PackageSecurity.cs" Link="PackageSecurity.cs" />
   </ItemGroup>
 
 </Project>

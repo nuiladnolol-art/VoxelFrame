@@ -36,9 +36,15 @@ public sealed partial class GameWorld {
 
     /// <summary>Позиции всех когда-либо сгенерированных эндер-кристаллов (для подсчёта живых).</summary>
     private readonly HashSet<Vec3i> _endCrystals = new();
+    private readonly HashSet<Vec3i> _destroyedEndCrystals = new();
 
     /// <summary>Эндер-кристаллы как сущности (парят над якорем, взрываются от касания).</summary>
     public readonly List<EndCrystalEntity> EndCrystals = new();
+
+    public void MarkEndCrystalDestroyed(Vec3i anchor) {
+        _destroyedEndCrystals.Add(anchor);
+        _endCrystals.Remove(anchor);
+    }
 
     /// <summary>Регистрирует эндер-кристаллы в свежесозданном чанке Энда и спавнит сущности.</summary>
     private void ScanEndCrystals(GameChunk gc) {
@@ -50,6 +56,7 @@ public sealed partial class GameWorld {
                         int wy = gc.Coord.Y * Chunk.SizeY + y;
                         int wz = gc.Coord.Z * Chunk.SizeZ + z;
                         var pos = new Vec3i(wx, wy, wz);
+                        if (_destroyedEndCrystals.Contains(pos)) continue;
                         _endCrystals.Add(pos);
                         TrySpawnCrystalEntityAt(pos);
                     }
@@ -58,9 +65,19 @@ public sealed partial class GameWorld {
         }
     }
 
+    /// <summary>Восстанавливает сущности кристаллов при повторной подгрузке ранее сгенерированного чанка Энда.</summary>
+    private void RestoreEndCrystalsForChunk(GameChunk gc) {
+        foreach (var pos in _endCrystals) {
+            if (_destroyedEndCrystals.Contains(pos)) continue;
+            if (Chunk.CoordOf(pos) == gc.Coord && GetVoxel(pos).TypeId == GameData.BEnderCrystal.Id) {
+                TrySpawnCrystalEntityAt(pos);
+            }
+        }
+    }
+
     /// <summary>Спавнит сущность-кристалл над якорным блоком, если её ещё нет.</summary>
     public void TrySpawnCrystalEntityAt(Vec3i pos) {
-        if (Dimension != Dimension.End) return;
+        if (Dimension != Dimension.End || _destroyedEndCrystals.Contains(pos)) return;
         foreach (var c in EndCrystals) {
             if (c.Anchor == pos) return;
         }
@@ -79,13 +96,22 @@ public sealed partial class GameWorld {
 
     /// <summary>
     /// Число живых эндер-кристаллов (пока хоть один жив — Слизень Края лечится).
-    /// Медленно пробегаем по набору позиций и проверяем, что блок остался кристаллом.
+    /// Если чанк кристалла временно выгружен по дистанции, неподорванный кристалл всё ещё считается живым.
     /// </summary>
     public int CountAliveEndCrystals() {
         int count = 0;
+        var broken = new List<Vec3i>();
         foreach (var p in _endCrystals) {
-            if (GetVoxel(p).TypeId == GameData.BEnderCrystal.Id) count++;
+            if (_destroyedEndCrystals.Contains(p)) continue;
+            if (TryGetChunk(Chunk.CoordOf(p)) == null) {
+                count++;
+            } else if (GetVoxel(p).TypeId == GameData.BEnderCrystal.Id) {
+                count++;
+            } else {
+                broken.Add(p);
+            }
         }
+        for (int i = 0; i < broken.Count; i++) MarkEndCrystalDestroyed(broken[i]);
         return count;
     }
 
